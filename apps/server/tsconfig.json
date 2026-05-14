@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/mcp-registry" },
+    { "path": "../../packages/executor" },
+    { "path": "../../packages/code-mode" }
+  ],
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  }
+}
