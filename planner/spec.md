@@ -2,20 +2,18 @@
 
 ## Summary
 
-`ptools` wraps multiple upstream MCP servers into one combined Code Mode MCP server. The combined server exposes a small discovery/execution surface, while the host keeps authority over MCP clients, credentials, policy, and dispatch.
-
-The intended external surface is:
+`ptools` is an MCP-first Code Mode wrapper. It takes many upstream MCP servers and exposes one combined MCP server with a small model-facing surface:
 
 ```txt
 search({ code })
 execute({ code })
 ```
 
-Generated code should call grouped APIs:
+Generated code should call provider-style APIs:
 
 ```ts
 async () => {
-  const issue = await mcp.github.createIssue({
+  const issue = await github.create_issue({
     owner: "example",
     repo: "repo",
     title: "Example"
@@ -25,45 +23,114 @@ async () => {
 }
 ```
 
-At runtime, `mcp.github.createIssue` is a host-backed proxy. It dispatches to the original upstream MCP server/tool.
+At runtime, `github.create_issue` is not a real SDK client inside the sandbox. It is a host-backed provider proxy that calls back to the Code Mode host, which dispatches through `McpRegistry.callTool(...)` to the original upstream MCP tool.
 
 ## Architecture
 
-The system has three authority zones:
+The system has five named parts. Avoid using the word "host" without qualifying which one.
 
 ```txt
-Combined MCP server
-  - exposes search + execute to MCP clients
-  - owns the public wrapper protocol
-
-Host runtime
-  - connects to upstream MCP servers
-  - owns credentials and process/session lifetimes
-  - discovers tool schemas
-  - validates names and dispatches calls
-  - applies policy and error handling
-
-Code executor
-  - runs generated JavaScript
-  - receives only safe bindings such as metadata or mcp proxy
-  - does not receive raw MCP clients, config, env, or secrets
+User harness / MCP client
+  -> Combined Code Mode MCP server
+  -> McpRegistry
+  -> LocalSandboxExecutor + shared Executor RPC host
+  -> sandbox process
+  -> callback to Executor RPC host
+  -> McpRegistry.callTool(...)
+  -> upstream MCP server
 ```
 
-## Packages
+### Code Mode Host
 
-### `packages/mcp-registry`
-
-Owns upstream MCP integration.
+The Code Mode host is the running service/process that exposes the combined MCP server. In local v1, this is the user's local Node process. In remote future, this can be a deployed service.
 
 Responsibilities:
 
-- load upstream server config passed by caller
-- connect stdio and Streamable HTTP MCP clients
-- discover all tools, including paginated `listTools`
-- sanitize MCP server/tool names into JavaScript identifiers
-- fail on name collisions
-- dispatch JS-facing calls back to original MCP tool names
+- load upstream MCP config
+- construct `McpRegistry`
+- construct the executor layer
+- expose combined MCP tools, initially `search` and `execute`
+- create provider handlers backed by `McpRegistry.callTool(...)`
+- keep MCP clients, credentials, policy, and env away from sandbox code
+
+### MCP Registry
+
+`McpRegistry` is an internal host-side service used by Code Mode. It is not a separate server in v1.
+
+Responsibilities:
+
+- connect configured upstream MCP servers
+- support stdio and Streamable HTTP transports
+- discover tools via `listTools`
+- preserve original MCP server/tool names
+- sanitize names into JavaScript identifiers for generated code
+- fail fast on name collisions and mapping invariants
+- dispatch generated-code calls back to original MCP `callTool`
 - close MCP clients through Effect scoped lifetimes
+
+### Executor RPC Host
+
+The Executor RPC host is an internal callback server owned by the executor. It is not an MCP registry and does not know how to discover MCP tools.
+
+Current v1 shape:
+
+```txt
+one Code Mode service instance
+  -> one LocalSandboxExecutor
+    -> one shared localhost Executor RPC host
+      -> many active run entries
+```
+
+Each execution registers:
+
+- `runId`
+- bearer token
+- provider map
+- completion/failure handlers
+
+Sandbox code calls:
+
+```txt
+POST /runs/:runId/call
+POST /runs/:runId/complete
+```
+
+The RPC host routes the callback to the provider handler registered for that run. That handler is created by Code Mode and usually calls `McpRegistry.callTool(...)`.
+
+### Sandbox Runtime
+
+The sandbox runs generated JavaScript. It receives:
+
+- generated code
+- serializable globals
+- provider manifest
+- callback URL
+- run token
+
+The sandbox does not receive:
+
+- upstream MCP clients
+- MCP config
+- env vars or API keys
+- raw host process access
+
+### Upstream MCP Servers
+
+Upstream MCP servers are the real side-effect layer. They live wherever the Code Mode host can reach or spawn them.
+
+Important deployment rule:
+
+```txt
+stdio MCP runs wherever the Code Mode host runs.
+```
+
+If Code Mode is remote, a stdio MCP config starts on the remote machine/container, not on the user's laptop. User-local stdio MCPs from a remote Code Mode host require a future local bridge/connector.
+
+## Package Responsibilities
+
+### `packages/mcp-registry`
+
+Implemented host-side MCP integration.
 
 Current key API:
 
@@ -73,36 +140,57 @@ McpRegistry.listTools
 McpRegistry.callTool
 ```
 
-This package is implemented and covered by unit tests plus a real stdio MCP integration test.
+This package is covered by unit tests plus a real stdio MCP integration test.
 
 ### `packages/executor`
 
-Reserved for configurable code execution.
+Implemented configurable local code execution.
 
-Initial implementation should be a dev-only Node executor. It is not a production security boundary.
-
-Expected shape:
+Current key API:
 
 ```ts
-run({
+execute({
   code,
-  bindings,
+  globals,
+  providers,
   timeoutMs
 })
 ```
 
-Later executor implementations can target a remote sandbox, Cloudflare Worker isolate, container, or another runtime without changing Code Mode or MCP registry APIs.
+The local executor:
+
+- starts one shared localhost RPC host per scoped executor instance
+- starts one fresh Node sandbox process per execution
+- passes only code, globals, provider manifest, callback URL, and token to the sandbox
+- captures console logs
+- enforces timeout
+- cleans up process and active run entries
+- uses Effect for lifecycle, request routing, provider dispatch, and typed errors
+- remains MCP-agnostic
+
+Provider handlers are Effect-returning host capabilities:
+
+```ts
+{
+  name: "github",
+  fns: {
+    create_issue: (input) => Effect.succeed(...)
+  }
+}
+```
+
+Generated/sandboxed code stays plain JavaScript and does not know Effect.
 
 ### `packages/code-mode`
 
-Reserved for Code Mode orchestration.
+Reserved for orchestration over registry metadata and executor providers.
 
 Responsibilities:
 
 - implement `search` over safe tool metadata
-- implement `execute` over an `mcp` runtime proxy
+- implement `execute` by converting discovered MCP tools into provider namespaces
 - generate model-facing TypeScript declarations from discovered MCP tools
-- keep generated code plain JavaScript
+- map sanitized JS names back to original MCP server/tool names
 - never expose raw MCP clients or secrets to the executor
 
 ### `apps/server`
@@ -129,23 +217,63 @@ Allowed binding:
 api.servers[]
 ```
 
-The metadata should include server names, tool names, descriptions, input schemas, output schemas when available, and annotations.
+Metadata should include server names, tool names, descriptions, input schemas, output schemas when available, and annotations.
 
 `search` must not expose live MCP clients.
 
 ### `execute`
 
-`execute` runs generated JavaScript against a grouped `mcp` proxy.
+`execute` runs generated JavaScript against grouped provider namespaces.
 
-Allowed binding:
+Allowed provider call shape:
 
 ```ts
-mcp.<server>.<tool>(arguments)
+<server>.<tool>(arguments)
 ```
 
-The proxy maps sanitized JS names back to original MCP server/tool names and calls `McpRegistry.callTool`.
+Code Mode builds those provider namespaces from `McpRegistry.listTools()`. Each provider function calls `McpRegistry.callTool(...)` with the original upstream MCP server/tool name.
 
-Invalid server/tool names should fail loudly.
+Invalid server/tool names and broken name mappings should fail loudly.
+
+## Local And Remote Deployment Model
+
+### Local V1
+
+```txt
+Code Mode host: local Node process
+MCP Registry: inside local host
+Executor RPC host: local shared localhost server
+Sandbox: local Node child process per execution
+stdio MCPs: spawned locally
+HTTP MCPs: connected by local host
+```
+
+Local users should not configure a callback URL. The local executor starts its callback server internally on a random localhost port.
+
+### Remote Future
+
+```txt
+Code Mode host: deployed service
+MCP Registry: inside remote host
+Executor RPC host: remote/public or tunneled callback endpoint
+Sandbox: remote sandbox service
+stdio MCPs: spawned on remote host/container
+HTTP MCPs: connected by remote host
+```
+
+Remote sandbox support requires the sandbox to reach the Code Mode host's callback URL and present the run token.
+
+### User-Local MCPs From Remote Host
+
+This is not v1. A remote Code Mode host cannot spawn or connect to stdio MCP processes on the user's laptop unless a local bridge/connector is running on that laptop.
+
+Future bridge shape:
+
+```txt
+remote Code Mode host
+  -> authenticated local bridge
+  -> user-local stdio MCP servers
+```
 
 ## Naming Rules
 
@@ -171,32 +299,50 @@ Use Effect tagged errors for host-side failures:
 - connection failures
 - discovery failures
 - name collisions
+- missing mapped names
 - missing tools
 - invalid tool arguments
 - upstream MCP call failures
-- executor failures
+- executor start/protocol/runtime/timeout failures
 
 Generated TypeScript declarations are for the model. They do not make upstream MCP data compile-time safe inside the host.
 
 ## Testing
 
-Current registry checks:
+Current verification commands:
 
 ```bash
 pnpm --filter @ptools/mcp-registry test
+pnpm --filter @ptools/executor test
+pnpm test
 pnpm typecheck
 pnpm build
 ```
 
-Existing registry test coverage:
+Current registry test coverage:
 
 - JS name sanitization
 - name collision failure
-- missing mapped name failure
+- missing mapped-name failure
 - paginated tool discovery across clients
 - dispatch to original MCP tool names
 - invalid argument rejection
 - real stdio MCP fixture server integration
+
+Current executor test coverage:
+
+- async function execution with plain globals
+- console log capture
+- provider namespace functions
+- sequential executions through one scoped executor host
+- concurrent executions routed to correct run providers
+- provider result and error propagation over HTTP RPC
+- invalid provider/global name failures
+- invalid code failure
+- timeout cleanup
+- wrong token and unknown run rejection
+- completed run removal from active run map
+- scoped RPC host shutdown
 
 Next packages should follow the same pattern:
 
@@ -206,9 +352,9 @@ Next packages should follow the same pattern:
 ## Near-Term Implementation Plan
 
 1. Keep `mcp-registry` stable unless Code Mode reveals an ergonomic issue.
-2. Implement `packages/executor` with a dev-only Node runner and timeout/log capture.
+2. Keep `packages/executor` stable unless Code Mode reveals an ergonomic issue.
 3. Implement `packages/code-mode` search over registry metadata.
-4. Implement `packages/code-mode` execute with an `mcp` proxy backed by `McpRegistry.callTool`.
+4. Implement `packages/code-mode` execute with provider namespaces backed by `McpRegistry.callTool`.
 5. Implement `apps/server` as the stdio combined MCP server exposing `search` and `execute`.
 
 ## Non-Goals For V1
@@ -217,6 +363,8 @@ Next packages should follow the same pattern:
 - No web UI.
 - No production sandbox guarantee from the first Node executor.
 - No direct exposure of upstream MCP tools as individual wrapper tools.
+- No remote executor implementation yet.
+- No user-local MCP bridge from a remote Code Mode host yet.
 - No generic fake-tool framework as the core abstraction.
 
 Fake or in-memory tools are allowed only as test doubles. The product abstraction is MCP server composition.

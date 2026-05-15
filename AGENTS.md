@@ -10,7 +10,7 @@ The product goal is:
 many upstream MCP servers
   -> one combined Code Mode MCP server
   -> exposes search + execute
-  -> generated code calls grouped APIs like mcp.github.createIssue(...)
+  -> generated code calls provider APIs like github.createIssue(...)
   -> host dispatches back to the original upstream MCP tools
 ```
 
@@ -32,7 +32,8 @@ The sandbox/executor is a code execution detail. The authoritative layer is alwa
   - dispatch through `callTool`
   - preserve original MCP tool names internally
   - expose sanitized JS names only at the generated-code boundary
-- Use Effect for host/runtime services, resource lifetimes, and typed errors.
+- This repo uses Effect-TS for host/runtime code. Use Effect for services, async orchestration, resource lifetimes, and typed errors.
+- Executor provider handlers are Effect-returning host capabilities. Wrap promise/value work with `Effect.promise` or `Effect.succeed` instead of widening executor APIs to raw promises.
 - Keep generated/sandboxed code plain JavaScript. Do not require generated code to know Effect.
 - Prefer fail-fast behavior for schema, name mapping, and dispatch invariants.
 - Do not add quiet fallbacks for critical mapping failures.

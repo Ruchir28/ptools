@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ptools Code Mode Architecture</title>
+    <style>
+      :root {
+        --bg: #f7f8fb;
+        --surface: #ffffff;
+        --surface-2: #eef4f6;
+        --ink: #15202b;
+        --muted: #657080;
+        --line: #d8e0e8;
+        --blue: #2563eb;
+        --blue-soft: #e9f0ff;
+        --green: #0f766e;
+        --green-soft: #e4f5f2;
+        --amber: #b45309;
+        --amber-soft: #fff4dc;
+        --rose: #be123c;
+        --rose-soft: #fff0f3;
+        --violet: #6d28d9;
+        --violet-soft: #f2edff;
+        --shadow: 0 18px 45px rgba(21, 32, 43, 0.08);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(247, 248, 251, 0.96)),
+          var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      button,
+      code {
+        font: inherit;
+      }
+
+      .page {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 32px 0 40px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 18px;
+        padding: 26px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+
+      .title-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 20px;
+        align-items: start;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 780px;
+        font-size: clamp(2rem, 4vw, 4.4rem);
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        max-width: 860px;
+        color: var(--muted);
+        font-size: 1.04rem;
+      }
+
+      .truth-card {
+        width: min(310px, 100%);
+        border: 1px solid #c7d7e8;
+        border-radius: var(--radius);
+        background: var(--blue-soft);
+        padding: 14px;
+      }
+
+      .truth-card strong {
+        display: block;
+        color: var(--blue);
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .truth-card span {
+        display: block;
+        margin-top: 6px;
+        color: #1d3557;
+        font-weight: 650;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fbfcfe;
+        color: #394658;
+        font-size: 0.86rem;
+        font-weight: 650;
+      }
+
+      .tabs {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        margin: 18px 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(12px);
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .tab {
+        min-height: 42px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.92rem;
+        font-weight: 750;
+      }
+
+      .tab:hover {
+        background: #f3f6fa;
+        color: var(--ink);
+      }
+
+      .tab[aria-selected="true"] {
+        background: var(--ink);
+        color: white;
+      }
+
+      .panel {
+        display: grid;
+        gap: 18px;
+      }
+
+      .panel[hidden] {
+        display: none;
+      }
+
+      .section-card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 12px 28px rgba(21, 32, 43, 0.06);
+        padding: 22px;
+      }
+
+      .section-heading {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 18px;
+      }
+
+      .section-heading h2 {
+        font-size: clamp(1.35rem, 2vw, 2rem);
+        letter-spacing: 0;
+      }
+
+      .section-heading p {
+        max-width: 850px;
+        color: var(--muted);
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        align-items: stretch;
+      }
+
+      .node {
+        position: relative;
+        min-height: 150px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fbfcfe;
+        padding: 14px;
+      }
+
+      .node:not(:last-child)::after {
+        content: "->";
+        position: absolute;
+        top: 50%;
+        right: -17px;
+        transform: translateY(-50%);
+        z-index: 2;
+        color: var(--muted);
+        font-weight: 850;
+      }
+
+      .node h3 {
+        font-size: 1rem;
+        letter-spacing: 0;
+      }
+
+      .node p {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .node code,
+      .code-line {
+        display: inline-block;
+        max-width: 100%;
+        margin-top: 10px;
+        padding: 5px 7px;
+        border-radius: 6px;
+        background: #eef2f7;
+        color: #263244;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.78rem;
+        overflow-wrap: anywhere;
+      }
+
+      .node-blue {
+        border-color: #bdd0ff;
+        background: var(--blue-soft);
+      }
+
+      .node-green {
+        border-color: #b7e1d8;
+        background: var(--green-soft);
+      }
+
+      .node-amber {
+        border-color: #f4d38d;
+        background: var(--amber-soft);
+      }
+
+      .node-violet {
+        border-color: #d7c9ff;
+        background: var(--violet-soft);
+      }
+
+      .node-rose {
+        border-color: #ffc2cf;
+        background: var(--rose-soft);
+      }
+
+      .legend-grid,
+      .split-grid,
+      .remote-grid,
+      .glossary-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .legend-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .split-grid {
+        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      }
+
+      .remote-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .glossary-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .mini-card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fbfcfe;
+        padding: 14px;
+      }
+
+      .mini-card strong {
+        display: block;
+        font-size: 0.96rem;
+      }
+
+      .mini-card p {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .callout {
+        border: 1px solid #b7e1d8;
+        border-radius: var(--radius);
+        background: var(--green-soft);
+        padding: 16px;
+      }
+
+      .callout strong {
+        color: var(--green);
+      }
+
+      .warning {
+        border-color: #f4d38d;
+        background: var(--amber-soft);
+      }
+
+      .warning strong {
+        color: var(--amber);
+      }
+
+      .trace {
+        display: grid;
+        gap: 10px;
+        counter-reset: trace;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fbfcfe;
+        padding: 14px;
+      }
+
+      .step::before {
+        counter-increment: trace;
+        content: counter(trace);
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: white;
+        font-weight: 800;
+      }
+
+      .step h3 {
+        font-size: 1rem;
+      }
+
+      .step p {
+        margin-top: 4px;
+        color: var(--muted);
+      }
+
+      .code-block {
+        margin: 14px 0 0;
+        padding: 14px;
+        border-radius: var(--radius);
+        background: #111827;
+        color: #e5edf5;
+        overflow-x: auto;
+        font-family:
+          "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.84rem;
+        line-height: 1.55;
+      }
+
+      .matrix {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .state-card {
+        min-height: 170px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fbfcfe;
+        padding: 16px;
+      }
+
+      .state-card h3 {
+        font-size: 1.05rem;
+      }
+
+      .state-card p {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .state-card ul {
+        margin: 12px 0 0;
+        padding-left: 20px;
+        color: #344154;
+      }
+
+      .state-card li + li {
+        margin-top: 5px;
+      }
+
+      .owner-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .owner-row {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fbfcfe;
+      }
+
+      .owner-row strong {
+        color: var(--ink);
+      }
+
+      .owner-row span {
+        color: var(--muted);
+      }
+
+      .footer-note {
+        color: var(--muted);
+        font-size: 0.9rem;
+        text-align: center;
+      }
+
+      @media (max-width: 980px) {
+        .title-row,
+        .split-grid,
+        .matrix {
+          grid-template-columns: 1fr;
+        }
+
+        .truth-card {
+          width: 100%;
+        }
+
+        .flow,
+        .legend-grid,
+        .remote-grid,
+        .glossary-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .tabs {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          position: static;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          width: min(100% - 20px, 1180px);
+          padding-top: 12px;
+        }
+
+        .hero,
+        .section-card {
+          padding: 16px;
+        }
+
+        .tabs,
+        .flow,
+        .legend-grid,
+        .remote-grid,
+        .glossary-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .tab {
+          min-height: 38px;
+        }
+
+        .node {
+          min-height: auto;
+        }
+
+        .node:not(:last-child)::after {
+          content: "down";
+          top: auto;
+          right: 14px;
+          bottom: -18px;
+          transform: none;
+          padding: 0 6px;
+          background: var(--surface);
+          font-size: 0.72rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .step,
+        .owner-row {
+          grid-template-columns: 1fr;
+        }
+
+        .step::before {
+          width: 30px;
+          height: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="title-row">
+          <div>
+            <h1>ptools Code Mode request flow</h1>
+          </div>
+          <aside class="truth-card" aria-label="Core truth">
+            <strong>Core truth</strong>
+            <span>Executor does not own MCPs. The Code Mode host does.</span>
+          </aside>
+        </div>
+
+        <p class="subtitle">
+          This map separates the combined Code Mode MCP server, the host-side
+          MCP registry, the executor RPC callback host, and the sandbox. The
+          sandbox receives provider stubs and a callback URL. Real MCP calls
+          stay in the host runtime.
+        </p>
+
+        <div class="chips" aria-label="Architecture actors">
+          <span class="chip">User harness</span>
+          <span class="chip">Code Mode MCP server</span>
+          <span class="chip">MCP Registry</span>
+          <span class="chip">Executor RPC host</span>
+          <span class="chip">Sandbox runtime</span>
+          <span class="chip">Upstream MCP servers</span>
+        </div>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="Architecture views">
+        <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="local-v1" data-tab="local-v1">
+          Local V1
+        </button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="request-trace" data-tab="request-trace">
+          Request Trace
+        </button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="remote-future" data-tab="remote-future">
+          Remote Future
+        </button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="local-mcp-remote-host" data-tab="local-mcp-remote-host">
+          Local MCP From Remote
+        </button>
+      </nav>
+
+      <section class="panel" id="local-v1" role="tabpanel">
+        <article class="section-card">
+          <div class="section-heading">
+            <h2>Local V1: one local Code Mode host, one local sandbox process per run</h2>
+            <p>
+              In v1, everything runs on the developer machine. The combined MCP
+              server owns the public MCP surface. The registry owns upstream MCP
+              clients. The executor only runs code and routes sandbox callbacks.
+            </p>
+          </div>
+
+          <div class="flow" aria-label="Local V1 flow">
+            <div class="node node-blue">
+              <h3>User harness</h3>
+              <p>Any MCP client or agent that connects to the combined server.</p>
+              <code>execute({ code })</code>
+            </div>
+            <div class="node node-green">
+              <h3>Code Mode MCP server</h3>
+              <p>Exposes search and execute. Builds provider handlers from discovered MCP tools.</p>
+              <code>search / execute</code>
+            </div>
+            <div class="node node-amber">
+              <h3>MCP Registry</h3>
+              <p>Connects upstream MCP clients, discovers schemas, sanitizes names, dispatches calls.</p>
+              <code>McpRegistry.callTool</code>
+            </div>
+            <div class="node node-violet">
+              <h3>Executor RPC host</h3>
+              <p>Shared callback server. Each active run has its own token, handler map, and state.</p>
+              <code>/runs/:runId/call</code>
+            </div>
+            <div class="node node-rose">
+              <h3>Sandbox process</h3>
+              <p>Runs generated JS with provider globals. It calls back to the RPC URL, not to upstream MCPs.</p>
+              <code>github.create_issue(...)</code>
+            </div>
+            <div class="node node-amber">
+              <h3>Upstream MCP servers</h3>
+              <p>Real side-effect layer. Reached by the registry after the sandbox callback hits the host.</p>
+              <code>callTool</code>
+            </div>
+          </div>
+        </article>
+
+        <article class="section-card">
+          <div class="section-heading">
+            <h2>Who owns what?</h2>
+            <p>
+              If one sentence should stick: MCP authority is in the Code Mode
+              host; sandbox authority is only the explicit provider capability
+              it was handed for this execution.
+            </p>
+          </div>
+
+          <div class="owner-list">
+            <div class="owner-row">
+              <strong>Code Mode MCP server</strong>
+              <span>Owns public search/execute and turns registry metadata into model-facing APIs.</span>
+            </div>
+            <div class="owner-row">
+              <strong>MCP Registry</strong>
+              <span>Owns upstream MCP client connections, tool discovery, original names, credentials, and dispatch.</span>
+            </div>
+            <div class="owner-row">
+              <strong>Executor RPC host</strong>
+              <span>Owns callback routing for active sandbox runs. It does not discover MCP tools.</span>
+            </div>
+            <div class="owner-row">
+              <strong>Sandbox runtime</strong>
+              <span>Owns generated JavaScript execution. It receives stubs, not MCP clients, env vars, or tokens.</span>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel" id="request-trace" role="tabpanel" hidden>
+        <article class="section-card">
+          <div class="section-heading">
+            <h2>Request trace: from execute to real MCP call</h2>
+            <p>
+              This is the actual mental model for an execute call. The sandbox
+              never talks to upstream MCP servers directly; it talks to the
+              executor callback URL, and the host handler dispatches through the registry.
+            </p>
+          </div>
+
+          <div class="trace">
+            <div class="step">
+              <div>
+                <h3>User harness calls the combined MCP server</h3>
+                <p>The outside client only sees the wrapper tools.</p>
+                <pre class="code-block">execute({
+  code: "async () => github.create_issue({ title: 'Bug' })"
+})</pre>
+              </div>
+            </div>
+
+            <div class="step">
+              <div>
+                <h3>Code Mode asks the registry what tools exist</h3>
+                <p>The registry has already connected to upstream MCP configs and preserved original names.</p>
+                <span class="code-line">McpRegistry.listTools()</span>
+              </div>
+            </div>
+
+            <div class="step">
+              <div>
+                <h3>Code Mode creates executor providers</h3>
+                <p>Each provider function is a host-owned handler backed by registry dispatch.</p>
+                <pre class="code-block">providers: [{
+  name: "github",
+  fns: {
+    create_issue: (input) =>
+      McpRegistry.callTool({
+        server: "github",
+        tool: "create_issue",
+        arguments: input
+      })
+  }
+}]</pre>
+              </div>
+            </div>
+
+            <div class="step">
+              <div>
+                <h3>Executor starts sandbox and gives it a callback URL</h3>
+                <p>The sandbox gets generated code, provider manifest, run URL, and bearer token.</p>
+                <span class="code-line">http://127.0.0.1:PORT/runs/RUN_ID</span>
+              </div>
+            </div>
+
+            <div class="step">
+              <div>
+                <h3>Sandbox calls the provider stub</h3>
+                <p>The generated JS thinks it is calling an API object, but it is really making an HTTP RPC callback.</p>
+                <pre class="code-block">await github.create_issue({
+  owner: "acme",
+  repo: "app",
+  title: "Bug"
+})</pre>
+              </div>
+            </div>
+
+            <div class="step">
+              <div>
+                <h3>RPC host invokes the registered handler</h3>
+                <p>The handler jumps back into the registry, which calls the real upstream MCP tool.</p>
+                <span class="code-line">sandbox -> RPC host -> McpRegistry.callTool -> upstream MCP</span>
+              </div>
+            </div>
+
+            <div class="step">
+              <div>
+                <h3>Result returns to the sandbox and then to the user harness</h3>
+                <p>The host keeps secrets and MCP clients. The sandbox only gets the tool result.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel" id="remote-future" role="tabpanel" hidden>
+        <article class="section-card">
+          <div class="section-heading">
+            <h2>Remote future: same callback idea, different machines</h2>
+            <p>
+              Remote support does not change the ownership model. It only changes
+              where the Code Mode host and sandbox run, plus how the sandbox
+              reaches the callback URL.
+            </p>
+          </div>
+
+          <div class="remote-grid">
+            <div class="state-card node-green">
+              <h3>Remote Code Mode host</h3>
+              <p>Runs the combined MCP server, registry, credentials, policies, and provider handlers.</p>
+              <ul>
+                <li>Can connect to remote-accessible MCP servers.</li>
+                <li>Can run configured stdio MCPs on the remote host machine.</li>
+                <li>Publishes or tunnels a callback URL for sandboxes.</li>
+              </ul>
+            </div>
+            <div class="state-card node-violet">
+              <h3>Remote sandbox</h3>
+              <p>Runs generated JS somewhere else and calls back to the host URL.</p>
+              <ul>
+                <li>Receives provider manifest.</li>
+                <li>Receives run token.</li>
+                <li>Does not receive upstream MCP credentials.</li>
+              </ul>
+            </div>
+            <div class="state-card node-amber">
+              <h3>Upstream MCP location</h3>
+              <p>MCP servers live wherever the Code Mode host can reach them.</p>
+              <ul>
+                <li>Remote HTTP MCP works if reachable.</li>
+                <li>Remote stdio MCP runs on the host machine.</li>
+                <li>User-local stdio needs a bridge.</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="section-card">
+          <div class="section-heading">
+            <h2>Can host and sandbox both be remote?</h2>
+            <p>
+              Yes. The sandbox only needs a callback URL it can reach. The host
+              needs access to the upstream MCP servers. Those are separate networking questions.
+            </p>
+          </div>
+
+          <div class="matrix">
+            <div class="callout">
+              <strong>Works conceptually</strong>
+              <p>
+                Remote Code Mode host plus remote sandbox is clean when all
+                upstream MCP servers are either hosted remotely or configured on
+                the remote host.
+              </p>
+            </div>
+            <div class="callout warning">
+              <strong>Does not magically work</strong>
+              <p>
+                A remote Code Mode host cannot spawn or connect to stdio MCP
+                processes on the user's laptop unless a local connector/bridge
+                is running there.
+              </p>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel" id="local-mcp-remote-host" role="tabpanel" hidden>
+        <article class="section-card">
+          <div class="section-heading">
+            <h2>Remote host + user-local MCPs: the missing bridge</h2>
+            <p>
+              This is the main future architecture fork. If the combined Code
+              Mode server is deployed remotely but the user wants local stdio
+              MCPs, something local must represent those MCPs to the remote host.
+            </p>
+          </div>
+
+          <div class="flow" aria-label="Remote host with local bridge">
+            <div class="node node-blue">
+              <h3>User harness</h3>
+              <p>Connects to deployed Code Mode MCP server.</p>
+              <code>remote ptools</code>
+            </div>
+            <div class="node node-green">
+              <h3>Remote Code Mode host</h3>
+              <p>Owns registry and executor provider handlers, but cannot see laptop processes by default.</p>
+              <code>search / execute</code>
+            </div>
+            <div class="node node-violet">
+              <h3>Remote sandbox</h3>
+              <p>Calls back to remote host with run token and provider name.</p>
+              <code>POST /runs/:id/call</code>
+            </div>
+            <div class="node node-amber">
+              <h3>Future local bridge</h3>
+              <p>Runs on user's machine and exposes local stdio MCPs over an authenticated channel.</p>
+              <code>not v1</code>
+            </div>
+            <div class="node node-rose">
+              <h3>User-local MCPs</h3>
+              <p>Processes like local filesystem, desktop, or project-specific stdio MCP servers.</p>
+              <code>stdio MCP</code>
+            </div>
+          </div>
+        </article>
+
+        <article class="section-card">
+          <div class="section-heading">
+            <h2>Deployment cases</h2>
+            <p>
+              Think about where the Code Mode host runs first. That determines
+              which upstream MCP configs are meaningful.
+            </p>
+          </div>
+
+          <div class="legend-grid">
+            <div class="mini-card">
+              <strong>Local host + local sandbox</strong>
+              <p>V1. Can spawn local stdio MCPs and run local sandbox callbacks on localhost.</p>
+            </div>
+            <div class="mini-card">
+              <strong>Remote host + remote sandbox</strong>
+              <p>Future. Works for MCPs the remote host can reach or spawn.</p>
+            </div>
+            <div class="mini-card">
+              <strong>Remote host + local sandbox</strong>
+              <p>Possible only if local sandbox can reach the host callback URL and receives a token.</p>
+            </div>
+            <div class="mini-card">
+              <strong>Remote host + local MCPs</strong>
+              <p>Needs a connector. Without it, remote host has no path to user-local stdio processes.</p>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="section-card" aria-labelledby="glossary-title">
+        <div class="section-heading">
+          <h2 id="glossary-title">Glossary: stop overloading "host"</h2>
+          <p>
+            Use these names in tickets and code comments so the architecture
+            stays understandable.
+          </p>
+        </div>
+
+        <div class="glossary-grid">
+          <div class="mini-card">
+            <strong>Code Mode host</strong>
+            <p>The process running the combined MCP server, registry, credentials, and policies.</p>
+          </div>
+          <div class="mini-card">
+            <strong>Executor RPC host</strong>
+            <p>The callback HTTP surface used by sandboxes to invoke host-owned provider handlers.</p>
+          </div>
+          <div class="mini-card">
+            <strong>Sandbox runtime</strong>
+            <p>The isolated code runner. It gets code, safe globals, provider stubs, URL, and token.</p>
+          </div>
+          <div class="mini-card">
+            <strong>Upstream MCP server</strong>
+            <p>The real side-effect layer. The registry connects to it and calls its tools.</p>
+          </div>
+        </div>
+      </section>
+
+      <p class="footer-note">
+        Current implementation target: local Code Mode host plus local sandbox.
+        Remote executor and local bridge support are future architecture, not shipped v1 behavior.
+      </p>
+    </main>
+
+    <script>
+      const tabs = Array.from(document.querySelectorAll("[data-tab]"));
+      const panels = Array.from(document.querySelectorAll("[role='tabpanel']"));
+
+      const activate = (id, updateHash = true) => {
+        for (const tab of tabs) {
+          const selected = tab.dataset.tab === id;
+          tab.setAttribute("aria-selected", String(selected));
+        }
+
+        for (const panel of panels) {
+          panel.hidden = panel.id !== id;
+        }
+
+        if (updateHash) {
+          history.replaceState(null, "", `#${id}`);
+        }
+      };
+
+      for (const tab of tabs) {
+        tab.addEventListener("click", () => activate(tab.dataset.tab));
+      }
+
+      window.addEventListener("hashchange", () => {
+        const id = location.hash.slice(1);
+        if (tabs.some((tab) => tab.dataset.tab === id)) {
+          activate(id, false);
+        }
+      });
+
+      const initial = location.hash.slice(1);
+      if (tabs.some((tab) => tab.dataset.tab === initial)) {
+        activate(initial, false);
+      }
+    </script>
+  </body>
+</html>
