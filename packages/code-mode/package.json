@@ -10,12 +10,15 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --dir test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@ptools/core": "workspace:*",
     "@ptools/executor": "workspace:*",
-    "effect": "latest"
+    "@ptools/mcp-registry": "workspace:*",
+    "effect": "latest",
+    "json-schema-to-typescript": "^15.0.4"
   }
 }

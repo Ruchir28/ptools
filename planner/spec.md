@@ -5,7 +5,7 @@
 `ptools` is an MCP-first Code Mode wrapper. It takes many upstream MCP servers and exposes one combined MCP server with a small model-facing surface:
 
 ```txt
-search({ code })
+search({ query?: string })
 execute({ code })
 ```
 
@@ -209,17 +209,15 @@ Responsibilities:
 
 ### `search`
 
-`search` runs generated JavaScript against metadata only.
+`search` is metadata-only. It accepts `{ query?: string }`, never generated code, and must not invoke the executor.
 
-Allowed binding:
+It is how the model discovers the generated-code API surface before calling `execute`.
 
-```ts
-api.servers[]
-```
+Blank or missing `query` returns the full discovered API surface. A non-blank query returns matching servers/tools and TypeScript declarations regenerated from that filtered surface.
 
 Metadata should include server names, tool names, descriptions, input schemas, output schemas when available, and annotations.
 
-`search` must not expose live MCP clients.
+`search` must not expose live MCP clients, provider handlers, credentials, or sandbox bindings.
 
 ### `execute`
 

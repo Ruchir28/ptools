@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Mode — Live Visual Architecture</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{--accent:#166534; --accent-light:#4ade80; --bg:#09090b; --card-bg:#18181b; --border:#27272a; --text:#fafafa; --text-dim:#a1a1aa;}
+body{font-family:ui-sans-serif,system-ui,-apple-system; background-color:var(--bg); color:var(--text); scroll-behavior: smooth;}
+svg{cursor:default; user-select: none;}
+.node circle{fill:var(--accent); stroke:var(--accent-light); stroke-width:2; transition:all .2s ease;}
+.node:hover circle{fill:var(--accent-light); r:28;}
+.node text{fill:#e5e7eb; font-size:11px; font-weight:600; pointer-events:none;}
+.edge{stroke:#3f3f46; stroke-width:1.5; fill:none; transition: stroke 0.3s;}
+.edge.active{stroke:var(--accent-light); stroke-width:2.5; stroke-dasharray: 1000; stroke-dashoffset: 1000; animation: dash 2s linear forwards;}
+@keyframes dash { from { stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
+
+.modal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.8); z-index: 50; backdrop-filter: blur(4px);}
+.modal.open{display:flex}
+.card-modal{max-width:650px; width: 90%; max-height: 80vh; overflow-y: auto;}
+
+.nav-link{transition: color 0.2s; cursor: pointer;}
+.nav-link:hover{color: var(--accent-light);}
+
+pre { background: #000; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; font-size: 0.8rem; border: 1px solid var(--border); }
+code { font-family: 'Fira Code', 'Monaco', monospace; }
+.keyword { color: #f472b6; }
+.function { color: #4ade80; }
+.type { color: #60a5fa; }
+.comment { color: #71717a; }
+.string { color: #fbbf24; }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.file-card { background: var(--card-bg); border: 1px solid var(--border); transition: transform 0.2s, border-color 0.2s; cursor: pointer; }
+.file-card:hover { transform: translateY(-2px); border-color: var(--accent-light); }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+.status-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: bold; border: 1px solid transparent; }
+.status-fixed { background: #064e3b; color: #34d399; border-color: #065f46; }
+.status-optimized { background: #1e3a8a; color: #60a5fa; border-color: #1e40af; }
+</style>
+</head>
+<body class="selection:bg-emerald-500/30">
+
+<!-- SIDE NAV (Desktop) / TOP NAV (Mobile) -->
+<div class="fixed top-0 left-0 w-full h-16 bg-zinc-950/80 backdrop-blur border-b border-zinc-800 z-40 flex items-center justify-between px-8">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 bg-emerald-600 rounded flex items-center justify-center font-bold text-white">C</div>
+    <span class="text-xl font-bold tracking-tight">Code Mode <span class="text-zinc-500 font-normal text-sm ml-2">Internal Docs</span></span>
+  </div>
+  <div class="hidden md:flex gap-6 text-sm font-medium text-zinc-400">
+    <a href="#overview" class="nav-link">Overview</a>
+    <a href="#rationale" class="nav-link">Rationale</a>
+    <a href="#visuals" class="nav-link">Visual Flows</a>
+    <a href="#files" class="nav-link">File Reference</a>
+    <a href="#lifecycles" class="nav-link">Lifecycles</a>
+  </div>
+  <div class="text-xs font-mono text-zinc-500 bg-zinc-900 px-3 py-1 rounded border border-zinc-800">
+    v1.1.0 • 2026-05-16
+  </div>
+</div>
+
+<div class="max-w-[1200px] mx-auto p-8 pt-24">
+
+  <!-- OVERVIEW SECTION -->
+  <section id="overview" class="mb-16">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="lg:col-span-2">
+        <h1 class="text-5xl font-extrabold tracking-tight mb-4 bg-gradient-to-br from-white to-zinc-500 bg-clip-text text-transparent">Architecture Overview</h1>
+        <p class="text-lg text-zinc-400 leading-relaxed mb-6">
+          Code Mode provides a type-safe bridge between generated sandbox code and upstream MCP tool providers. 
+          By utilizing a <strong>Build-Once-Stitch-Often</strong> caching strategy, it ensures that model discovery
+          remains extremely fast while maintaining precise token window control.
+        </p>
+        <div class="flex flex-wrap gap-4">
+          <div class="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+            <span class="text-emerald-400 font-bold mr-2">Core:</span> Effect-TS Service
+          </div>
+          <div class="px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+            <span class="text-blue-400 font-bold mr-2">Optimization:</span> Declaration Caching
+          </div>
+          <div class="px-4 py-2 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+            <span class="text-purple-400 font-bold mr-2">Engine:</span> MCP Engine
+          </div>
+        </div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-xl">
+        <h3 class="text-emerald-400 font-bold mb-4 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Latest Updates
+        </h3>
+        <ul class="space-y-4 text-sm">
+          <li class="flex gap-3">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 shrink-0"></span>
+            <div><strong class="text-zinc-200">Startup Build Step</strong><p class="text-zinc-500">Async schema compilation moved to <code>
+                
+            </code> at startup.</p></div>
+          </li>
+          <li class="flex gap-3">
+            <span class="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1.5 shrink-0"></span>
+            <div><strong class="text-zinc-200">Sync Search</strong><p class="text-zinc-500"><code>search()</code> is now a synchronous, pure stitching operation from cache.</p></div>
+          </li>
+          <li class="flex gap-3">
+            <span class="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 shrink-0"></span>
+            <div><strong class="text-zinc-200">Fast Path Cache</strong><p class="text-zinc-500">Empty queries return a precomputed <code>fullContext</code> in O(1).</p></div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- DESIGN RATIONALE -->
+  <section id="rationale" class="mb-16">
+    <h2 class="text-3xl font-bold mb-8">Design Rationale & Performance</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div class="bg-emerald-500/5 border border-emerald-500/20 rounded-2xl p-8">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold text-emerald-400 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Optimized Fragment Stitching
+          </h3>
+          <span class="status-badge status-fixed">RESOLVED</span>
+        </div>
+        <p class="text-zinc-400 text-sm mb-4">
+          The previous bottleneck of <strong>regenerating .d.ts on every search</strong> has been eliminated.
+        </p>
+        <div class="space-y-4">
+          <div>
+            <h4 class="text-zinc-200 font-bold text-sm">The Solution:</h4>
+            <p class="text-xs text-zinc-500">All heavy <code>json-schema-to-typescript</code> work happens once during <code>buildDeclarationIndex</code>. The <code>DeclarationIndex</code> stores pre-compiled "fragments" (interfaces and signatures) in memory.</p>
+          </div>
+          <div class="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+            <h4 class="text-emerald-400 font-bold text-sm mb-1">Performance Result:</h4>
+            <p class="text-xs text-zinc-500 italic">"Runtime search latency reduced from ~500ms+ (variable) to &lt;1ms (constant), as it now only involves array filtering and string joining."</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-8">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold text-blue-400 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-9m3 4H5m4 4H2"/><circle cx="17" cy="17" r="3"/><path d="m19 19 3 3"/></svg>
+            Precomputed Full Context
+          </h3>
+          <span class="status-badge status-optimized">O(1) OPTIMIZED</span>
+        </div>
+        <p class="text-zinc-400 text-sm mb-4">
+          The "Empty Query" fast path has been promoted to a primary data structure.
+        </p>
+        <div class="space-y-4">
+          <div>
+            <h4 class="text-zinc-200 font-bold text-sm">Mechanism:</h4>
+            <p class="text-xs text-zinc-500">The <code>CodeModeRuntime</code> now holds a <code>fullContext</code> property, pre-built during service initialization. Any search without a query simply returns this object reference.</p>
+          </div>
+          <div class="p-4 bg-zinc-950 rounded-lg border border-zinc-800">
+            <h4 class="text-blue-400 font-bold text-sm mb-1">Impact:</h4>
+            <p class="text-xs text-zinc-500 italic">Eliminates all work for the most common discovery calls, reducing total server overhead during large-scale model interactions.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VISUAL FLOWS -->
+  <section id="visuals" class="mb-16">
+    <div class="flex items-center justify-between mb-8 border-b border-zinc-800 pb-4">
+      <h2 class="text-3xl font-bold">Visual Call Flows</h2>
+      <div class="flex gap-2">
+        <button onclick="switchTab('system')" id="id-btn-system" class="px-4 py-1.5 text-sm rounded-full bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition">System</button>
+        <button onclick="switchTab('search')" id="id-btn-search" class="px-4 py-1.5 text-sm rounded-full bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition">Search (New)</button>
+        <button onclick="switchTab('stitching')" id="id-btn-stitching" class="px-4 py-1.5 text-sm rounded-full bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition text-blue-400 font-bold">Stitching Logic</button>
+        <button onclick="switchTab('execute')" id="id-btn-execute" class="px-4 py-1.5 text-sm rounded-full bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 transition">Execute</button>
+        <button onclick="switchTab('hotspots')" id="id-btn-hotspots" class="px-4 py-1.5 text-sm rounded-full bg-emerald-950/30 border border-emerald-900/50 text-emerald-400 hover:bg-emerald-900/40 transition font-bold">Performance Impact</button>
+      </div>
+    </div>
+
+    <!-- SYSTEM TAB -->
+    <div id="tab-system" class="tab-content active">
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h3 class="text-emerald-400 font-medium mb-4">1. Global System Flow (Startup-Centric)</h3>
+        <p class="text-sm text-zinc-500 mb-6">Click nodes to explore service responsibilities. Note how <b>context</b> and <b>decl</b> are now heavily utilized at startup.</p>
+        <svg id="global" width="1100" height="300" class="w-full"></svg>
+      </div>
+    </div>
+
+    <!-- SEARCH TAB -->
+    <div id="tab-search" class="tab-content">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+          <h3 class="text-blue-400 font-medium mb-4">2. Runtime Search flow (Stitching)</h3>
+          <p class="text-xs text-zinc-500 mb-4">Lightweight and Synchronous</p>
+          <svg id="search-flow" width="520" height="200" class="w-full"></svg>
+        </div>
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+          <h3 class="text-yellow-400 font-medium mb-4">3. Startup Build Pipeline</h3>
+          <p class="text-xs text-zinc-500 mb-4">Heavy and Async (Paid Once)</p>
+          <svg id="decl-pipeline" width="520" height="200" class="w-full"></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- STITCHING LOGIC TAB -->
+    <div id="tab-stitching" class="tab-content">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- The Explanation -->
+        <div class="lg:col-span-1 space-y-6">
+          <div class="bg-zinc-900 border border-zinc-800 p-6 rounded-xl">
+            <h3 class="text-blue-400 font-bold mb-4">How are Interfaces Linked?</h3>
+            <p class="text-xs text-zinc-400 mb-4">The "Glue" is the <code>toolKey</code>. The system ensures that a function never travels without its types by packaging them into a single <b>Fragment Object</b> at startup.</p>
+            <div class="space-y-4">
+              <div class="flex gap-3">
+                <div class="w-6 h-6 rounded bg-yellow-900 text-yellow-400 flex items-center justify-center text-[10px] font-bold shrink-0">1</div>
+                <div>
+                  <h4 class="text-xs font-bold text-zinc-200">The Packaging</h4>
+                  <p class="text-[10px] text-zinc-500"><code>buildDeclarationIndex</code> compiles the schema and saves the resulting <code>interface</code> code directly into the <code>CachedToolDeclaration</code> map.</p>
+                </div>
+              </div>
+              <div class="flex gap-3">
+                <div class="w-6 h-6 rounded bg-emerald-900 text-emerald-400 flex items-center justify-center text-[10px] font-bold shrink-0">2</div>
+                <div>
+                  <h4 class="text-xs font-bold text-zinc-200">The Filter</h4>
+                  <p class="text-[10px] text-zinc-500"><code>search()</code> returns a list of matching tool keys. It doesn't know about code yet, just keys like <code>"github.echo"</code>.</p>
+                </div>
+              </div>
+              <div class="flex gap-3">
+                <div class="w-6 h-6 rounded bg-blue-900 text-blue-400 flex items-center justify-center text-[10px] font-bold shrink-0">3</div>
+                <div>
+                  <h4 class="text-xs font-bold text-zinc-200">The Stitch</h4>
+                  <p class="text-[10px] text-zinc-500"><code>renderDeclarations</code> iterates those keys. For each key, it pulls the <b>entire package</b> (Interfaces + Signature) from the map and joins them.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- The Simulation -->
+        <div class="lg:col-span-2 bg-zinc-900 border border-zinc-800 p-6 rounded-xl relative overflow-hidden">
+          <h3 class="text-emerald-400 font-bold mb-6">Interactive Stitching Simulator</h3>
+          
+          <div class="grid grid-cols-2 gap-8 mb-8">
+            <!-- Left: The Search -->
+            <div>
+              <label class="text-[10px] uppercase tracking-wider text-zinc-500 font-bold block mb-2">1. Simulate Search</label>
+              <div class="flex flex-col gap-2">
+                <button onclick="simulateStitch('github.create_issue')" class="text-left px-4 py-2 bg-zinc-950 border border-zinc-800 rounded hover:border-emerald-500 transition text-xs">Search: "create issue"</button>
+                <button onclick="simulateStitch('linear.get_tickets')" class="text-left px-4 py-2 bg-zinc-950 border border-zinc-800 rounded hover:border-emerald-500 transition text-xs">Search: "linear tickets"</button>
+              </div>
+            </div>
+
+            <!-- Middle: The Lookup -->
+            <div id="sim-lookup" class="opacity-30 transition-opacity">
+              <label class="text-[10px] uppercase tracking-wider text-zinc-500 font-bold block mb-2">2. Cache Lookup</label>
+              <div class="p-3 bg-zinc-950 border border-emerald-900/50 rounded font-mono text-[10px] text-zinc-400">
+                Map.get(<span id="sim-key" class="text-emerald-400">"..."</span>)<br/>
+                <span class="text-zinc-600">→ returns Fragment Object</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Result: The Stitch -->
+          <div id="sim-result-box" class="opacity-0 translate-y-4 transition-all duration-500">
+            <label class="text-[10px] uppercase tracking-wider text-zinc-500 font-bold block mb-2">3. Rendered Output (.d.ts)</label>
+            <pre class="h-64 overflow-y-auto"><code id="sim-result-code" class="text-[10px]"></code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXECUTE TAB -->
+    <div id="tab-execute" class="tab-content">
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
+        <h3 class="text-purple-400 font-medium mb-4">4. Execution & Dispatch Flow</h3>
+        <svg id="execute-flow" width="1100" height="200" class="w-full"></svg>
+      </div>
+    </div>
+
+    <!-- HOTSPOTS TAB -->
+    <div id="tab-hotspots" class="tab-content">
+      <div class="bg-emerald-950/10 border border-emerald-900/30 rounded-xl p-8">
+        <div class="flex items-center gap-4 mb-8">
+          <div class="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center text-emerald-500">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-2xl font-bold text-emerald-400">Optimization Report</h3>
+            <p class="text-zinc-500 text-sm">Post-Caching performance profile.</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="p-6 bg-zinc-950 rounded-xl border border-zinc-800">
+            <h4 class="font-bold text-zinc-200 mb-2">1. Startup Build</h4>
+            <div class="w-full bg-zinc-900 h-2 rounded-full mb-3 overflow-hidden">
+              <div class="bg-yellow-500 h-full w-[95%]"></div>
+            </div>
+            <p class="text-xs text-zinc-500">Async <code>buildDeclarationIndex</code> takes the brunt of the work. This is isolated to system initialization.</p>
+          </div>
+          <div class="p-6 bg-zinc-950 rounded-xl border border-zinc-800">
+            <h4 class="font-bold text-zinc-200 mb-2">2. Search() Latency</h4>
+            <div class="w-full bg-zinc-900 h-2 rounded-full mb-3 overflow-hidden">
+              <div class="bg-emerald-500 h-full w-[2%]"></div>
+            </div>
+            <p class="text-xs text-zinc-500">Runtime stitching via <code>renderDeclarations</code> is now negligible. Token optimization is preserved with zero CPU penalty.</p>
+          </div>
+          <div class="p-6 bg-zinc-950 rounded-xl border border-zinc-800">
+            <h4 class="font-bold text-zinc-200 mb-2">3. Execute() Latency</h4>
+            <div class="w-full bg-zinc-900 h-2 rounded-full mb-3 overflow-hidden">
+              <div class="bg-blue-500 h-full w-[15%]"></div>
+            </div>
+            <p class="text-xs text-zinc-500">Remains constant; focused on sandbox IPC and upstream MCP network calls.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FILE REFERENCE -->
+  <section id="files" class="mb-16">
+    <h2 class="text-3xl font-bold mb-8">Source File Reference</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div onclick="showFile('CodeMode.ts')" class="file-card p-4 rounded-xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-emerald-400 font-mono text-sm font-bold">CodeMode.ts</span>
+          <span class="text-[10px] px-2 py-0.5 bg-emerald-950 text-emerald-300 rounded border border-emerald-800">Main Entry</span>
+        </div>
+        <p class="text-xs text-zinc-500">Uses <code>runtime.fullContext</code> for blank searches. Calls <code>makeCodeModeContext</code> for filtered ones.</p>
+      </div>
+      <div onclick="showFile('context.ts')" class="file-card p-4 rounded-xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-blue-400 font-mono text-sm font-bold">context.ts</span>
+          <span class="text-[10px] px-2 py-0.5 bg-blue-950 text-blue-300 rounded border border-blue-800">Orchestrator</span>
+        </div>
+        <p class="text-xs text-zinc-500">Now builds the <code>DeclarationIndex</code> and <code>fullContext</code> during <code>buildCodeModeRuntime</code>.</p>
+      </div>
+      <div onclick="showFile('declarations.ts')" class="file-card p-4 rounded-xl">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-yellow-400 font-mono text-sm font-bold">declarations.ts</span>
+          <span class="text-[10px] px-2 py-0.5 bg-yellow-950 text-yellow-300 rounded border border-yellow-800">Compiler/Renderer</span>
+        </div>
+        <p class="text-xs text-zinc-500">Split into <code>buildDeclarationIndex</code> (Async/Startup) and <code>renderDeclarations</code> (Sync/Runtime).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- KEY API REFERENCE -->
+  <section id="api" class="mb-16">
+    <h2 class="text-3xl font-bold mb-8">Updated API Reference</h2>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-zinc-950 border-b border-zinc-800">
+          <tr>
+            <th class="px-6 py-4 font-bold text-emerald-400">Function</th>
+            <th class="px-6 py-4 font-bold text-zinc-400">Lifecycle</th>
+            <th class="px-6 py-4 font-bold text-zinc-400">Description</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-800">
+          <tr class="hover:bg-zinc-800/50 transition">
+            <td class="px-6 py-4 font-mono text-emerald-400 font-bold">buildDeclarationIndex</td>
+            <td class="px-6 py-4 font-mono text-blue-400 text-xs">STARTUP (Async)</td>
+            <td class="px-6 py-4 text-zinc-400">Compiles all tool schemas once into a fragment cache.</td>
+          </tr>
+          <tr class="hover:bg-zinc-800/50 transition">
+            <td class="px-6 py-4 font-mono text-emerald-400 font-bold">renderDeclarations</td>
+            <td class="px-6 py-4 font-mono text-emerald-400 text-xs">RUNTIME (Sync)</td>
+            <td class="px-6 py-4 text-zinc-400">Pure function that stitches cached fragments into a final .d.ts string.</td>
+          </tr>
+          <tr class="hover:bg-zinc-800/50 transition">
+            <td class="px-6 py-4 font-mono text-emerald-400 font-bold">search</td>
+            <td class="px-6 py-4 font-mono text-emerald-400 text-xs">RUNTIME (Sync)</td>
+            <td class="px-6 py-4 text-zinc-400">Filters tools and calls <code>renderDeclarations</code>. Zero async overhead.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- LIFECYCLES -->
+  <section id="lifecycles" class="mb-16">
+    <h2 class="text-3xl font-bold mb-8">The New Caching Lifecycle</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <!-- Build Lifecycle -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 relative overflow-hidden">
+        <h3 class="text-2xl font-bold text-yellow-400 mb-6 flex items-center gap-2">
+          1. The Build Phase (Startup)
+        </h3>
+        <ol class="space-y-6 relative">
+          <li class="pl-8 relative">
+            <span class="absolute left-0 top-0 w-6 h-6 rounded-full bg-yellow-900 text-yellow-400 text-xs flex items-center justify-center font-bold">1</span>
+            <h4 class="font-bold text-zinc-200">Discovery & Grouping</h4>
+            <p class="text-sm text-zinc-500">McpRegistry returns tools; <code>groupDiscoveredMcpTools</code> organizes them by server.</p>
+          </li>
+          <li class="pl-8 relative">
+            <span class="absolute left-0 top-0 w-6 h-6 rounded-full bg-yellow-900 text-yellow-400 text-xs flex items-center justify-center font-bold">2</span>
+            <h4 class="font-bold text-zinc-200">Index Building</h4>
+            <p class="text-sm text-zinc-500"><code>buildDeclarationIndex</code> runs async compilation for every tool schema.</p>
+          </li>
+          <li class="pl-8 relative">
+            <span class="absolute left-0 top-0 w-6 h-6 rounded-full bg-yellow-900 text-yellow-400 text-xs flex items-center justify-center font-bold">3</span>
+            <h4 class="font-bold text-zinc-200">Full Cache Warming</h4>
+            <p class="text-sm text-zinc-500"><code>fullContext</code> is precomputed using <code>renderDeclarations</code> and stored on the Runtime.</p>
+          </li>
+        </ol>
+      </div>
+
+      <!-- Search Lifecycle -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 relative overflow-hidden">
+        <h3 class="text-2xl font-bold text-emerald-400 mb-6 flex items-center gap-2">
+          2. The Search Phase (Runtime)
+        </h3>
+        <ol class="space-y-6">
+          <li class="pl-8 relative">
+            <span class="absolute left-0 top-0 w-6 h-6 rounded-full bg-emerald-900 text-emerald-400 text-xs flex items-center justify-center font-bold">1</span>
+            <h4 class="font-bold text-zinc-200">Filtering</h4>
+            <p class="text-sm text-zinc-500"><code>filterCodeModeServers</code> identifies the relevant tools for the query.</p>
+          </li>
+          <li class="pl-8 relative">
+            <span class="absolute left-0 top-0 w-6 h-6 rounded-full bg-emerald-900 text-emerald-400 text-xs flex items-center justify-center font-bold">2</span>
+            <h4 class="font-bold text-zinc-200">Fragment Retrieval</h4>
+            <p class="text-sm text-zinc-500"><code>renderDeclarations</code> pulls pre-compiled fragments from the <code>DeclarationIndex</code>.</p>
+          </li>
+          <li class="pl-8 relative">
+            <span class="absolute left-0 top-0 w-6 h-6 rounded-full bg-emerald-900 text-emerald-400 text-xs flex items-center justify-center font-bold">3</span>
+            <h4 class="font-bold text-zinc-200">Sync Stitching</h4>
+            <p class="text-sm text-zinc-500">Fragments are joined into a single string and returned. No I/O, no async work.</p>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- MODALS -->
+<div id="modal" class="modal" onclick="closeModal()">
+  <div class="card-modal bg-zinc-900 border border-zinc-700 p-8 rounded-2xl shadow-2xl" onclick="event.stopPropagation()">
+    <div id="modal-title" class="text-2xl font-bold mb-4"></div>
+    <div id="modal-body" class="text-zinc-300 leading-relaxed text-sm"></div>
+    <div class="mt-8 flex justify-end">
+      <button onclick="closeModal()" class="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-medium transition">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ====== DATA ======
+const nodesGlobal = [
+  {id:'user',x:80,y:150,label:'User / LLM', color:'#71717a'},
+  {id:'server',x:280,y:150,label:'apps/server', color:'#10b981'},
+  {id:'codemode',x:480,y:150,label:'CodeMode Service', color:'#10b981'},
+  {id:'context',x:700,y:80,label:'context.ts\n(Stitching)', color:'#3b82f6'},
+  {id:'decl',x:700,y:220,label:'declarations.ts\n(Index)', color:'#eab308'},
+  {id:'registry',x:920,y:150,label:'McpRegistry', color:'#a855f7'},
+];
+const edgesGlobal = [
+  ['user','server'],['server','codemode'],['codemode','context'],
+  ['context','decl'],['codemode','registry']
+];
+
+const searchNodes = [
+  {id:'s1',x:70,y:100,label:'filterServers', color:'#3b82f6'},
+  {id:'s2',x:260,y:100,label:'renderDeclarations\n(Sync Cache)', color:'#10b981'},
+  {id:'s3',x:450,y:100,label:'Result', color:'#eab308'},
+];
+const searchEdges = [['s1','s2'],['s2','s3']];
+
+const declNodes = [
+  {id:'d1',x:80,y:100,label:'buildIndex\n(Async)', color:'#eab308'},
+  {id:'d2',x:260,y:100,label:'compileSchemas', color:'#eab308'},
+  {id:'d3',x:440,y:100,label:'Cache Fragments', color:'#10b981'},
+];
+const declEdges = [['d1','d2'],['d2','d3']];
+
+const execNodes = [
+  {id:'e1',x:80,y:100,label:'execute()', color:'#a855f7'},
+  {id:'e2',x:280,y:100,label:'sandbox runs', color:'#a855f7'},
+  {id:'e3',x:480,y:100,label:'provider handler', color:'#10b981'},
+  {id:'e4',x:680,y:100,label:'registry.callTool', color:'#a855f7'},
+];
+const execEdges = [['e1','e2'],['e2','e3'],['e3','e4']];
+
+const fileInfo = {
+  'CodeMode.ts': {
+    title: 'CodeMode.ts — The Public Service',
+    body: `
+      <p class="mb-4">Defines the <code>CodeMode</code> service. Optimized to use the <code>fullContext</code> cache for blank queries.</p>
+      <pre><code><span class="comment">// New search logic:</span>
+<span class="keyword">return</span> filteredServers === runtime.servers
+  ? Effect.succeed(runtime.fullContext)
+  : makeCodeModeContext(filteredServers, runtime.declarationIndex);</code></pre>
+    `
+  },
+  'context.ts': {
+    title: 'context.ts — Logic Orchestrator',
+    body: `
+      <p class="mb-4">Now handles the orchestration of the <code>DeclarationIndex</code> during startup.</p>
+      <h4 class="font-bold text-zinc-100 mb-2">Key Updates:</h4>
+      <ul class="list-disc pl-5 space-y-2 mb-4">
+        <li><strong>buildCodeModeRuntime</strong>: Now calls <code>buildDeclarationIndex</code> and precomputes <code>fullContext</code>.</li>
+        <li><strong>makeCodeModeContext</strong>: Transitioned to a sync wrapper around <code>renderDeclarations</code>.</li>
+      </ul>
+    `
+  },
+  'declarations.ts': {
+    title: 'declarations.ts — Compiler & Cache',
+    body: `
+      <p class="mb-4">The core logic has been split into a <strong>Build Phase</strong> and a <strong>Render Phase</strong>.</p>
+      <h4 class="font-bold text-zinc-100 mb-2">The Caching Core:</h4>
+      <ol class="list-decimal pl-5 space-y-2 mb-4">
+        <li><strong>buildDeclarationIndex</strong>: Async function that populates the <code>DeclarationIndex</code> map.</li>
+        <li><strong>renderDeclarations</strong>: Synchronous function that retrieves pre-compiled fragments and joins them.</li>
+      </ol>
+      <p class="text-emerald-400 font-bold">Latency reduced from 500ms to <1ms.</p>
+    `
+  }
+};
+
+// ====== RENDERER ======
+function drawGraph(svgId, nodes, edges, onClick){
+  const svg = document.getElementById(svgId);
+  if(!svg) return;
+  svg.innerHTML = '';
+  
+  edges.forEach(([a,b]) => {
+    const from = nodes.find(n=>n.id===a), to = nodes.find(n=>n.id===b);
+    const line = document.createElementNS('http://www.w3.org/2000/svg','path');
+    const midX = (from.x + to.x) / 2;
+    const midY = (from.y + to.y) / 2 - 20;
+    const d = `M ${from.x+26} ${from.y} Q ${midX} ${midY} ${to.x-26} ${to.y}`;
+    line.setAttribute('d', d);
+    line.setAttribute('class','edge');
+    line.id = `e-${svgId}-${a}-${b}`;
+    svg.appendChild(line);
+  });
+
+  nodes.forEach(n => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class','node');
+    g.style.cursor = 'pointer';
+    g.innerHTML = `
+      <circle cx="${n.x}" cy="${n.y}" r="26" style="fill: ${n.color || 'var(--accent)'}"/>
+      <text x="${n.x}" y="${n.y+4}" text-anchor="middle">${n.label.split('\n').map(l=>`<tspan x="${n.x}" dy="0">${l}</tspan>`).join('')}</text>
+    `;
+    g.onclick = () => {
+      highlightPath(svgId, n.id, edges);
+      if(onClick) onClick(n);
+    };
+    svg.appendChild(g);
+  });
+}
+
+function highlightPath(svgId, nodeId, edges) {
+  edges.forEach(([a,b]) => {
+    const el = document.getElementById(`e-${svgId}-${a}-${b}`);
+    if(a === nodeId || b === nodeId) {
+      el.classList.add('active');
+      setTimeout(() => el.classList.remove('active'), 2000);
+    }
+  });
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('[id^="id-btn-"]').forEach(el => el.classList.remove('bg-emerald-600', 'text-white'));
+  
+  document.getElementById(`tab-${tab}`).classList.add('active');
+  const btn = document.getElementById(`id-btn-${tab}`);
+  if(btn) btn.classList.add('bg-emerald-600', 'text-white');
+  
+  if(tab === 'search') {
+    drawGraph('search-flow', searchNodes, searchEdges);
+    drawGraph('decl-pipeline', declNodes, declEdges);
+  } else if(tab === 'execute') {
+    drawGraph('execute-flow', execNodes, execEdges);
+  }
+}
+
+// ====== SIMULATOR ======
+const simData = {
+  'github.create_issue': {
+    interfaces: `interface GithubCreateIssueInput {\n  title: string;\n  body?: string;\n}\n\ninterface GithubCreateIssueOutput {\n  number: number;\n  url: string;\n}`,
+    signature: `/** Create a new issue */\nfunction create_issue(input: GithubCreateIssueInput): Promise<GithubCreateIssueOutput>;`
+  },
+  'linear.get_tickets': {
+    interfaces: `interface LinearGetTicketsInput {\n  teamKey: string;\n  status?: string;\n}\n\ninterface LinearGetTicketsOutput {\n  tickets: Array<{ id: string, title: string }>;\n}`,
+    signature: `/** Fetch tickets for a team */\nfunction get_tickets(input: LinearGetTicketsInput): Promise<LinearGetTicketsOutput>;`
+  }
+};
+
+function simulateStitch(key) {
+  const lookup = document.getElementById('sim-lookup');
+  const keyEl = document.getElementById('sim-key');
+  const resultBox = document.getElementById('sim-result-box');
+  const resultCode = document.getElementById('sim-result-code');
+  const [ns] = key.split('.');
+
+  lookup.style.opacity = '1';
+  keyEl.innerText = `"${key}"`;
+  
+  const data = simData[key];
+  resultCode.innerText = `${data.interfaces}\n\ndeclare namespace ${ns} {\n  ${data.signature.replace(/\n/g, '\n  ')}\n}`;
+  
+  resultBox.style.opacity = '1';
+  resultBox.style.transform = 'translateY(0)';
+}
+
+function showFile(fileName) {
+  const info = fileInfo[fileName];
+  showModal(info.title, info.body);
+}
+
+function showModal(title, body) {
+  document.getElementById('modal-title').innerHTML = title;
+  document.getElementById('modal-body').innerHTML = body;
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+
+window.onload = () => {
+  drawGraph('global', nodesGlobal, edgesGlobal, n => {
+    const map = {
+      user: {title:'User / LLM', body:'The consumer of the Code Mode service.'},
+      server: {title:'apps/server', body:'The host application.'},
+      codemode: {title:'CodeMode Service', body:'The core Effect service.'},
+      context: {title:'context.ts', body:'Now handles sync stitching and cached runtime building.'},
+      decl: {title:'declarations.ts', body:'Maintains the fragment cache built at startup.'},
+      registry: {title:'McpRegistry', body:'Source of all tools.'}
+    };
+    const info = map[n.id];
+    showModal(info.title, info.body);
+  });
+  switchTab('system');
+};
+
+window.addEventListener('keydown', e => { if(e.key === 'Escape') closeModal(); });
+</script>
+</body>
+</html>

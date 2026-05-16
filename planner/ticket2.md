@@ -149,7 +149,7 @@ Implement `packages/code-mode`.
 
 Needed pieces:
 
-- `search({ code })` over safe registry metadata
+- `search({ query?: string })` over safe registry metadata and generated declarations
 - `execute({ code })` over provider namespaces backed by `McpRegistry.callTool(...)`
 - TypeScript declaration generation for discovered MCP tools
 - mapping from sanitized JS names back to original MCP names
