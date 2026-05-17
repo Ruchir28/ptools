@@ -161,7 +161,7 @@ function evaluateCode(
 
   if (typeof value !== "function") {
     throw markInvalidCode(
-      new Error("Executor code must evaluate to a function"),
+      new Error(formatFunctionExpressionError()),
     );
   }
 
@@ -189,6 +189,15 @@ function markInvalidCode(cause: unknown): Error {
   (error as Error & { code?: string }).code = "InvalidExecutorCode";
 
   return error;
+}
+
+function formatFunctionExpressionError(): string {
+  return [
+    "Executor code must evaluate to a function expression.",
+    "Use async () => { ... } or () => { ... }.",
+    "Do not send a script body, top-level return, top-level await, or a function declaration.",
+    "Example: async () => { const result = await exa.web_search_exa({ query: \"example\" }); return result; }",
+  ].join(" ");
 }
 
 function serializeUnknownError(cause: unknown): SerializedSandboxError {

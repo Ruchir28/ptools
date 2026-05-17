@@ -186,9 +186,12 @@ describe("LocalSandboxExecutor", () => {
 
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(InvalidExecutorCode);
-      expect(result.left.error.message).toBe(
-        "Executor code must evaluate to a function",
-      );
+      if (result.left._tag === "InvalidExecutorCode") {
+        expect(result.left.error.message).toContain(
+          "Executor code must evaluate to a function expression.",
+        );
+        expect(result.left.error.message).toContain("async () =>");
+      }
     }
   });
 
@@ -257,7 +260,9 @@ describe("LocalSandboxExecutor", () => {
 
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(ExecutorRuntimeError);
-      expect(result.left.error.message).toBe("uncaught");
+      if (result.left._tag === "ExecutorRuntimeError") {
+        expect(result.left.error.message).toBe("uncaught");
+      }
     }
   });
 
@@ -277,7 +282,9 @@ describe("LocalSandboxExecutor", () => {
 
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(ExecutorTimeoutError);
-      expect(result.left.timeoutMs).toBe(1_000);
+      if (result.left._tag === "ExecutorTimeoutError") {
+        expect(result.left.timeoutMs).toBe(1_000);
+      }
     }
   });
 });

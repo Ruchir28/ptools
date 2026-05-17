@@ -48,6 +48,9 @@ importers:
       effect:
         specifier: latest
         version: 3.21.2
+      zod:
+        specifier: latest
+        version: 4.4.3
 
   packages/code-mode:
     dependencies:

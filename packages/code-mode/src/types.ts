@@ -16,7 +16,19 @@ export interface CodeModeSearchRequest {
  */
 export interface CodeModeExecuteRequest {
   /**
-   * Async function expression or function expression evaluated by the executor.
+   * JavaScript function expression evaluated and called by the executor.
+   *
+   * Use an async arrow function for provider calls:
+   *
+   * ```ts
+   * async () => {
+   *   const result = await exa.web_search_exa({ query: "example" });
+   *   return result;
+   * }
+   * ```
+   *
+   * Do not send a script body, top-level await, top-level return, or a
+   * function declaration.
    */
   readonly code: string;
   /**
