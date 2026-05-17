@@ -9,6 +9,7 @@ import type {
   DiscoveredMcpTool,
   InvalidToolArguments,
   McpCallError,
+  McpRegistryDiagnostic,
   ToolNotFound,
 } from "@ptools/mcp-registry";
 import { McpRegistry } from "@ptools/mcp-registry";
@@ -99,6 +100,40 @@ describe("Code Mode context and search", () => {
     expect(toToolKeys(result)).toEqual(["fixture.echo"]);
     expect(result.declarations).toContain("function echo(");
     expect(result.declarations).not.toContain("function add(");
+  });
+
+  it("search carries registry diagnostics in structured context", async () => {
+    const diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [
+      {
+        code: "McpConnectionFailed",
+        severity: "error",
+        serverName: "missing",
+        message: "spawn failed",
+      },
+    ];
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        const context = yield* codeMode.search();
+        const directDiagnostics = yield* codeMode.diagnostics;
+
+        return { context, directDiagnostics };
+      }).pipe(
+        Effect.provide(
+          makeCodeModeLive().pipe(
+            Layer.provide(
+              Layer.merge(
+                makeRegistryLayer([fixtureEchoTool()], undefined, diagnostics),
+                makeExecutorLayer(),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(result.context.diagnostics).toEqual(diagnostics);
+    expect(result.directDiagnostics).toEqual(diagnostics);
   });
 
   it("filters by server names, tool names, titles, and descriptions", () => {
@@ -265,6 +300,35 @@ describe("TypeScript declaration generation", () => {
     expect(declarations).toContain(
       "function array_schema(input: unknown): Promise<FixtureArraySchemaOutput>;",
     );
+  });
+
+  it("uses unknown for tools whose output schema was marked invalid", async () => {
+    const declarations = await Effect.runPromise(
+      generateDeclarations(
+        groupDiscoveredMcpTools([
+          mcpTool({
+            originalToolName: "upload_design_md",
+            jsToolName: "upload_design_md",
+            inputSchema: {
+              type: "object",
+              properties: {},
+            },
+            outputSchema: {
+              type: "object",
+              properties: {
+                screen: { $ref: "#/$defs/ScreenInstance" },
+              },
+            },
+            outputSchemaInvalid: true,
+          }),
+        ]),
+      ),
+    );
+
+    expect(declarations).toContain(
+      "function upload_design_md(input: FixtureUploadDesignMdInput): Promise<unknown>;",
+    );
+    expect(declarations).not.toContain("interface FixtureUploadDesignMdOutput");
   });
 
   it("strips top-level export keywords from generated declarations", async () => {
@@ -439,9 +503,11 @@ const makeRegistryLayer = (
     unknown,
     ToolNotFound | InvalidToolArguments | McpCallError
   > = () => Effect.dieMessage("callTool not implemented"),
+  diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
 ) =>
   Layer.succeed(McpRegistry, {
     listTools: Effect.succeed(tools),
+    diagnostics: Effect.succeed(diagnostics),
     callTool,
   });
 
@@ -512,6 +578,7 @@ const mcpTool = (options: {
   readonly description?: string;
   readonly inputSchema?: unknown;
   readonly outputSchema?: unknown;
+  readonly outputSchemaInvalid?: true;
   readonly annotations?: unknown;
 }): DiscoveredMcpTool => ({
   serverName: options.serverName ?? "fixture",
@@ -532,6 +599,9 @@ const mcpTool = (options: {
   ...(options.outputSchema === undefined
     ? {}
     : { outputSchema: options.outputSchema }),
+  ...(options.outputSchemaInvalid === undefined
+    ? {}
+    : { outputSchemaInvalid: options.outputSchemaInvalid }),
   ...(options.annotations === undefined
     ? {}
     : { annotations: options.annotations }),

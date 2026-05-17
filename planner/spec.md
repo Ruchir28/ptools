@@ -9,7 +9,7 @@ search({ query?: string })
 execute({ code })
 ```
 
-Generated code should call provider-style APIs:
+Generated code calls provider-style APIs:
 
 ```ts
 async () => {
@@ -31,9 +31,10 @@ The system has five named parts. Avoid using the word "host" without qualifying 
 
 ```txt
 User harness / MCP client
-  -> Combined Code Mode MCP server
-  -> McpRegistry
-  -> LocalSandboxExecutor + shared Executor RPC host
+  -> Combined Code Mode MCP server (apps/server)
+  -> CodeMode (packages/code-mode)
+  -> McpRegistry (packages/mcp-registry)
+  -> LocalSandboxExecutor + shared Executor RPC host (packages/executor)
   -> sandbox process
   -> callback to Executor RPC host
   -> McpRegistry.callTool(...)
@@ -42,16 +43,16 @@ User harness / MCP client
 
 ### Code Mode Host
 
-The Code Mode host is the running service/process that exposes the combined MCP server. In local v1, this is the user's local Node process. In remote future, this can be a deployed service.
+The Code Mode host is the running service/process that exposes the combined MCP server. In local v1 this is the user's local Node process. In remote future, this can be a deployed service.
 
 Responsibilities:
 
-- load upstream MCP config
-- construct `McpRegistry`
-- construct the executor layer
-- expose combined MCP tools, initially `search` and `execute`
+- load upstream MCP config (`apps/server`)
+- construct `McpRegistry`, executor, and `CodeMode` Effect layers
+- expose combined MCP tools: `search` and `execute`
 - create provider handlers backed by `McpRegistry.callTool(...)`
 - keep MCP clients, credentials, policy, and env away from sandbox code
+- print startup diagnostics to `stderr` when upstreams fail
 
 ### MCP Registry
 
@@ -59,20 +60,32 @@ Responsibilities:
 
 Responsibilities:
 
-- connect configured upstream MCP servers
+- connect configured upstream MCP servers independently (degraded startup)
 - support stdio and Streamable HTTP transports
 - discover tools via `listTools`
 - preserve original MCP server/tool names
 - sanitize names into JavaScript identifiers for generated code
 - fail fast on name collisions and mapping invariants
+- record structured diagnostics for failed connections, discovery failures, and schema issues
+- start successfully even when all upstreams fail
 - dispatch generated-code calls back to original MCP `callTool`
 - close MCP clients through Effect scoped lifetimes
+
+**Schema enforcement policy:**
+
+- Invalid `inputSchema` is a hard failure for that upstream server: the server is excluded, and `InvalidInputSchema` + `McpDiscoveryFailed` diagnostics are recorded.
+- Invalid `outputSchema` is a warning: the tool remains exposed, `outputSchemaInvalid: true` is set on the discovered tool, Code Mode uses `Promise<unknown>` for generated declarations, and an `InvalidOutputSchema` diagnostic is recorded.
+- Name collisions are always hard failures; degraded startup cannot safely choose one JS name.
+
+**Tolerant AJV validator:**
+
+The official MCP SDK `Client` eagerly compiles every advertised `outputSchema` with AJV during `listTools()`. `TolerantOutputSchemaValidator` is injected at client construction time to prevent a broken optional schema from killing discovery. Good schemas still compile normally. Broken schemas fall through to a per-schema pass-through validator, and the post-discovery validation step records the diagnostic.
 
 ### Executor RPC Host
 
 The Executor RPC host is an internal callback server owned by the executor. It is not an MCP registry and does not know how to discover MCP tools.
 
-Current v1 shape:
+V1 shape:
 
 ```txt
 one Code Mode service instance
@@ -137,10 +150,19 @@ Current key API:
 ```ts
 makeMcpRegistryLive(upstreams)
 McpRegistry.listTools
+McpRegistry.diagnostics
 McpRegistry.callTool
 ```
 
-This package is covered by unit tests plus a real stdio MCP integration test.
+Key internals:
+
+- `connect.ts`: `connectConfiguredMcpClientsDegraded` — connects each upstream independently, collecting `McpConnectionFailed` diagnostics for failed ones
+- `discovery.ts`: `discoverAllToolsDegraded` — discovers tools per client independently, collecting `McpDiscoveryFailed` / `InvalidInputSchema` / `InvalidOutputSchema` diagnostics
+- `dispatch.ts`: `dispatchToolCall` — routes JS-facing calls back to original upstream MCP tool names
+- `names.ts`: `sanitizeJsIdentifier`, `buildNameMap`, `getMappedName` — name sanitization and collision detection
+- `schema.ts`: `TolerantOutputSchemaValidator`, `validateInputSchema`, `validateOutputSchema`
+
+Covered by unit tests and a real stdio MCP integration test.
 
 ### `packages/executor`
 
@@ -162,9 +184,8 @@ The local executor:
 - starts one shared localhost RPC host per scoped executor instance
 - starts one fresh Node sandbox process per execution
 - passes only code, globals, provider manifest, callback URL, and token to the sandbox
-- captures console logs
-- enforces timeout
-- cleans up process and active run entries
+- captures `console.log`, `console.warn`, `console.error`
+- enforces timeout and cleans up process and active run entries
 - uses Effect for lifecycle, request routing, provider dispatch, and typed errors
 - remains MCP-agnostic
 
@@ -183,27 +204,112 @@ Generated/sandboxed code stays plain JavaScript and does not know Effect.
 
 ### `packages/code-mode`
 
-Reserved for orchestration over registry metadata and executor providers.
+Implemented orchestration over registry metadata and executor providers.
 
-Responsibilities:
+Current key API:
 
-- implement `search` over safe tool metadata
-- implement `execute` by converting discovered MCP tools into provider namespaces
-- generate model-facing TypeScript declarations from discovered MCP tools
-- map sanitized JS names back to original MCP server/tool names
-- never expose raw MCP clients or secrets to the executor
+```ts
+makeCodeModeLive(options?)
+CodeMode.search(request?)
+CodeMode.execute(request)
+```
+
+Key internals:
+
+- `CodeMode.ts`: Effect service tag and `makeCodeModeLive` layer
+- `context.ts`: groups flat `DiscoveredMcpTool[]` into `CodeModeServerMetadata[]`, builds executor providers, builds the declaration index, caches `fullContext`
+- `declarations.ts`: `buildDeclarationIndex` (startup, async, Effect-based), `renderDeclarations` (synchronous render from cached fragments)
+- `types.ts`: all public metadata/request/result types
+
+Decisions:
+
+- At layer startup, Code Mode calls `McpRegistry.listTools` once and calls `McpRegistry.diagnostics` once. Both are cached for the layer lifetime.
+- `buildDeclarationIndex` compiles all JSON Schemas once at startup using `json-schema-to-typescript`. `renderDeclarations` is a pure render step that stitches cached fragments; it never re-compiles schemas.
+- Blank/missing `search` query returns a precomputed `fullContext` without any rendering work.
+- Non-blank `search` query filters metadata and renders declarations from cached fragments only for matching tools.
+- Registry diagnostics are carried into every `search()` response (both `structuredContent` and the formatted text response).
+- Tools with `outputSchemaInvalid: true` get `Promise<unknown>` in generated declarations; their `outputSchema` field is not compiled.
+- Provider handlers call `McpRegistry.callTool(...)` and unwrap `CallToolResult` before returning to sandbox code (see MCP Result Unwrapping below).
 
 ### `apps/server`
 
-Reserved for the combined MCP server entrypoint.
+Implemented combined MCP server entrypoint.
 
 Responsibilities:
 
-- load project config
-- construct Effect layers
-- create the combined MCP server
-- register `search` and `execute`
-- connect the combined server to stdio first
+- parse `--config <path>` or `PTOOLS_CONFIG` env var
+- load and validate `ptools.config.json` using `Effect.Schema`
+- resolve `envFrom` / `headersFromEnv` into literal env/headers before passing to `makeMcpRegistryLive`
+- construct Effect layers: `makeMcpRegistryLive`, `makeLocalSandboxExecutorLive`, `makeCodeModeLive`
+- register `search` and `execute` on an SDK `McpServer`
+- connect over stdio via `StdioServerTransport`
+- print startup diagnostics to `stderr` if any configured upstream failed
+- keep the scope alive until stdio/process shutdown
+- startup/config/layer failures write a safe message to `stderr` and exit non-zero
+- tool invocation errors return MCP results with `isError: true`
+
+## Server Config Shape
+
+```ts
+interface PtoolsConfig {
+  readonly mcpServers: Record<string, ServerMcpConfig>;
+  readonly executor?: {
+    readonly defaultTimeoutMs?: number;
+  };
+}
+
+type ServerMcpConfig =
+  | {
+      readonly transport: "stdio";
+      readonly command: string;
+      readonly args?: ReadonlyArray<string>;
+      readonly cwd?: string;
+      readonly env?: Record<string, string>;
+      readonly envFrom?: Record<string, string>;
+    }
+  | {
+      readonly transport: "http";
+      readonly url: string;
+      readonly headers?: Record<string, string>;
+      readonly headersFromEnv?: Record<string, string>;
+    };
+```
+
+Resolution rules:
+
+- `env` and `headers` are literal values passed directly to the registry.
+- `envFrom` maps target env key to source `process.env` key; missing refs fail startup.
+- `headersFromEnv` maps target header key to source `process.env` key; missing refs fail startup.
+- After resolution, only literal `env` / `headers` are passed to `makeMcpRegistryLive`. The registry types do not include `envFrom` / `headersFromEnv`.
+- The config key (e.g. `fixture`) becomes the user-facing provider namespace, regardless of the upstream MCP server's internal name.
+- Relative config paths resolve from `process.cwd()`.
+
+Example config:
+
+```jsonc
+{
+  "mcpServers": {
+    "github": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "envFrom": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "GITHUB_TOKEN"
+      }
+    },
+    "remoteDocs": {
+      "transport": "http",
+      "url": "https://example.com/mcp",
+      "headersFromEnv": {
+        "authorization": "REMOTE_DOCS_AUTH"
+      }
+    }
+  },
+  "executor": {
+    "defaultTimeoutMs": 30000
+  }
+}
+```
 
 ## Search And Execute Semantics
 
@@ -213,9 +319,28 @@ Responsibilities:
 
 It is how the model discovers the generated-code API surface before calling `execute`.
 
-Blank or missing `query` returns the full discovered API surface. A non-blank query returns matching servers/tools and TypeScript declarations regenerated from that filtered surface.
+- Blank or missing `query`: returns precomputed `fullContext` (zero rendering work).
+- Non-blank `query`: filters metadata by query tokens, stitches cached declaration fragments for matching tools only.
 
-Metadata should include server names, tool names, descriptions, input schemas, output schemas when available, and annotations.
+Query matching:
+
+- trim and split on whitespace
+- match case-insensitively against original and JS server/tool names, `title`, and `description`
+- include a tool if any token matches any field
+- preserve original discovery order
+- exclude servers where all tools were filtered out
+
+Response shape (`CodeModeContext`):
+
+```ts
+interface CodeModeContext {
+  readonly servers: ReadonlyArray<CodeModeServerMetadata>;
+  readonly declarations: string;
+  readonly diagnostics: ReadonlyArray<CodeModeDiagnostic>;
+}
+```
+
+`diagnostics` is always present; empty means every configured upstream loaded cleanly. The server also renders a human-readable `Diagnostics:` section in the text content response.
 
 `search` must not expose live MCP clients, provider handlers, credentials, or sandbox bindings.
 
@@ -229,9 +354,76 @@ Allowed provider call shape:
 <server>.<tool>(arguments)
 ```
 
-Code Mode builds those provider namespaces from `McpRegistry.listTools()`. Each provider function calls `McpRegistry.callTool(...)` with the original upstream MCP server/tool name.
+Code Mode builds provider namespaces from `McpRegistry.listTools()` once at layer startup. Each provider function calls `McpRegistry.callTool(...)` with the original upstream MCP names. Invalid server/tool names and broken name mappings fail loudly.
 
-Invalid server/tool names and broken name mappings should fail loudly.
+## MCP Result Unwrapping
+
+Provider handlers unwrap `CallToolResult` before returning to sandbox code. Unwrapping follows Cloudflare-style rules:
+
+| MCP result case | Runtime value returned to sandbox |
+| --- | --- |
+| `isError: true` | thrown `Error` with text content message |
+| `structuredContent` present | `structuredContent` object |
+| all `content` items are text | `JSON.parse` of joined text, or joined text string if parsing fails |
+| image/audio/resource/mixed content | raw `CallToolResult` (content preserved, not dropped) |
+| registry/protocol/dispatch failure | thrown provider error |
+
+The typed output promise from a declaration (e.g. `Promise<FixtureAddOutput>`) reflects the expected `structuredContent` shape when `outputSchema` is present and valid. Tools without a valid `outputSchema` use `Promise<unknown>`.
+
+## TypeScript Declaration Generation
+
+Generated declarations are model-facing guidance, not host-side type enforcement.
+
+Example output shape:
+
+```ts
+interface FixtureAddInput {
+  a: number;
+  b: number;
+}
+
+interface FixtureAddOutput {
+  sum: number;
+}
+
+declare namespace fixture {
+  /**
+   * Add two numbers
+   */
+  function add(input: FixtureAddInput): Promise<FixtureAddOutput>;
+}
+```
+
+Rules:
+
+- one `declare namespace <jsServerName>` per MCP server
+- one `function <jsToolName>(input: <InputType>): Promise<OutputType>` per tool
+- `title` / `description` rendered as JSDoc; original MCP name included in JSDoc when it differs from the JS name
+- `json-schema-to-typescript` compiles schemas; type names are `PascalCase(jsServerName) + PascalCase(jsToolName) + Input|Output`
+- absent, non-object, or failed input schema → `unknown` for input type (no input declaration emitted)
+- absent, non-object, failed, or `outputSchemaInvalid` output schema → `Promise<unknown>` (no output declaration emitted)
+- top-level `export` keywords stripped before embedding in `declarations`
+- duplicate generated type names fail fast at context construction
+
+Declaration compilation happens once at `makeCodeModeLive` startup via `buildDeclarationIndex`. `renderDeclarations` is a pure synchronous render from cached fragments and never re-invokes `json-schema-to-typescript`.
+
+## Registry Diagnostics
+
+Structured `McpRegistryDiagnostic` type:
+
+```ts
+type McpRegistryDiagnostic =
+  | { code: "McpConnectionFailed"; severity: "error"; serverName: string; message: string }
+  | { code: "McpDiscoveryFailed";  severity: "error"; serverName: string; message: string }
+  | { code: "InvalidInputSchema";  severity: "error"; serverName: string; toolName: string; message: string }
+  | { code: "InvalidOutputSchema"; severity: "warning"; serverName: string; toolName: string; message: string };
+```
+
+Diagnostics are surfaced in three places:
+
+1. `McpRegistry.diagnostics` — consumed by Code Mode at startup.
+2. `CodeModeContext.diagnostics` — included in every `search()` response (`structuredContent` and text).
+3. `stderr` — printed once after layer construction if any diagnostics exist.
 
 ## Local And Remote Deployment Model
 
@@ -246,7 +438,7 @@ stdio MCPs: spawned locally
 HTTP MCPs: connected by local host
 ```
 
-Local users should not configure a callback URL. The local executor starts its callback server internally on a random localhost port.
+Local users do not configure a callback URL. The local executor starts its callback server internally on a random localhost port.
 
 ### Remote Future
 
@@ -263,7 +455,7 @@ Remote sandbox support requires the sandbox to reach the Code Mode host's callba
 
 ### User-Local MCPs From Remote Host
 
-This is not v1. A remote Code Mode host cannot spawn or connect to stdio MCP processes on the user's laptop unless a local bridge/connector is running on that laptop.
+Not v1. A remote Code Mode host cannot spawn or connect to stdio MCP processes on the user's laptop unless a local bridge/connector is running on that laptop.
 
 Future bridge shape:
 
@@ -280,80 +472,165 @@ MCP names can contain characters that are not legal JavaScript identifiers. The 
 Examples:
 
 ```txt
-create-issue -> create_issue
-github.createIssue -> github_createIssue
-delete -> delete_
-3d-render -> _d_render
+create-issue         -> create_issue
+github.createIssue   -> github_createIssue
+delete               -> delete_
+3d-render            -> _d_render
 ```
 
-If two names sanitize to the same identifier, startup/discovery should fail. Do not silently rename or suffix critical API names.
+If two names sanitize to the same identifier, startup/discovery fails loudly. Do not silently rename or suffix critical API names. Name collisions are a hard failure even under degraded startup.
 
 ## Error And Type Policy
 
-External MCP boundaries should use `unknown` until runtime validation has occurred. This is intentional because MCP schemas are discovered at runtime.
+External MCP boundaries use `unknown` until runtime validation has occurred. This is intentional because MCP schemas are discovered at runtime.
 
 Use Effect tagged errors for host-side failures:
 
-- connection failures
-- discovery failures
-- name collisions
+- connection failures (`McpConnectionError`)
+- discovery failures (`McpDiscoveryError`)
+- name collisions (`NameCollisionError`)
 - missing mapped names
-- missing tools
-- invalid tool arguments
-- upstream MCP call failures
+- missing tools (`ToolNotFound`)
+- invalid tool arguments (`InvalidToolArguments`)
+- upstream MCP call failures (`McpCallError`)
+- Code Mode invariant failures (`CodeModeInvariantError`)
 - executor start/protocol/runtime/timeout failures
 
-Generated TypeScript declarations are for the model. They do not make upstream MCP data compile-time safe inside the host.
+Invalid input schemas and invalid output schemas produce `McpRegistryDiagnostic` entries, not thrown Effect errors, to support degraded startup.
+
+Generated TypeScript declarations are model guidance. They do not make upstream MCP data compile-time safe inside the host.
+
+Do not add quiet fallbacks for critical mapping failures. Prefer fail-fast behavior for schema, name mapping, and dispatch invariants.
 
 ## Testing
 
-Current verification commands:
+Verification commands:
 
 ```bash
 pnpm --filter @ptools/mcp-registry test
 pnpm --filter @ptools/executor test
+pnpm --filter @ptools/code-mode test
+pnpm --filter @ptools/server test
 pnpm test
 pnpm typecheck
 pnpm build
 ```
 
-Current registry test coverage:
+### `mcp-registry` test coverage
 
-- JS name sanitization
+Unit tests:
+
+- JS name sanitization rules
 - name collision failure
 - missing mapped-name failure
-- paginated tool discovery across clients
-- dispatch to original MCP tool names
+- paginated tool discovery across fake MCP clients
+- dispatch from JS-facing names to original MCP tool names
 - invalid argument rejection
-- real stdio MCP fixture server integration
+- `discoverAllToolsDegraded`: one upstream fails connection, another succeeds
+- `discoverAllToolsDegraded`: one upstream fails discovery, another succeeds
+- `discoverAllToolsDegraded`: all upstreams fail → empty tools, all diagnostics
+- `discoverAllToolsDegraded`: invalid `inputSchema` excludes server and records error diagnostics
+- `discoverAllToolsDegraded`: invalid `outputSchema` records warning, keeps tool with `outputSchemaInvalid: true`
 
-Current executor test coverage:
+Integration tests (real stdio MCP fixture):
 
-- async function execution with plain globals
+- registry connects, discovers, and dispatches to a real stdio server
+- degraded startup: fixture succeeds, unavailable server records `McpConnectionFailed`
+- all-fail: empty tools plus diagnostics
+- broken optional output schema: tool callable, `outputSchemaInvalid: true`, `InvalidOutputSchema` warning
+
+### `executor` test coverage
+
+- async function execution with serializable globals
 - console log capture
 - provider namespace functions
 - sequential executions through one scoped executor host
-- concurrent executions routed to correct run providers
+- concurrent executions routed to correct run/provider handlers
 - provider result and error propagation over HTTP RPC
 - invalid provider/global name failures
 - invalid code failure
+- uncaught sandbox error propagation
 - timeout cleanup
 - wrong token and unknown run rejection
 - completed run removal from active run map
 - scoped RPC host shutdown
 
-Next packages should follow the same pattern:
+### `code-mode` test coverage
 
-- unit tests for helpers and failure behavior
-- integration tests for the real host-mediated path
+Unit tests:
 
-## Near-Term Implementation Plan
+- `search()` returns full API surface
+- `search({ query })` filters servers, tools, and declarations
+- registry diagnostics carried through `search()` structured context
+- diagnostics section rendered in `search()` text response
+- declaration generation for object schemas (required and optional fields)
+- declaration generation for arrays, enums, consts, and primitives
+- output schema compilation to typed `Promise<OutputType>`
+- absent output schema falls back to `Promise<unknown>`
+- `outputSchemaInvalid: true` tools get `Promise<unknown>`, no output interface emitted
+- malformed schema falls back to `unknown` without breaking other tools
+- top-level `export` keyword stripping
+- duplicate generated type name fails fast
+- deterministic declaration ordering
+- provider construction dispatching to correct `jsServerName` / `jsToolName`
+- `structuredContent` unwrapping returns plain structured value
+- text-only content joining and JSON parse attempt
+- image/audio/resource or mixed content preserves raw `CallToolResult`
+- `isError: true` surfaces as thrown sandbox error
+- provider dispatch failures surface as thrown sandbox errors
+- filtered search does not re-compile schemas (compile count regression)
+- duplicate grouped provider/tool entries fail fast
 
-1. Keep `mcp-registry` stable unless Code Mode reveals an ergonomic issue.
-2. Keep `packages/executor` stable unless Code Mode reveals an ergonomic issue.
-3. Implement `packages/code-mode` search over registry metadata.
-4. Implement `packages/code-mode` execute with provider namespaces backed by `McpRegistry.callTool`.
-5. Implement `apps/server` as the stdio combined MCP server exposing `search` and `execute`.
+Integration tests (stdio MCP fixture):
+
+- `search()` includes `fixture.echo` and `fixture.add`
+- `search({ query: "echo" })` returns filtered surface only
+- `search.declarations` includes `declare namespace fixture`
+- `execute({ code })` calls `fixture.echo` and `fixture.add` end-to-end
+- returned value is the unwrapped structured result
+- console logs from generated code are preserved
+- provider errors can be caught inside generated code
+
+### `apps/server` test coverage
+
+Config tests:
+
+- valid stdio/HTTP config resolves to registry-compatible config
+- literal `env` / `headers` preserved
+- `envFrom` / `headersFromEnv` resolved from env map
+- missing env refs fail loudly
+- invalid config shape fails
+- `--config` and `PTOOLS_CONFIG` path resolution
+
+Server integration tests (full stack, real stdio):
+
+- public tools are only `search` and `execute`
+- `search()` returns healthy tools plus diagnostics for broken server
+- `search({ query })` returns filtered surface
+- `execute({ code })` dispatches through fixture MCP end-to-end
+- all-upstreams-fail config still starts; `search()` returns empty `servers` plus diagnostics
+- fixture with broken optional `outputSchema` is exposed and callable
+
+## Architecture Decisions Log
+
+Decisions made across tickets 1–6, recorded here to prevent drift:
+
+- **MCP-first**: ptools is a registry + dispatch layer, not a generic tool runner or fake-tool framework. Fake tools are test doubles only.
+- **Effect-TS for host code**: services, async orchestration, resource lifetimes, and typed errors all use Effect. Generated/sandbox code stays plain JS.
+- **Provider handlers are Effect-returning**: host capabilities wrap promise/value work with `Effect.promise` or `Effect.succeed`, not raw promises.
+- **Degraded startup**: each upstream is connected and discovered independently. Failures become diagnostics. The registry and server start even when all upstreams fail.
+- **Input schema is critical, output schema is optional**: invalid `inputSchema` excludes that server; invalid `outputSchema` warns and marks the tool, but the tool remains exposed.
+- **TolerantOutputSchemaValidator injection**: prevents the SDK from killing `listTools` on broken `outputSchema` while preserving normal AJV validation for good schemas.
+- **No blanket no-op validator**: tolerance is scoped to broken schemas only, not applied globally.
+- **Name collision = hard failure always**: even under degraded startup, name collisions cannot be safely resolved and always fail.
+- **Declaration caching at startup**: `buildDeclarationIndex` runs once when the Code Mode layer starts. `renderDeclarations` is a pure render step; `search` never re-compiles schemas.
+- **Precomputed full context**: blank/absent `search` query returns a startup-cached `fullContext`; no filtering or rendering occurs.
+- **Config key is the provider namespace**: the `mcpServers` config key determines the user-facing JS namespace (e.g. `fixture`), not the upstream server's internal self-reported name.
+- **`envFrom` / `headersFromEnv` are server-only**: secret resolution stays in `apps/server`. The `mcp-registry` types only accept resolved literal env/headers.
+- **Config validation uses `Effect.Schema`**: `apps/server` depends on `effect` for config parsing; `zod` is used only for MCP SDK tool schema registration.
+- **No per-server strict/permissive config option**: output schema tolerance is uniform across all upstreams.
+- **No automatic schema repair**: broken schemas are flagged and preserved as-is; ptools does not mutate upstream schema metadata.
+- **Diagnostics in three places**: `McpRegistry.diagnostics` (internal), `CodeModeContext.diagnostics` (model-facing), and `stderr` on startup (operator-facing).
 
 ## Non-Goals For V1
 
@@ -364,5 +641,10 @@ Next packages should follow the same pattern:
 - No remote executor implementation yet.
 - No user-local MCP bridge from a remote Code Mode host yet.
 - No generic fake-tool framework as the core abstraction.
+- No per-server strict/permissive schema validation config.
+- No automatic repair or mutation of upstream schema metadata.
+- No dynamic MCP config reload.
+- No public HTTP combined MCP server transport.
+- No remote auth/OAuth changes.
 
 Fake or in-memory tools are allowed only as test doubles. The product abstraction is MCP server composition.

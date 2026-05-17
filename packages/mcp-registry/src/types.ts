@@ -31,6 +31,7 @@ export interface DiscoveredMcpTool {
   readonly description?: string;
   readonly inputSchema: unknown;
   readonly outputSchema?: unknown;
+  readonly outputSchemaInvalid?: true;
   readonly annotations?: unknown;
 }
 
@@ -39,3 +40,31 @@ export interface CallToolRequest {
   readonly jsToolName: string;
   readonly arguments: unknown;
 }
+
+export type McpRegistryDiagnostic =
+  | {
+      readonly code: "McpConnectionFailed";
+      readonly severity: "error";
+      readonly serverName: string;
+      readonly message: string;
+    }
+  | {
+      readonly code: "McpDiscoveryFailed";
+      readonly severity: "error";
+      readonly serverName: string;
+      readonly message: string;
+    }
+  | {
+      readonly code: "InvalidInputSchema";
+      readonly severity: "error";
+      readonly serverName: string;
+      readonly toolName: string;
+      readonly message: string;
+    }
+  | {
+      readonly code: "InvalidOutputSchema";
+      readonly severity: "warning";
+      readonly serverName: string;
+      readonly toolName: string;
+      readonly message: string;
+    };

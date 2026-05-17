@@ -5,11 +5,18 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Effect } from "effect";
 import { McpConnectionError, NameCollisionError } from "./errors.js";
 import { buildNameMap, getMappedName } from "./names.js";
+import { safeErrorMessage, TolerantOutputSchemaValidator } from "./schema.js";
 import type {
   ConnectedMcpClient,
+  McpRegistryDiagnostic,
   UpstreamMcpConfig,
   UpstreamMcpServers,
 } from "./types.js";
+
+export interface ConnectConfiguredMcpClientsResult {
+  readonly clients: ReadonlyArray<ConnectedMcpClient>;
+  readonly diagnostics: ReadonlyArray<McpRegistryDiagnostic>;
+}
 
 export const connectConfiguredMcpClients = (
   upstreams: UpstreamMcpServers,
@@ -38,6 +45,40 @@ export const connectConfiguredMcpClients = (
     return clients;
   });
 
+export const connectConfiguredMcpClientsDegraded = (
+  upstreams: UpstreamMcpServers,
+): Effect.Effect<ConnectConfiguredMcpClientsResult, NameCollisionError> =>
+  Effect.gen(function* () {
+    const entries = Object.entries(upstreams);
+    const serverNameMap = yield* buildNameMap(
+      entries.map(([serverName]) => serverName),
+      "mcp server names",
+    );
+    const clients: Array<ConnectedMcpClient> = [];
+    const diagnostics: Array<McpRegistryDiagnostic> = [];
+
+    for (const [serverName, config] of entries) {
+      const jsServerName = yield* getMappedName(
+        serverNameMap,
+        serverName,
+        "mcp server names",
+      );
+      const result = yield* connectMcpClient(
+        serverName,
+        jsServerName,
+        config,
+      ).pipe(Effect.either);
+
+      if (result._tag === "Left") {
+        diagnostics.push(toConnectionDiagnostic(result.left));
+      } else {
+        clients.push(result.right);
+      }
+    }
+
+    return { clients, diagnostics };
+  });
+
 const connectMcpClient = (
   serverName: string,
   jsServerName: string,
@@ -45,10 +86,15 @@ const connectMcpClient = (
 ): Effect.Effect<ConnectedMcpClient, McpConnectionError> =>
   Effect.tryPromise({
     try: async () => {
-      const client = new Client({
-        name: `ptools-${serverName}`,
-        version: "0.0.0",
-      });
+      const client = new Client(
+        {
+          name: `ptools-${serverName}`,
+          version: "0.0.0",
+        },
+        {
+          jsonSchemaValidator: new TolerantOutputSchemaValidator(),
+        },
+      );
 
       const transport =
         config.transport === "stdio"
@@ -65,6 +111,15 @@ const connectMcpClient = (
     },
     catch: (cause) => new McpConnectionError({ serverName, cause }),
   });
+
+const toConnectionDiagnostic = (
+  error: McpConnectionError,
+): McpRegistryDiagnostic => ({
+  code: "McpConnectionFailed",
+  severity: "error",
+  serverName: error.serverName,
+  message: safeErrorMessage(error.cause),
+});
 
 const createStdioTransport = (
   config: Extract<UpstreamMcpConfig, { readonly transport: "stdio" }>,

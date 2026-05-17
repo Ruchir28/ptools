@@ -3,7 +3,11 @@ import type {
   ExecutorProviderHandler,
   ExecutorProviders,
 } from "@ptools/executor";
-import type { CallToolRequest, DiscoveredMcpTool } from "@ptools/mcp-registry";
+import type {
+  CallToolRequest,
+  DiscoveredMcpTool,
+  McpRegistryDiagnostic,
+} from "@ptools/mcp-registry";
 import { Effect } from "effect";
 import {
   buildDeclarationIndex,
@@ -30,10 +34,12 @@ export interface CodeModeRuntime {
   readonly providers: ExecutorProviders;
   readonly declarationIndex: DeclarationIndex;
   readonly fullContext: CodeModeContext;
+  readonly diagnostics: ReadonlyArray<McpRegistryDiagnostic>;
 }
 
 export interface BuildCodeModeRuntimeOptions {
   readonly schemaCompiler?: SchemaCompiler;
+  readonly diagnostics?: ReadonlyArray<McpRegistryDiagnostic>;
 }
 
 /**
@@ -61,17 +67,23 @@ export const buildCodeModeRuntime = (
       },
       catch: normalizeInvariantError,
     });
+    const diagnostics = options.diagnostics ?? [];
     const declarationIndex = yield* buildDeclarationIndex(
       servers,
       options.schemaCompiler,
     );
-    const fullContext = yield* makeCodeModeContext(servers, declarationIndex);
+    const fullContext = yield* makeCodeModeContext(
+      servers,
+      declarationIndex,
+      diagnostics,
+    );
 
     return {
       servers,
       providers,
       declarationIndex,
       fullContext,
+      diagnostics,
     };
   });
 
@@ -85,11 +97,13 @@ export const buildCodeModeRuntime = (
 export const makeCodeModeContext = (
   servers: ReadonlyArray<CodeModeServerMetadata>,
   declarationIndex: DeclarationIndex,
+  diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
 ): Effect.Effect<CodeModeContext, CodeModeInvariantError> =>
   Effect.try({
     try: () => ({
       servers,
       declarations: renderDeclarations(servers, declarationIndex),
+      diagnostics,
     }),
     catch: normalizeInvariantError,
   });
@@ -253,6 +267,9 @@ const toCodeModeToolMetadata = (
   ...(tool.outputSchema === undefined
     ? {}
     : { outputSchema: tool.outputSchema }),
+  ...(tool.outputSchemaInvalid === undefined
+    ? {}
+    : { outputSchemaInvalid: tool.outputSchemaInvalid }),
   ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
 });
 

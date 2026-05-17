@@ -5,4 +5,5 @@ export * from "./errors.js";
 export * from "./McpRegistryLive.js";
 export * from "./names.js";
 export * from "./registry.js";
+export * from "./schema.js";
 export * from "./types.js";

@@ -260,7 +260,7 @@ const compileToolTypes = (
       schemaCompiler,
     );
     const output =
-      tool.outputSchema === undefined
+      tool.outputSchema === undefined || tool.outputSchemaInvalid === true
         ? { typeName: "unknown", declaration: undefined }
         : yield* compileSchemaType(
             tool.outputSchema,

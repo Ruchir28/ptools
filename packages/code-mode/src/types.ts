@@ -1,4 +1,5 @@
 import type { CapturedLog } from "@ptools/executor";
+import type { McpRegistryDiagnostic } from "@ptools/mcp-registry";
 
 /**
  * Request for discovering the currently available Code Mode API surface.
@@ -63,7 +64,14 @@ export interface CodeModeContext {
    * TypeScript declarations describing the sandbox-visible provider APIs.
    */
   readonly declarations: string;
+  /**
+   * Registry diagnostics collected while connecting and discovering upstream
+   * MCP servers. Empty means every configured upstream loaded cleanly.
+   */
+  readonly diagnostics: ReadonlyArray<CodeModeDiagnostic>;
 }
+
+export type CodeModeDiagnostic = McpRegistryDiagnostic;
 
 /**
  * One upstream MCP server represented as one sandbox provider namespace.
@@ -111,6 +119,11 @@ export interface CodeModeToolMetadata {
    * Optional MCP output schema describing structuredContent.
    */
   readonly outputSchema?: unknown;
+  /**
+   * Present when the upstream advertised an output schema that could not be
+   * compiled. The tool remains callable, but declarations use `unknown`.
+   */
+  readonly outputSchemaInvalid?: true;
   /**
    * Optional MCP tool annotations.
    */

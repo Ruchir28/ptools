@@ -14,6 +14,7 @@ const SearchInputSchema = {
 const SearchOutputSchema = {
   servers: z.array(z.unknown()),
   declarations: z.string(),
+  diagnostics: z.array(z.unknown()),
 };
 
 const EXECUTE_CODE_CONTRACT = [
@@ -82,6 +83,8 @@ const runMcpServer: Effect.Effect<void, never, CodeMode | Scope.Scope> = Effect.
       name: "ptools-code-mode",
       version: "0.0.0",
     });
+
+    yield* writeStartupDiagnostics(codeMode);
 
     registerCodeModeTools(server, codeMode);
 
@@ -189,7 +192,7 @@ const waitForProcessClose: Effect.Effect<void> = Effect.async<void>((resume) => 
 });
 
 const formatSearchText = (context: CodeModeContext): string =>
-  [
+  maybeAppendDiagnostics([
     "Execution contract:",
     EXECUTE_CODE_CONTRACT,
     "",
@@ -201,7 +204,39 @@ const formatSearchText = (context: CodeModeContext): string =>
     "",
     "Metadata:",
     JSON.stringify({ servers: context.servers }, null, 2),
-  ].join("\n");
+  ], context).join("\n");
+
+const writeStartupDiagnostics = (
+  codeMode: Context.Tag.Service<typeof CodeMode>,
+): Effect.Effect<void> =>
+  codeMode.diagnostics.pipe(
+    Effect.flatMap((diagnostics) =>
+      diagnostics.length === 0
+        ? Effect.void
+        : Effect.sync(() => {
+            process.stderr.write(
+              `[ptools] MCP registry diagnostics:\n${JSON.stringify(
+                diagnostics,
+                null,
+                2,
+              )}\n`,
+            );
+          }),
+    ),
+  );
+
+const maybeAppendDiagnostics = (
+  lines: ReadonlyArray<string>,
+  context: CodeModeContext,
+): ReadonlyArray<string> =>
+  context.diagnostics.length === 0
+    ? lines
+    : [
+        ...lines,
+        "",
+        "Diagnostics:",
+        JSON.stringify(context.diagnostics, null, 2),
+      ];
 
 const toToolError = (cause: unknown): {
   readonly isError: true;

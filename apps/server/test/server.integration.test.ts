@@ -12,6 +12,10 @@ const fixtureServerPath = join(
   repoRoot,
   "packages/mcp-registry/test/fixtures/stdio-mcp-server.ts",
 );
+const brokenOutputFixtureServerPath = join(
+  repoRoot,
+  "packages/mcp-registry/test/fixtures/broken-output-schema-mcp-server.ts",
+);
 
 describe("combined Code Mode MCP server", () => {
   let activeClient: Client | undefined;
@@ -67,6 +71,7 @@ describe("combined Code Mode MCP server", () => {
     expect(extractTextContent(fullSearch)).toContain(
       "code must be a JavaScript function expression",
     );
+    expect(extractTextContent(fullSearch)).not.toContain("Diagnostics:");
 
     const echoSearch = await client.callTool({
       name: "search",
@@ -102,6 +107,124 @@ describe("combined Code Mode MCP server", () => {
       logs: [],
     });
   }, 30_000);
+
+  it("starts with diagnostics when every upstream fails", async () => {
+    const configPath = await writeAllFailConfig();
+    const client = new Client({
+      name: "ptools-server-test-client",
+      version: "0.0.0",
+    });
+    activeClient = client;
+
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["--import", "tsx", serverMainPath, "--config", configPath],
+      cwd: repoRoot,
+      stderr: "pipe",
+    });
+
+    await client.connect(transport);
+
+    const tools = await client.listTools();
+
+    expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+      "execute",
+      "search",
+    ]);
+
+    const search = await client.callTool({
+      name: "search",
+      arguments: {},
+    });
+    const context = search.structuredContent as {
+      readonly declarations: string;
+      readonly servers: ReadonlyArray<unknown>;
+      readonly diagnostics: ReadonlyArray<{
+        readonly code: string;
+        readonly serverName: string;
+      }>;
+    };
+
+    expect(context.servers).toEqual([]);
+    expect(context.declarations).toBe("");
+    expect(context.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "McpConnectionFailed",
+        serverName: "unavailable",
+      }),
+    ]);
+    expect(extractTextContent(search)).toContain("Diagnostics:");
+  }, 30_000);
+
+  it("exposes and calls tools with broken optional output schemas", async () => {
+    const configPath = await writeBrokenOutputConfig();
+    const client = new Client({
+      name: "ptools-server-test-client",
+      version: "0.0.0",
+    });
+    activeClient = client;
+
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ["--import", "tsx", serverMainPath, "--config", configPath],
+      cwd: repoRoot,
+      stderr: "pipe",
+    });
+
+    await client.connect(transport);
+
+    const search = await client.callTool({
+      name: "search",
+      arguments: {},
+    });
+    const context = search.structuredContent as {
+      readonly declarations: string;
+      readonly servers: ReadonlyArray<{
+        readonly jsServerName: string;
+        readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
+      }>;
+      readonly diagnostics: ReadonlyArray<{
+        readonly code: string;
+        readonly serverName: string;
+        readonly toolName?: string;
+      }>;
+    };
+
+    expect(toToolKeys(context)).toEqual(["broken.upload_design_md"]);
+    expect(context.declarations).toContain(
+      "function upload_design_md(input: BrokenUploadDesignMdInput): Promise<unknown>;",
+    );
+    expect(context.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "InvalidOutputSchema",
+        serverName: "broken",
+        toolName: "upload_design_md",
+      }),
+    ]);
+
+    const execution = await client.callTool({
+      name: "execute",
+      arguments: {
+        code: `async () => {
+          return await broken.upload_design_md({ text: "hello" });
+        }`,
+      },
+    });
+    const result = execution.structuredContent as {
+      readonly value: unknown;
+      readonly logs: ReadonlyArray<unknown>;
+    };
+
+    expect(result).toEqual({
+      value: {
+        screen: {
+          id: "screen-1",
+          text: "hello",
+        },
+      },
+      logs: [],
+    });
+  }, 30_000);
 });
 
 const writeFixtureConfig = async (): Promise<string> => {
@@ -117,6 +240,53 @@ const writeFixtureConfig = async (): Promise<string> => {
             transport: "stdio",
             command: process.execPath,
             args: ["--import", "tsx", fixtureServerPath],
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  return configPath;
+};
+
+const writeAllFailConfig = async (): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "ptools-server-"));
+  const configPath = join(dir, "ptools.config.json");
+
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        mcpServers: {
+          unavailable: {
+            transport: "stdio",
+            command: "/path/that/does/not/exist",
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  return configPath;
+};
+
+const writeBrokenOutputConfig = async (): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), "ptools-server-"));
+  const configPath = join(dir, "ptools.config.json");
+
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        mcpServers: {
+          broken: {
+            transport: "stdio",
+            command: process.execPath,
+            args: ["--import", "tsx", brokenOutputFixtureServerPath],
           },
         },
       },

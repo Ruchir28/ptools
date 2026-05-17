@@ -73,4 +73,133 @@ describe("McpRegistry stdio integration", () => {
       }),
     );
   });
+
+  it("starts with healthy tools when another upstream fails to connect", async () => {
+    const fixturePath = fileURLToPath(
+      new URL("./fixtures/stdio-mcp-server.ts", import.meta.url),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const registry = yield* McpRegistry;
+        const tools = yield* registry.listTools;
+        const diagnostics = yield* registry.diagnostics;
+
+        return { tools, diagnostics };
+      }).pipe(
+        Effect.provide(
+          makeMcpRegistryLive({
+            fixture: {
+              transport: "stdio",
+              command: process.execPath,
+              args: ["--import", "tsx", fixturePath],
+            },
+            unavailable: {
+              transport: "stdio",
+              command: "/path/that/does/not/exist",
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(
+      result.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`),
+    ).toEqual(["fixture.echo", "fixture.add"]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "McpConnectionFailed",
+        severity: "error",
+        serverName: "unavailable",
+      }),
+    ]);
+  });
+
+  it("starts empty when every upstream fails", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const registry = yield* McpRegistry;
+        const tools = yield* registry.listTools;
+        const diagnostics = yield* registry.diagnostics;
+
+        return { tools, diagnostics };
+      }).pipe(
+        Effect.provide(
+          makeMcpRegistryLive({
+            unavailable: {
+              transport: "stdio",
+              command: "/path/that/does/not/exist",
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(result.tools).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "McpConnectionFailed",
+        severity: "error",
+        serverName: "unavailable",
+      }),
+    ]);
+  });
+
+  it("warns for a broken optional output schema while keeping the tool callable", async () => {
+    const fixturePath = fileURLToPath(
+      new URL("./fixtures/broken-output-schema-mcp-server.ts", import.meta.url),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const registry = yield* McpRegistry;
+        const tools = yield* registry.listTools;
+        const diagnostics = yield* registry.diagnostics;
+        const callResult = yield* registry.callTool({
+          jsServerName: "broken",
+          jsToolName: "upload_design_md",
+          arguments: { text: "hello" },
+        });
+
+        return { tools, diagnostics, callResult };
+      }).pipe(
+        Effect.provide(
+          makeMcpRegistryLive({
+            broken: {
+              transport: "stdio",
+              command: process.execPath,
+              args: ["--import", "tsx", fixturePath],
+            },
+          }),
+        ),
+      ),
+    );
+
+    expect(
+      result.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`),
+    ).toEqual(["broken.upload_design_md"]);
+    expect(result.tools[0]).toEqual(
+      expect.objectContaining({
+        outputSchemaInvalid: true,
+      }),
+    );
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "InvalidOutputSchema",
+        severity: "warning",
+        serverName: "broken",
+        toolName: "upload_design_md",
+      }),
+    ]);
+    expect(result.callResult).toEqual(
+      expect.objectContaining({
+        structuredContent: {
+          screen: {
+            id: "screen-1",
+            text: "hello",
+          },
+        },
+      }),
+    );
+  });
 });

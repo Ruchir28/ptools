@@ -10,6 +10,7 @@ import type { SchemaCompiler } from "./declarations.js";
 import { CodeModeExecuteError, type CodeModeError } from "./errors.js";
 import type {
   CodeModeContext,
+  CodeModeDiagnostic,
   CodeModeExecuteRequest,
   CodeModeRunResult,
   CodeModeSearchRequest,
@@ -29,6 +30,7 @@ export interface MakeCodeModeLiveOptions {
 export class CodeMode extends Context.Tag("@ptools/CodeMode")<
   CodeMode,
   {
+    readonly diagnostics: Effect.Effect<ReadonlyArray<CodeModeDiagnostic>>;
     readonly search: (
       request?: CodeModeSearchRequest,
     ) => Effect.Effect<CodeModeContext, CodeModeError>;
@@ -57,13 +59,16 @@ export const makeCodeModeLive = (
       const registry = yield* McpRegistry;
       const executor = yield* CodeExecutor;
       const tools = yield* registry.listTools;
+      const diagnostics = yield* registry.diagnostics;
       const runtime = yield* buildCodeModeRuntime(tools, registry, {
+        diagnostics,
         ...(options.schemaCompiler === undefined
           ? {}
           : { schemaCompiler: options.schemaCompiler }),
       });
 
       return {
+        diagnostics: Effect.succeed(runtime.diagnostics),
         search: (request?: CodeModeSearchRequest) => {
           const filteredServers = filterCodeModeServers(
             runtime.servers,
@@ -72,7 +77,11 @@ export const makeCodeModeLive = (
 
           return filteredServers === runtime.servers
             ? Effect.succeed(runtime.fullContext)
-            : makeCodeModeContext(filteredServers, runtime.declarationIndex);
+            : makeCodeModeContext(
+                filteredServers,
+                runtime.declarationIndex,
+                runtime.diagnostics,
+              );
         },
         execute: (request: CodeModeExecuteRequest) =>
           executor
