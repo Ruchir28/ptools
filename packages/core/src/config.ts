@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
-import type { UpstreamMcpServers } from "@ptools/mcp-registry";
 import { Data, Effect, ParseResult, Schema } from "effect";
 
 export class ServerConfigError extends Data.TaggedError(
@@ -74,11 +73,27 @@ export type ServerMcpConfig =
     };
 
 export interface ResolvedPtoolsConfig {
-  readonly mcpServers: UpstreamMcpServers;
+  readonly mcpServers: ResolvedMcpServers;
   readonly executor?: {
     readonly defaultTimeoutMs?: number;
   };
 }
+
+export type ResolvedMcpServers = Readonly<Record<string, ResolvedMcpConfig>>;
+
+export type ResolvedMcpConfig =
+  | {
+      readonly transport: "stdio";
+      readonly command: string;
+      readonly args?: ReadonlyArray<string>;
+      readonly env?: Record<string, string>;
+      readonly cwd?: string;
+    }
+  | {
+      readonly transport: "http";
+      readonly url: string;
+      readonly headers?: Record<string, string>;
+    };
 
 /**
  * Parses CLI/env config path inputs into an absolute config file path.
@@ -181,7 +196,7 @@ export const resolvePtoolsConfig = (
   env: NodeJS.ProcessEnv,
 ): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const mcpServers: Record<string, UpstreamMcpServers[string]> = {};
+    const mcpServers: Record<string, ResolvedMcpConfig> = {};
 
     for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
       mcpServers[serverName] =
@@ -210,7 +225,7 @@ const resolveStdioConfig = (
   serverName: string,
   config: Extract<ServerMcpConfig, { readonly transport: "stdio" }>,
   env: NodeJS.ProcessEnv,
-): Effect.Effect<UpstreamMcpServers[string], ServerConfigError> =>
+): Effect.Effect<ResolvedMcpConfig, ServerConfigError> =>
   Effect.gen(function* () {
     const resolvedEnv = yield* resolveEnvRecord(
       serverName,
@@ -233,7 +248,7 @@ const resolveHttpConfig = (
   serverName: string,
   config: Extract<ServerMcpConfig, { readonly transport: "http" }>,
   env: NodeJS.ProcessEnv,
-): Effect.Effect<UpstreamMcpServers[string], ServerConfigError> =>
+): Effect.Effect<ResolvedMcpConfig, ServerConfigError> =>
   Effect.gen(function* () {
     const headers = yield* resolveEnvRecord(
       serverName,

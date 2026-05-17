@@ -6,6 +6,7 @@
   "packageManager": "pnpm@11.1.1",
   "scripts": {
     "dev": "pnpm --filter @ptools/server dev",
+    "playground": "tsx apps/playground/src/playground.ts",
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty && pnpm --recursive --if-present typecheck",
     "test": "vitest run --exclude \"**/dist/**\""

@@ -5,6 +5,7 @@
     { "path": "./packages/mcp-registry" },
     { "path": "./packages/executor" },
     { "path": "./packages/code-mode" },
-    { "path": "./apps/server" }
+    { "path": "./apps/server" },
+    { "path": "./apps/playground" }
   ]
 }

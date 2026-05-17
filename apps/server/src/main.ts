@@ -1,11 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { makeCodeModeLive, CodeMode, type CodeModeContext } from "@ptools/code-mode";
+import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Context, Effect, Either, Layer, Scope } from "effect";
 import { z } from "zod";
-import { loadPtoolsConfig, resolveConfigPath } from "./config.js";
 
 const SearchInputSchema = {
   query: z.string().optional(),
