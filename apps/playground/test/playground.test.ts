@@ -42,7 +42,6 @@ describe("Code Mode playground", () => {
           const page = yield* fetchText(`${started.url}/`);
           const context = yield* fetchJson<{
             readonly context: {
-              readonly declarations: string;
               readonly servers: ReadonlyArray<{
                 readonly jsServerName: string;
                 readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
@@ -57,11 +56,20 @@ describe("Code Mode playground", () => {
           const filtered = yield* fetchJson<typeof context>(
             `${started.url}/api/context?query=echo`,
           );
-          const addDeclarations = yield* fetchJson<{
-            readonly declarations: string;
-          }>(
-            `${started.url}/api/tool-declarations?server=fixture&tool=add`,
-          );
+          const addSchema = yield* fetchJson<{
+            readonly tools: ReadonlyArray<{
+              readonly inputSchema: unknown;
+            }>;
+            readonly declarationsByServer: ReadonlyArray<{
+              readonly declaration: string;
+            }>;
+          }>(`${started.url}/api/tool-schema`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              tools: [{ jsServerName: "fixture", jsToolName: "add" }],
+            }),
+          });
           const execution = yield* fetchJson<{
             readonly value: unknown;
             readonly logs: ReadonlyArray<unknown>;
@@ -75,7 +83,7 @@ describe("Code Mode playground", () => {
             }),
           });
 
-          return { page, context, filtered, addDeclarations, execution };
+          return { page, context, filtered, addSchema, execution };
         }).pipe(Effect.provide(live)),
       ),
     );
@@ -90,15 +98,24 @@ describe("Code Mode playground", () => {
       "fixture.echo",
       "fixture.add",
     ]);
-    expect(result.context.context.declarations).toContain(
-      "declare namespace fixture",
+    expect(result.context.context).not.toHaveProperty("declarations");
+    expect(result.context.context.servers[0]?.tools[0]).not.toHaveProperty(
+      "inputSchema",
     );
     expect(toToolKeys(result.filtered.context)).toEqual(["fixture.echo"]);
-    expect(result.filtered.context.declarations).toContain("function echo");
-    expect(result.filtered.context.declarations).not.toContain("function add");
-    expect(result.addDeclarations.declarations).toContain("function add");
-    expect(result.addDeclarations.declarations).toContain("FixtureAddInput");
-    expect(result.addDeclarations.declarations).not.toContain("function echo");
+    expect(result.addSchema.tools[0]).not.toHaveProperty("declaration");
+    expect(result.addSchema.declarationsByServer[0]?.declaration).toContain(
+      "function add",
+    );
+    expect(result.addSchema.declarationsByServer[0]?.declaration).toContain(
+      "FixtureAddInput",
+    );
+    expect(result.addSchema.declarationsByServer[0]?.declaration).not.toContain(
+      "function echo",
+    );
+    expect(result.addSchema.tools[0]?.inputSchema).toEqual(
+      expect.objectContaining({ type: "object" }),
+    );
     expect(result.execution).toEqual({
       value: { sum: 5 },
       logs: [],

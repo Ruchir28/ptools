@@ -7,11 +7,7 @@ import type { AddressInfo } from "node:net";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  CodeMode,
-  generateDeclarations,
-  makeCodeModeLive,
-} from "@ptools/code-mode";
+import { CodeMode, makeCodeModeLive } from "@ptools/code-mode";
 import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
@@ -152,51 +148,20 @@ const handleRequest = (
       });
     }
 
-    if (request.method === "GET" && url.pathname === "/api/tool-declarations") {
-      const jsServerName = url.searchParams.get("server")?.trim();
-      const jsToolName = url.searchParams.get("tool")?.trim();
+    if (request.method === "POST" && url.pathname === "/api/tool-schema") {
+      const parsed = yield* readToolSchemaRequest(request).pipe(Effect.either);
 
-      if (
-        jsServerName === undefined ||
-        jsServerName.length === 0 ||
-        jsToolName === undefined ||
-        jsToolName.length === 0
-      ) {
-        return yield* sendJson(response, 400, {
-          error: "Tool declarations require server and tool query parameters.",
-        });
+      if (Either.isLeft(parsed)) {
+        return yield* sendJson(response, 400, toErrorBody(parsed.left));
       }
 
-      const context = yield* codeMode.search({}).pipe(Effect.either);
+      const result = yield* codeMode.toolSchema(parsed.right).pipe(Effect.either);
 
-      if (Either.isLeft(context)) {
-        return yield* sendJson(response, 500, toErrorBody(context.left));
+      if (Either.isLeft(result)) {
+        return yield* sendJson(response, 500, toErrorBody(result.left));
       }
 
-      const server = context.right.servers.find(
-        (candidate) => candidate.jsServerName === jsServerName,
-      );
-      const tool = server?.tools.find(
-        (candidate) => candidate.jsToolName === jsToolName,
-      );
-
-      if (server === undefined || tool === undefined) {
-        return yield* sendJson(response, 404, {
-          error: `Tool not found: ${jsServerName}.${jsToolName}`,
-        });
-      }
-
-      const declarations = yield* generateDeclarations([
-        { ...server, tools: [tool] },
-      ]).pipe(Effect.either);
-
-      if (Either.isLeft(declarations)) {
-        return yield* sendJson(response, 500, toErrorBody(declarations.left));
-      }
-
-      return yield* sendJson(response, 200, {
-        declarations: declarations.right,
-      });
+      return yield* sendJson(response, 200, result.right);
     }
 
     if (request.method === "POST" && url.pathname === "/api/execute") {
@@ -336,6 +301,69 @@ const readExecuteRequest = (
           ? { code: candidate.code }
           : { code: candidate.code, timeoutMs },
       );
+    }),
+  );
+
+const readToolSchemaRequest = (
+  request: IncomingMessage,
+): Effect.Effect<
+  {
+    readonly tools: ReadonlyArray<{
+      readonly jsServerName: string;
+      readonly jsToolName: string;
+    }>;
+  },
+  PlaygroundServerError
+> =>
+  readJson(request).pipe(
+    Effect.flatMap((body) => {
+      const candidate = body as {
+        readonly tools?: unknown;
+      };
+
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        !Array.isArray(candidate.tools)
+      ) {
+        return Effect.fail(
+          new PlaygroundServerError({
+            message: "Tool schema request requires a tools array.",
+          }),
+        );
+      }
+
+      const tools: Array<{
+        readonly jsServerName: string;
+        readonly jsToolName: string;
+      }> = [];
+
+      for (const tool of candidate.tools) {
+        if (
+          typeof tool !== "object" ||
+          tool === null ||
+          !("jsServerName" in tool) ||
+          typeof tool.jsServerName !== "string" ||
+          tool.jsServerName.trim().length === 0 ||
+          !("jsToolName" in tool) ||
+          typeof tool.jsToolName !== "string" ||
+          tool.jsToolName.trim().length === 0
+        ) {
+          return Effect.fail(
+            new PlaygroundServerError({
+              message:
+                "Each requested tool requires non-empty jsServerName and jsToolName strings.",
+            }),
+          );
+        }
+
+        tools.push({
+          jsServerName: tool.jsServerName.trim(),
+          jsToolName: tool.jsToolName.trim(),
+        });
+      }
+
+      return Effect.succeed({ tools });
     }),
   );
 

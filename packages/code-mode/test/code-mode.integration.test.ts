@@ -18,8 +18,11 @@ describe("CodeMode stdio MCP integration", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        const fullContext = yield* codeMode.search();
+        const fullSearchResult = yield* codeMode.search();
         const echoContext = yield* codeMode.search({ query: "echo" });
+        const echoSchema = yield* codeMode.toolSchema({
+          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+        });
         const echoRun = yield* codeMode.execute({
           code: `async () => {
             console.log("calling echo");
@@ -52,8 +55,9 @@ describe("CodeMode stdio MCP integration", () => {
         );
 
         return {
-          fullContext,
+          fullSearchResult,
           echoContext,
+          echoSchema,
           echoRun,
           addRun,
           caughtProviderError,
@@ -62,12 +66,14 @@ describe("CodeMode stdio MCP integration", () => {
       }).pipe(Effect.provide(makeIntegrationLive(fixturePath))),
     );
 
-    expect(toToolKeys(result.fullContext)).toEqual([
+    expect(toToolKeys(result.fullSearchResult)).toEqual([
       "fixture.echo",
       "fixture.add",
     ]);
     expect(toToolKeys(result.echoContext)).toEqual(["fixture.echo"]);
-    expect(result.fullContext.declarations).toContain(
+    expect(result.fullSearchResult).not.toHaveProperty("declarations");
+    expect(result.echoSchema.tools[0]).not.toHaveProperty("declaration");
+    expect(result.echoSchema.declarationsByServer[0]?.declaration).toContain(
       "declare namespace fixture",
     );
     expect(result.echoRun.value).toEqual({ text: "hello from code mode" });

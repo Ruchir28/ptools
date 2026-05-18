@@ -116,7 +116,36 @@ export const renderDeclarations = (
 };
 
 /**
+ * Renders requested tools from one server as a standalone declaration snippet.
+ *
+ * Unlike `renderDeclarations`, this keeps the referenced input/output type
+ * declarations inside the provider namespace so the selected-server snippet is
+ * self-contained while still avoiding duplicate same-name namespace blocks in
+ * batched schema responses.
+ */
+export const renderServerDeclaration = (
+  server: CodeModeServerMetadata,
+  tools: ReadonlyArray<CodeModeToolMetadata>,
+  declarationIndex: DeclarationIndex,
+): string => {
+  const blocks = tools.flatMap((tool) => {
+    const cached = getCachedToolDeclaration(server, tool, declarationIndex);
+
+    return [...cached.typeDeclarations, cached.functionSignature];
+  });
+  const body = blocks
+    .filter((block) => block.trim().length > 0)
+    .map(indentBlock)
+    .join("\n\n");
+
+  return `declare namespace ${server.jsServerName} {\n${body}\n}\n`;
+};
+
+/**
  * Generates TypeScript declarations for the model-facing sandbox API.
+ *
+ * @deprecated Prefer `buildDeclarationIndex` at startup and
+ * `renderDeclarations` / `renderServerDeclaration` from cached fragments.
  *
  * @param servers Grouped Code Mode server metadata.
  * @param schemaCompiler Async JSON Schema compiler. Defaults to
@@ -346,16 +375,17 @@ const formatNamespace = (
   signatures: ReadonlyArray<string>,
 ): string => {
   const body = signatures
-    .map((signature) =>
-      signature
-        .split("\n")
-        .map((line) => `  ${line}`)
-        .join("\n"),
-    )
+    .map(indentBlock)
     .join("\n\n");
 
   return `declare namespace ${jsServerName} {\n${body}\n}`;
 };
+
+const indentBlock = (block: string): string =>
+  block
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
 
 /**
  * Formats the TypeScript signature for one sandbox-visible tool function.

@@ -46,6 +46,7 @@ describe("combined Code Mode MCP server", () => {
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "execute",
+      "get_tool_schema",
       "search",
     ]);
 
@@ -53,35 +54,63 @@ describe("combined Code Mode MCP server", () => {
       name: "search",
       arguments: {},
     });
-    const fullContext = fullSearch.structuredContent as {
-      readonly declarations: string;
+    const fullSearchResult = fullSearch.structuredContent as {
       readonly servers: ReadonlyArray<{
         readonly jsServerName: string;
         readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
       }>;
     };
 
-    expect([...toToolKeys(fullContext)].sort()).toEqual([
+    expect([...toToolKeys(fullSearchResult)].sort()).toEqual([
       "fixture.add",
       "fixture.echo",
     ]);
-    expect(fullContext.declarations).toContain("namespace fixture");
-    expect(fullContext.declarations).toContain("function echo");
-    expect(fullContext.declarations).toContain("function add");
+    expect(fullSearchResult).not.toHaveProperty("declarations");
+    expect(fullSearchResult.servers[0]?.tools[0]).not.toHaveProperty(
+      "inputSchema",
+    );
     expect(extractTextContent(fullSearch)).toContain(
       "code must be a JavaScript function expression",
     );
+    expect(extractTextContent(fullSearch)).toContain("get_tool_schema");
     expect(extractTextContent(fullSearch)).not.toContain("Diagnostics:");
+
+    const schema = await client.callTool({
+      name: "get_tool_schema",
+      arguments: {
+        tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+      },
+    });
+    const schemaResult = schema.structuredContent as {
+      readonly tools: ReadonlyArray<{
+        readonly inputSchema: unknown;
+      }>;
+      readonly declarationsByServer: ReadonlyArray<{
+        readonly declaration: string;
+      }>;
+    };
+
+    expect(schemaResult.tools[0]).not.toHaveProperty("declaration");
+    expect(schemaResult.declarationsByServer[0]?.declaration).toContain(
+      "namespace fixture",
+    );
+    expect(schemaResult.declarationsByServer[0]?.declaration).toContain(
+      "function echo",
+    );
+    expect(schemaResult.declarationsByServer[0]?.declaration).not.toContain(
+      "function add",
+    );
+    expect(schemaResult.tools[0]?.inputSchema).toEqual(
+      expect.objectContaining({ type: "object" }),
+    );
 
     const echoSearch = await client.callTool({
       name: "search",
       arguments: { query: "echo" },
     });
-    const echoContext = echoSearch.structuredContent as typeof fullContext;
+    const echoContext = echoSearch.structuredContent as typeof fullSearchResult;
 
     expect(toToolKeys(echoContext)).toEqual(["fixture.echo"]);
-    expect(echoContext.declarations).toContain("function echo");
-    expect(echoContext.declarations).not.toContain("function add");
 
     const execution = await client.callTool({
       name: "execute",
@@ -129,6 +158,7 @@ describe("combined Code Mode MCP server", () => {
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
       "execute",
+      "get_tool_schema",
       "search",
     ]);
 
@@ -137,7 +167,6 @@ describe("combined Code Mode MCP server", () => {
       arguments: {},
     });
     const context = search.structuredContent as {
-      readonly declarations: string;
       readonly servers: ReadonlyArray<unknown>;
       readonly diagnostics: ReadonlyArray<{
         readonly code: string;
@@ -146,7 +175,6 @@ describe("combined Code Mode MCP server", () => {
     };
 
     expect(context.servers).toEqual([]);
-    expect(context.declarations).toBe("");
     expect(context.diagnostics).toEqual([
       expect.objectContaining({
         code: "McpConnectionFailed",
@@ -178,7 +206,6 @@ describe("combined Code Mode MCP server", () => {
       arguments: {},
     });
     const context = search.structuredContent as {
-      readonly declarations: string;
       readonly servers: ReadonlyArray<{
         readonly jsServerName: string;
         readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
@@ -191,9 +218,25 @@ describe("combined Code Mode MCP server", () => {
     };
 
     expect(toToolKeys(context)).toEqual(["broken.upload_design_md"]);
-    expect(context.declarations).toContain(
+    const schema = await client.callTool({
+      name: "get_tool_schema",
+      arguments: {
+        tools: [{ jsServerName: "broken", jsToolName: "upload_design_md" }],
+      },
+    });
+    const schemaResult = schema.structuredContent as {
+      readonly tools: ReadonlyArray<{
+        readonly outputSchemaInvalid?: true;
+      }>;
+      readonly declarationsByServer: ReadonlyArray<{
+        readonly declaration: string;
+      }>;
+    };
+
+    expect(schemaResult.declarationsByServer[0]?.declaration).toContain(
       "function upload_design_md(input: BrokenUploadDesignMdInput): Promise<unknown>;",
     );
+    expect(schemaResult.tools[0]?.outputSchemaInvalid).toBe(true);
     expect(context.diagnostics).toEqual([
       expect.objectContaining({
         code: "InvalidOutputSchema",

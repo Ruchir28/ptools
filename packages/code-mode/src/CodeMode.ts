@@ -4,16 +4,19 @@ import { Context, Effect, Layer } from "effect";
 import {
   buildCodeModeRuntime,
   filterCodeModeServers,
-  makeCodeModeContext,
+  makeCodeModeSearchResult,
+  makeCodeModeToolSchemaResult,
 } from "./context.js";
 import type { SchemaCompiler } from "./declarations.js";
 import { CodeModeExecuteError, type CodeModeError } from "./errors.js";
 import type {
-  CodeModeContext,
   CodeModeDiagnostic,
   CodeModeExecuteRequest,
   CodeModeRunResult,
   CodeModeSearchRequest,
+  CodeModeSearchResult,
+  CodeModeToolSchemaRequest,
+  CodeModeToolSchemaResult,
 } from "./types.js";
 
 export interface MakeCodeModeLiveOptions {
@@ -23,9 +26,10 @@ export interface MakeCodeModeLiveOptions {
 /**
  * Host-side Code Mode service.
  *
- * `search` returns the MCP-backed API surface and generated TypeScript
- * declarations. `execute` runs generated JavaScript through the configured
- * executor with provider functions backed by the MCP registry.
+ * `search` returns schema-free MCP-backed API summaries. `toolSchema` returns
+ * full schema/declaration details for selected tools. `execute` runs generated
+ * JavaScript through the configured executor with provider functions backed by
+ * the MCP registry.
  */
 export class CodeMode extends Context.Tag("@ptools/CodeMode")<
   CodeMode,
@@ -33,7 +37,10 @@ export class CodeMode extends Context.Tag("@ptools/CodeMode")<
     readonly diagnostics: Effect.Effect<ReadonlyArray<CodeModeDiagnostic>>;
     readonly search: (
       request?: CodeModeSearchRequest,
-    ) => Effect.Effect<CodeModeContext, CodeModeError>;
+    ) => Effect.Effect<CodeModeSearchResult, CodeModeError>;
+    readonly toolSchema: (
+      request: CodeModeToolSchemaRequest,
+    ) => Effect.Effect<CodeModeToolSchemaResult, CodeModeError>;
     readonly execute: (
       request: CodeModeExecuteRequest,
     ) => Effect.Effect<CodeModeRunResult, CodeModeError>;
@@ -76,13 +83,18 @@ export const makeCodeModeLive = (
           );
 
           return filteredServers === runtime.servers
-            ? Effect.succeed(runtime.fullContext)
-            : makeCodeModeContext(
-                filteredServers,
-                runtime.declarationIndex,
-                runtime.diagnostics,
+            ? Effect.succeed(runtime.fullSearchResult)
+            : Effect.succeed(
+                makeCodeModeSearchResult(filteredServers, runtime.diagnostics),
               );
         },
+        toolSchema: (request: CodeModeToolSchemaRequest) =>
+          makeCodeModeToolSchemaResult(
+            runtime.servers,
+            runtime.declarationIndex,
+            request,
+            runtime.diagnostics,
+          ),
         execute: (request: CodeModeExecuteRequest) =>
           executor
             .execute({

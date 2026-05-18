@@ -6,6 +6,7 @@
 
 ```txt
 search({ query?: string })
+get_tool_schema({ tools: [{ jsServerName, jsToolName }] })
 execute({ code })
 ```
 
@@ -49,7 +50,7 @@ Responsibilities:
 
 - load upstream MCP config (`apps/server`)
 - construct `McpRegistry`, executor, and `CodeMode` Effect layers
-- expose combined MCP tools: `search` and `execute`
+- expose combined MCP tools: `search`, `get_tool_schema`, and `execute`
 - create provider handlers backed by `McpRegistry.callTool(...)`
 - keep MCP clients, credentials, policy, and env away from sandbox code
 - print startup diagnostics to `stderr` when upstreams fail
@@ -211,23 +212,26 @@ Current key API:
 ```ts
 makeCodeModeLive(options?)
 CodeMode.search(request?)
+CodeMode.toolSchema(request)
 CodeMode.execute(request)
 ```
 
 Key internals:
 
 - `CodeMode.ts`: Effect service tag and `makeCodeModeLive` layer
-- `context.ts`: groups flat `DiscoveredMcpTool[]` into `CodeModeServerMetadata[]`, builds executor providers, builds the declaration index, caches `fullContext`
-- `declarations.ts`: `buildDeclarationIndex` (startup, async, Effect-based), `renderDeclarations` (synchronous render from cached fragments)
+- `context.ts`: groups flat `DiscoveredMcpTool[]` into `CodeModeServerMetadata[]`, builds executor providers, builds the declaration index, caches schema-free `fullSearchResult`
+- `declarations.ts`: `buildDeclarationIndex` (startup, async, Effect-based), `renderDeclarations` (synchronous render from cached fragments), `renderServerDeclaration` (self-contained requested-server snippet)
 - `types.ts`: all public metadata/request/result types
 
 Decisions:
 
 - At layer startup, Code Mode calls `McpRegistry.listTools` once and calls `McpRegistry.diagnostics` once. Both are cached for the layer lifetime.
 - `buildDeclarationIndex` compiles all JSON Schemas once at startup using `json-schema-to-typescript`. `renderDeclarations` is a pure render step that stitches cached fragments; it never re-compiles schemas.
-- Blank/missing `search` query returns a precomputed `fullContext` without any rendering work.
-- Non-blank `search` query filters metadata and renders declarations from cached fragments only for matching tools.
+- Blank/missing `search` query returns a precomputed schema-free `fullSearchResult`.
+- Non-blank `search` query filters metadata only; it does not render declarations or include raw schemas.
+- `toolSchema` does all-or-nothing exact lookup for one or more `{ jsServerName, jsToolName }` pairs and returns raw schemas per requested tool plus self-contained declarations grouped by requested server from cached fragments.
 - Registry diagnostics are carried into every `search()` response (both `structuredContent` and the formatted text response).
+- Registry diagnostics are also carried into every `toolSchema()` response.
 - Tools with `outputSchemaInvalid: true` get `Promise<unknown>` in generated declarations; their `outputSchema` field is not compiled.
 - Provider handlers call `McpRegistry.callTool(...)` and unwrap `CallToolResult` before returning to sandbox code (see MCP Result Unwrapping below).
 
@@ -241,7 +245,7 @@ Responsibilities:
 - load and validate `ptools.config.json` using `Effect.Schema`
 - resolve `envFrom` / `headersFromEnv` into literal env/headers before passing to `makeMcpRegistryLive`
 - construct Effect layers: `makeMcpRegistryLive`, `makeLocalSandboxExecutorLive`, `makeCodeModeLive`
-- register `search` and `execute` on an SDK `McpServer`
+- register `search`, `get_tool_schema`, and `execute` on an SDK `McpServer`
 - connect over stdio via `StdioServerTransport`
 - print startup diagnostics to `stderr` if any configured upstream failed
 - keep the scope alive until stdio/process shutdown
@@ -311,16 +315,17 @@ Example config:
 }
 ```
 
-## Search And Execute Semantics
+## Search, Schema, And Execute Semantics
 
 ### `search`
 
 `search` is metadata-only. It accepts `{ query?: string }`, never generated code, and must not invoke the executor.
 
-It is how the model discovers the generated-code API surface before calling `execute`.
+It is how the model discovers the generated-code API surface before choosing which tool schemas to fetch.
 
-- Blank or missing `query`: returns precomputed `fullContext` (zero rendering work).
-- Non-blank `query`: filters metadata by query tokens, stitches cached declaration fragments for matching tools only.
+- Blank or missing `query`: returns precomputed schema-free `fullSearchResult`.
+- Non-blank `query`: filters metadata by query tokens.
+- It does not return `inputSchema`, `outputSchema`, or a declaration bundle.
 
 Query matching:
 
@@ -330,12 +335,11 @@ Query matching:
 - preserve original discovery order
 - exclude servers where all tools were filtered out
 
-Response shape (`CodeModeContext`):
+Response shape (`CodeModeSearchResult`):
 
 ```ts
-interface CodeModeContext {
-  readonly servers: ReadonlyArray<CodeModeServerMetadata>;
-  readonly declarations: string;
+interface CodeModeSearchResult {
+  readonly servers: ReadonlyArray<CodeModeServerSummary>;
   readonly diagnostics: ReadonlyArray<CodeModeDiagnostic>;
 }
 ```
@@ -343,6 +347,51 @@ interface CodeModeContext {
 `diagnostics` is always present; empty means every configured upstream loaded cleanly. The server also renders a human-readable `Diagnostics:` section in the text content response.
 
 `search` must not expose live MCP clients, provider handlers, credentials, or sandbox bindings.
+
+### `get_tool_schema`
+
+`get_tool_schema` fetches full schema and declaration details for selected tools. It accepts a batch because generated-code plans often use several tools together.
+
+Request shape:
+
+```ts
+interface GetToolSchemaRequest {
+  readonly tools: ReadonlyArray<{
+    readonly jsServerName: string;
+    readonly jsToolName: string;
+  }>;
+}
+```
+
+Lookup uses sanitized names from `search()`. It is all-or-nothing: if any requested server/tool pair is unknown, the entire request fails with a tool error. It does not rediscover upstream MCP tools.
+
+Response shape:
+
+```ts
+interface CodeModeToolSchemaResult {
+  readonly tools: ReadonlyArray<CodeModeToolSchema>;
+  readonly declarationsByServer: ReadonlyArray<CodeModeServerDeclaration>;
+  readonly diagnostics: ReadonlyArray<CodeModeDiagnostic>;
+}
+
+interface CodeModeToolSchema {
+  readonly serverName: string;
+  readonly jsServerName: string;
+  readonly originalToolName: string;
+  readonly jsToolName: string;
+  readonly inputSchema: unknown;
+  readonly outputSchema?: unknown;
+  readonly outputSchemaInvalid?: true;
+}
+
+interface CodeModeServerDeclaration {
+  readonly serverName: string;
+  readonly jsServerName: string;
+  readonly declaration: string;
+}
+```
+
+Raw schemas stay attached per requested tool in `tools[]`. TypeScript declarations are grouped in `declarationsByServer[]`, with one standalone namespace-wrapped snippet per requested server. Each declaration bundle includes referenced input/output types inside the real provider namespace and only includes tools requested in this `get_tool_schema` call.
 
 ### `execute`
 
@@ -407,6 +456,8 @@ Rules:
 
 Declaration compilation happens once at `makeCodeModeLive` startup via `buildDeclarationIndex`. `renderDeclarations` is a pure synchronous render from cached fragments and never re-invokes `json-schema-to-typescript`.
 
+`renderServerDeclaration` uses the same cached fragments, but intentionally emits a different selected-server format: referenced input/output type declarations for only the requested tools are placed inside one `declare namespace <provider>` block with those tool function signatures.
+
 ## Registry Diagnostics
 
 Structured `McpRegistryDiagnostic` type:
@@ -422,8 +473,9 @@ type McpRegistryDiagnostic =
 Diagnostics are surfaced in three places:
 
 1. `McpRegistry.diagnostics` — consumed by Code Mode at startup.
-2. `CodeModeContext.diagnostics` — included in every `search()` response (`structuredContent` and text).
-3. `stderr` — printed once after layer construction if any diagnostics exist.
+2. `CodeModeSearchResult.diagnostics` — included in every `search()` response (`structuredContent` and text).
+3. `CodeModeToolSchemaResult.diagnostics` — included in every `toolSchema()` response.
+4. `stderr` — printed once after layer construction if any diagnostics exist.
 
 ## Local And Remote Deployment Model
 
@@ -559,8 +611,12 @@ Integration tests (real stdio MCP fixture):
 
 Unit tests:
 
-- `search()` returns full API surface
-- `search({ query })` filters servers, tools, and declarations
+- `search()` returns schema-free API summaries
+- `search({ query })` filters servers and tools
+- `toolSchema()` returns one and multiple selected tool schemas
+- `toolSchema()` declarations are self-contained namespace-wrapped snippets grouped by requested server
+- `toolSchema()` does not include unrequested tools from the same server declaration bundle
+- `toolSchema()` fails the whole batch when any requested server/tool is unknown
 - registry diagnostics carried through `search()` structured context
 - diagnostics section rendered in `search()` text response
 - declaration generation for object schemas (required and optional fields)
@@ -578,14 +634,14 @@ Unit tests:
 - image/audio/resource or mixed content preserves raw `CallToolResult`
 - `isError: true` surfaces as thrown sandbox error
 - provider dispatch failures surface as thrown sandbox errors
-- filtered search does not re-compile schemas (compile count regression)
+- selected schema lookup does not re-compile schemas (compile count regression)
 - duplicate grouped provider/tool entries fail fast
 
 Integration tests (stdio MCP fixture):
 
 - `search()` includes `fixture.echo` and `fixture.add`
 - `search({ query: "echo" })` returns filtered surface only
-- `search.declarations` includes `declare namespace fixture`
+- `toolSchema()` for `fixture.echo` includes `declare namespace fixture`
 - `execute({ code })` calls `fixture.echo` and `fixture.add` end-to-end
 - returned value is the unwrapped structured result
 - console logs from generated code are preserved
@@ -604,16 +660,17 @@ Config tests:
 
 Server integration tests (full stack, real stdio):
 
-- public tools are only `search` and `execute`
+- public tools are only `search`, `get_tool_schema`, and `execute`
 - `search()` returns healthy tools plus diagnostics for broken server
 - `search({ query })` returns filtered surface
+- `get_tool_schema` returns selected schema/declaration details
 - `execute({ code })` dispatches through fixture MCP end-to-end
 - all-upstreams-fail config still starts; `search()` returns empty `servers` plus diagnostics
 - fixture with broken optional `outputSchema` is exposed and callable
 
 ## Architecture Decisions Log
 
-Decisions made across tickets 1–6, recorded here to prevent drift:
+Decisions made across tickets 1–8, recorded here to prevent drift:
 
 - **MCP-first**: ptools is a registry + dispatch layer, not a generic tool runner or fake-tool framework. Fake tools are test doubles only.
 - **Effect-TS for host code**: services, async orchestration, resource lifetimes, and typed errors all use Effect. Generated/sandbox code stays plain JS.
@@ -623,14 +680,15 @@ Decisions made across tickets 1–6, recorded here to prevent drift:
 - **TolerantOutputSchemaValidator injection**: prevents the SDK from killing `listTools` on broken `outputSchema` while preserving normal AJV validation for good schemas.
 - **No blanket no-op validator**: tolerance is scoped to broken schemas only, not applied globally.
 - **Name collision = hard failure always**: even under degraded startup, name collisions cannot be safely resolved and always fail.
-- **Declaration caching at startup**: `buildDeclarationIndex` runs once when the Code Mode layer starts. `renderDeclarations` is a pure render step; `search` never re-compiles schemas.
-- **Precomputed full context**: blank/absent `search` query returns a startup-cached `fullContext`; no filtering or rendering occurs.
+- **Declaration caching at startup**: `buildDeclarationIndex` runs once when the Code Mode layer starts. Search and schema lookup never re-compile schemas.
+- **Two-stage discovery**: `search` returns schema-free summaries; `get_tool_schema` returns batched full schemas per selected tool and self-contained declarations grouped by requested server.
+- **Precomputed full search result**: blank/absent `search` query returns a startup-cached schema-free `fullSearchResult`; no filtering or rendering occurs.
 - **Config key is the provider namespace**: the `mcpServers` config key determines the user-facing JS namespace (e.g. `fixture`), not the upstream server's internal self-reported name.
 - **`envFrom` / `headersFromEnv` are server-only**: secret resolution stays in `apps/server`. The `mcp-registry` types only accept resolved literal env/headers.
 - **Config validation uses `Effect.Schema`**: `apps/server` depends on `effect` for config parsing; `zod` is used only for MCP SDK tool schema registration.
 - **No per-server strict/permissive config option**: output schema tolerance is uniform across all upstreams.
 - **No automatic schema repair**: broken schemas are flagged and preserved as-is; ptools does not mutate upstream schema metadata.
-- **Diagnostics in three places**: `McpRegistry.diagnostics` (internal), `CodeModeContext.diagnostics` (model-facing), and `stderr` on startup (operator-facing).
+- **Diagnostics in model-facing responses**: `McpRegistry.diagnostics` is included in `CodeModeSearchResult`, `CodeModeToolSchemaResult`, and startup `stderr` output.
 
 ## Non-Goals For V1
 

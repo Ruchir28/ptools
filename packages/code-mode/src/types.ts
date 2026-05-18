@@ -13,6 +13,19 @@ export interface CodeModeSearchRequest {
 }
 
 /**
+ * Request for fetching full schema/declaration details for selected tools.
+ */
+export interface CodeModeToolSchemaRequest {
+  /**
+   * Batched list of sanitized provider/tool names selected from `search()`.
+   */
+  readonly tools: ReadonlyArray<{
+    readonly jsServerName: string;
+    readonly jsToolName: string;
+  }>;
+}
+
+/**
  * Request for executing generated JavaScript against the provider API surface.
  */
 export interface CodeModeExecuteRequest {
@@ -55,15 +68,11 @@ export interface CodeModeRunResult {
 /**
  * Model-facing discovery payload returned by `search`.
  */
-export interface CodeModeContext {
+export interface CodeModeSearchResult {
   /**
-   * Grouped server/tool metadata for the matching API surface.
+   * Grouped server/tool summaries for the matching API surface.
    */
-  readonly servers: ReadonlyArray<CodeModeServerMetadata>;
-  /**
-   * TypeScript declarations describing the sandbox-visible provider APIs.
-   */
-  readonly declarations: string;
+  readonly servers: ReadonlyArray<CodeModeServerSummary>;
   /**
    * Registry diagnostics collected while connecting and discovering upstream
    * MCP servers. Empty means every configured upstream loaded cleanly.
@@ -72,6 +81,103 @@ export interface CodeModeContext {
 }
 
 export type CodeModeDiagnostic = McpRegistryDiagnostic;
+
+/**
+ * Full schema/declaration payload returned for selected tools.
+ */
+export interface CodeModeToolSchemaResult {
+  readonly tools: ReadonlyArray<CodeModeToolSchema>;
+  readonly declarationsByServer: ReadonlyArray<CodeModeServerDeclaration>;
+  readonly diagnostics: ReadonlyArray<CodeModeDiagnostic>;
+}
+
+/**
+ * TypeScript declaration bundle for requested tools under one provider
+ * namespace.
+ */
+export interface CodeModeServerDeclaration {
+  readonly serverName: string;
+  readonly jsServerName: string;
+  /**
+   * Self-contained TypeScript declaration snippet for only the requested tools
+   * from this server. It uses the real provider namespace exposed to generated
+   * code and includes referenced input/output types.
+   */
+  readonly declaration: string;
+}
+
+/**
+ * Full selected-tool schema data.
+ */
+export interface CodeModeToolSchema {
+  readonly serverName: string;
+  readonly jsServerName: string;
+  readonly originalToolName: string;
+  readonly jsToolName: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly inputSchema: unknown;
+  readonly outputSchema?: unknown;
+  readonly outputSchemaInvalid?: true;
+  readonly annotations?: unknown;
+}
+
+/**
+ * One upstream MCP server represented in model-facing search results.
+ */
+export interface CodeModeServerSummary {
+  /**
+   * Original MCP server name from user configuration.
+   */
+  readonly serverName: string;
+  /**
+   * Sanitized JavaScript namespace exposed to generated code.
+   */
+  readonly jsServerName: string;
+  /**
+   * Schema-free tool summaries available under this provider namespace.
+   */
+  readonly tools: ReadonlyArray<CodeModeToolSummary>;
+}
+
+/**
+ * Schema-free summary for one upstream MCP tool.
+ */
+export interface CodeModeToolSummary {
+  /**
+   * Original upstream MCP tool name.
+   */
+  readonly originalToolName: string;
+  /**
+   * Sanitized JavaScript function name exposed to generated code.
+   */
+  readonly jsToolName: string;
+  /**
+   * Optional MCP tool title.
+   */
+  readonly title?: string;
+  /**
+   * Optional MCP tool description.
+   */
+  readonly description?: string;
+  /**
+   * Present when a full input schema is available via `get_tool_schema`.
+   */
+  readonly inputSchemaAvailable: true;
+  /**
+   * Present when a full output schema is available via `get_tool_schema`.
+   */
+  readonly outputSchemaAvailable?: true;
+  /**
+   * Present when the upstream advertised an output schema that could not be
+   * compiled. The tool remains callable, but declarations use `unknown`.
+   */
+  readonly outputSchemaInvalid?: true;
+  /**
+   * Optional MCP tool annotations.
+   */
+  readonly annotations?: unknown;
+}
 
 /**
  * One upstream MCP server represented as one sandbox provider namespace.

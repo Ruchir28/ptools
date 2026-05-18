@@ -1,6 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { makeCodeModeLive, CodeMode, type CodeModeContext } from "@ptools/code-mode";
+import {
+  makeCodeModeLive,
+  CodeMode,
+  type CodeModeSearchResult,
+  type CodeModeToolSchemaResult,
+} from "@ptools/code-mode";
 import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
@@ -13,7 +18,25 @@ const SearchInputSchema = {
 
 const SearchOutputSchema = {
   servers: z.array(z.unknown()),
-  declarations: z.string(),
+  diagnostics: z.array(z.unknown()),
+};
+
+const ToolSchemaInputSchema = {
+  tools: z
+    .array(
+      z.object({
+        jsServerName: z.string().trim().min(1),
+        jsToolName: z.string().trim().min(1),
+      }),
+    )
+    .describe(
+      "Selected tools from search() whose full JSON schemas and TypeScript declaration snippets are needed.",
+    ),
+};
+
+const ToolSchemaOutputSchema = {
+  tools: z.array(z.unknown()),
+  declarationsByServer: z.array(z.unknown()),
   diagnostics: z.array(z.unknown()),
 };
 
@@ -21,6 +44,7 @@ const EXECUTE_CODE_CONTRACT = [
   "code must be a JavaScript function expression that the executor can call.",
   "Use async arrow functions for provider calls: async () => { const r = await exa.web_search_exa({ query: \"...\" }); return r; }",
   "Do not send a script body, top-level await, top-level return, or a function declaration.",
+  "First use search to find candidate provider APIs, then get_tool_schema for tools you plan to call, then execute.",
   "Provider namespaces returned by search, such as exa, are injected as globals inside that function.",
 ].join(" ");
 
@@ -113,7 +137,7 @@ export const registerCodeModeTools = (
     {
       title: "Search Code Mode APIs",
       description:
-        "Discover available MCP-backed provider APIs and TypeScript declarations for generated code.",
+        "Discover schema-free MCP-backed provider API summaries. Use get_tool_schema for selected tools before execute.",
       inputSchema: SearchInputSchema,
       outputSchema: SearchOutputSchema,
     },
@@ -129,6 +153,36 @@ export const registerCodeModeTools = (
 
       return {
         content: [{ type: "text" as const, text: formatSearchText(result.right) }],
+        structuredContent: toStructuredContent(result.right),
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_tool_schema",
+    {
+      title: "Get Code Mode Tool Schemas",
+      description:
+        "Fetch full JSON schemas and self-contained TypeScript declarations for one or more tools selected from search. Fails the whole request if any requested tool is unknown.",
+      inputSchema: ToolSchemaInputSchema,
+      outputSchema: ToolSchemaOutputSchema,
+    },
+    async ({ tools }) => {
+      const result = await Effect.runPromise(
+        codeMode.toolSchema({ tools }).pipe(Effect.either),
+      );
+
+      if (Either.isLeft(result)) {
+        return toToolError(result.left);
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: formatToolSchemaText(result.right),
+          },
+        ],
         structuredContent: toStructuredContent(result.right),
       };
     },
@@ -191,20 +245,33 @@ const waitForProcessClose: Effect.Effect<void> = Effect.async<void>((resume) => 
   });
 });
 
-const formatSearchText = (context: CodeModeContext): string =>
+const formatSearchText = (context: CodeModeSearchResult): string =>
   maybeAppendDiagnostics([
+    "Discovery result:",
+    "These are schema-free API summaries. Call get_tool_schema with one or more { jsServerName, jsToolName } entries before writing execute.code.",
+    "",
     "Execution contract:",
     EXECUTE_CODE_CONTRACT,
     "",
     "Example execute.code:",
     EXECUTE_CODE_EXAMPLE,
     "",
-    "TypeScript declarations:",
-    context.declarations.trimEnd(),
-    "",
     "Metadata:",
     JSON.stringify({ servers: context.servers }, null, 2),
   ], context).join("\n");
+
+const formatToolSchemaText = (result: CodeModeToolSchemaResult): string =>
+  maybeAppendDiagnostics([
+    "Selected tool schemas and declarations:",
+    JSON.stringify(
+      {
+        tools: result.tools,
+        declarationsByServer: result.declarationsByServer,
+      },
+      null,
+      2,
+    ),
+  ], result).join("\n");
 
 const writeStartupDiagnostics = (
   codeMode: Context.Tag.Service<typeof CodeMode>,
@@ -227,7 +294,9 @@ const writeStartupDiagnostics = (
 
 const maybeAppendDiagnostics = (
   lines: ReadonlyArray<string>,
-  context: CodeModeContext,
+  context: {
+    readonly diagnostics: ReadonlyArray<unknown>;
+  },
 ): ReadonlyArray<string> =>
   context.diagnostics.length === 0
     ? lines

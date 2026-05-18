@@ -11,15 +11,20 @@ import type {
 import { Effect } from "effect";
 import {
   buildDeclarationIndex,
-  renderDeclarations,
+  renderServerDeclaration,
   type DeclarationIndex,
   type SchemaCompiler,
 } from "./declarations.js";
 import { CodeModeInvariantError } from "./errors.js";
 import type {
-  CodeModeContext,
+  CodeModeSearchResult,
   CodeModeServerMetadata,
+  CodeModeServerSummary,
+  CodeModeToolSchemaRequest,
+  CodeModeToolSchemaResult,
+  CodeModeToolSchema,
   CodeModeToolMetadata,
+  CodeModeToolSummary,
 } from "./types.js";
 import { unwrapMcpToolResult } from "./unwrap.js";
 
@@ -33,7 +38,7 @@ export interface CodeModeRuntime {
   readonly servers: ReadonlyArray<CodeModeServerMetadata>;
   readonly providers: ExecutorProviders;
   readonly declarationIndex: DeclarationIndex;
-  readonly fullContext: CodeModeContext;
+  readonly fullSearchResult: CodeModeSearchResult;
   readonly diagnostics: ReadonlyArray<McpRegistryDiagnostic>;
 }
 
@@ -72,39 +77,104 @@ export const buildCodeModeRuntime = (
       servers,
       options.schemaCompiler,
     );
-    const fullContext = yield* makeCodeModeContext(
-      servers,
-      declarationIndex,
-      diagnostics,
-    );
+    const fullSearchResult = makeCodeModeSearchResult(servers, diagnostics);
 
     return {
       servers,
       providers,
       declarationIndex,
-      fullContext,
+      fullSearchResult,
       diagnostics,
     };
   });
 
 /**
- * Builds a model-facing Code Mode context from cached declarations.
+ * Builds a schema-free model-facing Code Mode search result.
  *
  * @param servers Grouped server/tool metadata.
- * @param declarationIndex Startup-built declaration fragment cache.
- * @returns Metadata plus generated TypeScript declarations for that surface.
+ * @param diagnostics Registry diagnostics to carry alongside search results.
+ * @returns Metadata summaries without raw schemas or declaration bundles.
  */
-export const makeCodeModeContext = (
+export const makeCodeModeSearchResult = (
+  servers: ReadonlyArray<CodeModeServerMetadata>,
+  diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
+): CodeModeSearchResult => ({
+  servers: servers.map(toCodeModeServerSummary),
+  diagnostics,
+});
+
+/**
+ * Looks up full schema/declaration details for selected tools.
+ *
+ * The lookup is all-or-nothing: any unknown server/tool key fails the whole
+ * request instead of returning partial results.
+ */
+export const makeCodeModeToolSchemaResult = (
   servers: ReadonlyArray<CodeModeServerMetadata>,
   declarationIndex: DeclarationIndex,
+  request: CodeModeToolSchemaRequest,
   diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
-): Effect.Effect<CodeModeContext, CodeModeInvariantError> =>
+): Effect.Effect<CodeModeToolSchemaResult, CodeModeInvariantError> =>
   Effect.try({
-    try: () => ({
-      servers,
-      declarations: renderDeclarations(servers, declarationIndex),
-      diagnostics,
-    }),
+    try: () => {
+      const grouped = new Map<
+        string,
+        {
+          readonly server: CodeModeServerMetadata;
+          readonly tools: Array<CodeModeToolMetadata>;
+        }
+      >();
+      const tools: Array<CodeModeToolSchema> = request.tools.map((requested) => {
+        const resolved = resolveCodeModeTool(servers, requested);
+        const group = grouped.get(resolved.server.jsServerName);
+
+        if (group === undefined) {
+          grouped.set(resolved.server.jsServerName, {
+            server: resolved.server,
+            tools: [resolved.tool],
+          });
+        } else {
+          group.tools.push(resolved.tool);
+        }
+
+        return {
+          serverName: resolved.server.serverName,
+          jsServerName: resolved.server.jsServerName,
+          originalToolName: resolved.tool.originalToolName,
+          jsToolName: resolved.tool.jsToolName,
+          ...(resolved.tool.title === undefined
+            ? {}
+            : { title: resolved.tool.title }),
+          ...(resolved.tool.description === undefined
+            ? {}
+            : { description: resolved.tool.description }),
+          inputSchema: resolved.tool.inputSchema,
+          ...(resolved.tool.outputSchema === undefined
+            ? {}
+            : { outputSchema: resolved.tool.outputSchema }),
+          ...(resolved.tool.outputSchemaInvalid === undefined
+            ? {}
+            : { outputSchemaInvalid: resolved.tool.outputSchemaInvalid }),
+          ...(resolved.tool.annotations === undefined
+            ? {}
+            : { annotations: resolved.tool.annotations }),
+        };
+      });
+
+      return {
+        tools,
+        declarationsByServer: [...grouped.values()].map((group) => ({
+          serverName: group.server.serverName,
+          jsServerName: group.server.jsServerName,
+          declaration: renderServerDeclaration(
+            group.server,
+            group.tools,
+            declarationIndex,
+          ),
+        })),
+        diagnostics,
+      };
+    },
     catch: normalizeInvariantError,
   });
 
@@ -272,6 +342,64 @@ const toCodeModeToolMetadata = (
     : { outputSchemaInvalid: tool.outputSchemaInvalid }),
   ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
 });
+
+const toCodeModeServerSummary = (
+  server: CodeModeServerMetadata,
+): CodeModeServerSummary => ({
+  serverName: server.serverName,
+  jsServerName: server.jsServerName,
+  tools: server.tools.map(toCodeModeToolSummary),
+});
+
+const toCodeModeToolSummary = (
+  tool: CodeModeToolMetadata,
+): CodeModeToolSummary => ({
+  originalToolName: tool.originalToolName,
+  jsToolName: tool.jsToolName,
+  ...(tool.title === undefined ? {} : { title: tool.title }),
+  ...(tool.description === undefined ? {} : { description: tool.description }),
+  inputSchemaAvailable: true,
+  ...(tool.outputSchema === undefined || tool.outputSchemaInvalid === true
+    ? {}
+    : { outputSchemaAvailable: true }),
+  ...(tool.outputSchemaInvalid === undefined
+    ? {}
+    : { outputSchemaInvalid: tool.outputSchemaInvalid }),
+  ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
+});
+
+const resolveCodeModeTool = (
+  servers: ReadonlyArray<CodeModeServerMetadata>,
+  requested: {
+    readonly jsServerName: string;
+    readonly jsToolName: string;
+  },
+): {
+  readonly server: CodeModeServerMetadata;
+  readonly tool: CodeModeToolMetadata;
+} => {
+  const server = servers.find(
+    (candidate) => candidate.jsServerName === requested.jsServerName,
+  );
+
+  if (server === undefined) {
+    throw new CodeModeInvariantError({
+      message: `Unknown Code Mode server: ${requested.jsServerName}`,
+    });
+  }
+
+  const tool = server.tools.find(
+    (candidate) => candidate.jsToolName === requested.jsToolName,
+  );
+
+  if (tool === undefined) {
+    throw new CodeModeInvariantError({
+      message: `Unknown Code Mode tool: ${requested.jsServerName}.${requested.jsToolName}`,
+    });
+  }
+
+  return { server, tool };
+};
 
 /**
  * Checks whether a tool should be included for a tokenized search query.

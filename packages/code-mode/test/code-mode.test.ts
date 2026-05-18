@@ -26,7 +26,6 @@ import {
   type SchemaCompiler,
 } from "../src/declarations.js";
 import { CodeModeInvariantError } from "../src/errors.js";
-import type { CodeModeContext } from "../src/types.js";
 import { unwrapMcpToolResult } from "../src/unwrap.js";
 
 describe("Code Mode context and search", () => {
@@ -82,13 +81,12 @@ describe("Code Mode context and search", () => {
     );
 
     expect(toToolKeys(result)).toEqual(["fixture.add", "fixture.echo"]);
-    expect(result.declarations).toContain("declare namespace fixture");
-    expect(result.declarations).toContain(
-      "function add(input: FixtureAddInput): Promise<FixtureAddOutput>;",
-    );
+    expect(result.servers[0]?.tools[0]).not.toHaveProperty("inputSchema");
+    expect(result.servers[0]?.tools[0]).not.toHaveProperty("outputSchema");
+    expect(result).not.toHaveProperty("declarations");
   });
 
-  it("search filters metadata and declarations by query", async () => {
+  it("search filters schema-free metadata by query", async () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
@@ -98,8 +96,248 @@ describe("Code Mode context and search", () => {
     );
 
     expect(toToolKeys(result)).toEqual(["fixture.echo"]);
-    expect(result.declarations).toContain("function echo(");
-    expect(result.declarations).not.toContain("function add(");
+    expect(result.servers[0]?.tools[0]).toEqual(
+      expect.objectContaining({
+        jsToolName: "echo",
+        inputSchemaAvailable: true,
+        outputSchemaAvailable: true,
+      }),
+    );
+  });
+
+  it("search does not mark invalid output schemas as available", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.search();
+      }),
+      [
+        mcpTool({
+          originalToolName: "broken-output",
+          jsToolName: "broken_output",
+          outputSchema: {
+            type: "object",
+            properties: {
+              value: { $ref: "#/$defs/Missing" },
+            },
+          },
+          outputSchemaInvalid: true,
+        }),
+      ],
+    );
+
+    expect(result.servers[0]?.tools[0]).toEqual(
+      expect.objectContaining({
+        jsToolName: "broken_output",
+        outputSchemaInvalid: true,
+      }),
+    );
+    expect(result.servers[0]?.tools[0]).not.toHaveProperty(
+      "outputSchemaAvailable",
+    );
+  });
+
+  it("toolSchema returns full schemas per tool and merged declarations per requested server", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.toolSchema({
+          tools: [
+            { jsServerName: "fixture", jsToolName: "add" },
+            { jsServerName: "fixture", jsToolName: "echo" },
+          ],
+        });
+      }),
+      [fixtureAddTool(), fixtureEchoTool()],
+    );
+
+    expect(result.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`)).toEqual([
+      "fixture.add",
+      "fixture.echo",
+    ]);
+    expect(result.tools[0]?.inputSchema).toEqual(
+      expect.objectContaining({ type: "object" }),
+    );
+    expect(result.tools[0]?.outputSchema).toEqual(
+      expect.objectContaining({ type: "object" }),
+    );
+    expect(result.tools[0]).not.toHaveProperty("declaration");
+    expect(result.tools[1]).not.toHaveProperty("declaration");
+    expect(result.declarationsByServer).toHaveLength(1);
+    expect(result.declarationsByServer[0]).toEqual({
+      serverName: "fixture",
+      jsServerName: "fixture",
+      declaration: `declare namespace fixture {
+  interface FixtureAddInput {
+    a: number;
+    b?: number;
+    [k: string]: unknown;
+  }
+
+  interface FixtureAddOutput {
+    sum: number;
+    [k: string]: unknown;
+  }
+
+  /**
+   * Add
+   *
+   * Add two numbers
+   */
+  function add(input: FixtureAddInput): Promise<FixtureAddOutput>;
+
+  interface FixtureEchoInput {
+    text: string;
+    [k: string]: unknown;
+  }
+
+  interface FixtureEchoOutput {
+    text: string;
+    [k: string]: unknown;
+  }
+
+  /**
+   * Echo
+   *
+   * Echo text back to the caller
+   */
+  function echo(input: FixtureEchoInput): Promise<FixtureEchoOutput>;
+}
+`,
+    });
+  });
+
+  it("toolSchema returns one declaration bundle for each requested server", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.toolSchema({
+          tools: [
+            { jsServerName: "fixture", jsToolName: "add" },
+            { jsServerName: "fixture", jsToolName: "echo" },
+            { jsServerName: "slack", jsToolName: "send_message" },
+          ],
+        });
+      }),
+      [
+        fixtureAddTool(),
+        fixtureEchoTool(),
+        mcpTool({
+          serverName: "slack",
+          originalToolName: "send-message",
+          jsServerName: "slack",
+          jsToolName: "send_message",
+          title: "Send Message",
+          description: "Send a Slack message",
+          inputSchema: {
+            type: "object",
+            properties: {
+              channel: { type: "string" },
+              text: { type: "string" },
+            },
+            required: ["channel", "text"],
+          },
+          outputSchema: {
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+          },
+        }),
+      ],
+    );
+
+    expect(result.declarationsByServer.map((item) => item.jsServerName)).toEqual([
+      "fixture",
+      "slack",
+    ]);
+
+    expect(result.declarationsByServer[0]?.declaration).toBe(`declare namespace fixture {
+  interface FixtureAddInput {
+    a: number;
+    b?: number;
+    [k: string]: unknown;
+  }
+
+  interface FixtureAddOutput {
+    sum: number;
+    [k: string]: unknown;
+  }
+
+  /**
+   * Add
+   *
+   * Add two numbers
+   */
+  function add(input: FixtureAddInput): Promise<FixtureAddOutput>;
+
+  interface FixtureEchoInput {
+    text: string;
+    [k: string]: unknown;
+  }
+
+  interface FixtureEchoOutput {
+    text: string;
+    [k: string]: unknown;
+  }
+
+  /**
+   * Echo
+   *
+   * Echo text back to the caller
+   */
+  function echo(input: FixtureEchoInput): Promise<FixtureEchoOutput>;
+}
+`);
+    expect(result.declarationsByServer[1]?.declaration).toBe(`declare namespace slack {
+  interface SlackSendMessageInput {
+    channel: string;
+    text: string;
+    [k: string]: unknown;
+  }
+
+  interface SlackSendMessageOutput {
+    ok: boolean;
+    [k: string]: unknown;
+  }
+
+  /**
+   * Send Message
+   *
+   * Send a Slack message
+   *
+   * Original tool: send-message
+   */
+  function send_message(input: SlackSendMessageInput): Promise<SlackSendMessageOutput>;
+}
+`);
+  });
+
+  it("toolSchema fails the whole batch when any requested tool is unknown", async () => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        runWithCodeModeEffect(
+          Effect.gen(function* () {
+            const codeMode = yield* CodeMode;
+            return yield* codeMode.toolSchema({
+              tools: [
+                { jsServerName: "fixture", jsToolName: "add" },
+                { jsServerName: "fixture", jsToolName: "missing" },
+              ],
+            });
+          }),
+          [fixtureAddTool()],
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.left.message).toBe("Unknown Code Mode tool: fixture.missing");
+    }
   });
 
   it("search carries registry diagnostics in structured context", async () => {
@@ -163,8 +401,12 @@ describe("Code Mode context and search", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        const first = yield* codeMode.search({ query: "echo" });
-        const second = yield* codeMode.search({ query: "echo" });
+        const first = yield* codeMode.toolSchema({
+          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+        });
+        const second = yield* codeMode.toolSchema({
+          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+        });
 
         return { first, second };
       }).pipe(
@@ -187,9 +429,13 @@ describe("Code Mode context and search", () => {
       "FixtureEchoInput",
       "FixtureEchoOutput",
     ]);
-    expect(result.first.declarations).toBe(result.second.declarations);
-    expect(result.first.declarations).toContain("interface FixtureEchoInput");
-    expect(result.first.declarations).not.toContain(
+    expect(result.first.declarationsByServer[0]?.declaration).toBe(
+      result.second.declarationsByServer[0]?.declaration,
+    );
+    expect(result.first.declarationsByServer[0]?.declaration).toContain(
+      "interface FixtureEchoInput",
+    );
+    expect(result.first.declarationsByServer[0]?.declaration).not.toContain(
       "interface FixtureAddInput",
     );
   });
@@ -483,13 +729,17 @@ const runWithCodeMode = <A, E>(
   effect: Effect.Effect<A, E, CodeMode>,
   tools: ReadonlyArray<DiscoveredMcpTool>,
 ): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(
-      Effect.provide(
-        makeCodeModeLive().pipe(
-          Layer.provide(
-            Layer.merge(makeRegistryLayer(tools), makeExecutorLayer()),
-          ),
+  Effect.runPromise(runWithCodeModeEffect(effect, tools));
+
+const runWithCodeModeEffect = <A, E>(
+  effect: Effect.Effect<A, E, CodeMode>,
+  tools: ReadonlyArray<DiscoveredMcpTool>,
+) =>
+  effect.pipe(
+    Effect.provide(
+      makeCodeModeLive().pipe(
+        Layer.provide(
+          Layer.merge(makeRegistryLayer(tools), makeExecutorLayer()),
         ),
       ),
     ),
@@ -607,7 +857,14 @@ const mcpTool = (options: {
     : { annotations: options.annotations }),
 });
 
-const toToolKeys = (context: Pick<CodeModeContext, "servers">) =>
+const toToolKeys = (context: {
+  readonly servers: ReadonlyArray<{
+    readonly jsServerName: string;
+    readonly tools: ReadonlyArray<{
+      readonly jsToolName: string;
+    }>;
+  }>;
+}) =>
   context.servers.flatMap((server) =>
     server.tools.map((tool) => `${server.jsServerName}.${tool.jsToolName}`),
   );
