@@ -1,9 +1,14 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Effect, Either } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  loadPtoolsConfig,
   parsePtoolsConfigJson,
   resolveConfigPath,
   resolvePtoolsConfig,
+  ServerConfigError,
 } from "../src/config.js";
 
 describe("server config", () => {
@@ -11,7 +16,6 @@ describe("server config", () => {
     const config = await parseConfig({
       mcpServers: {
         fixture: {
-          transport: "stdio",
           command: "node",
           args: ["server.js"],
           cwd: "/tmp",
@@ -37,7 +41,6 @@ describe("server config", () => {
     const config = await parseConfig({
       mcpServers: {
         docs: {
-          transport: "http",
           url: "https://example.com/mcp",
         },
       },
@@ -59,14 +62,12 @@ describe("server config", () => {
     const config = await parseConfig({
       mcpServers: {
         local: {
-          transport: "stdio",
           command: "node",
           env: {
             LOG_LEVEL: "debug",
           },
         },
         remote: {
-          transport: "http",
           url: "https://example.com/mcp",
           headers: {
             "x-client": "ptools",
@@ -85,27 +86,22 @@ describe("server config", () => {
     });
   });
 
-  it("resolves envFrom and headersFromEnv", async () => {
+  it("resolves env placeholders in string fields", async () => {
     const config = await parseConfig({
       mcpServers: {
         local: {
-          transport: "stdio",
-          command: "node",
+          command: "${env:NODE_BIN}",
+          args: ["${env:SERVER_FILE}"],
           env: {
             LOG_LEVEL: "info",
-          },
-          envFrom: {
-            TOKEN: "SOURCE_TOKEN",
+            TOKEN: "${env:SOURCE_TOKEN}",
           },
         },
         remote: {
-          transport: "http",
-          url: "https://example.com/mcp",
+          url: "https://${env:REMOTE_HOST}/mcp",
           headers: {
             "x-client": "ptools",
-          },
-          headersFromEnv: {
-            authorization: "REMOTE_AUTH",
+            authorization: "Bearer ${env:REMOTE_AUTH}",
           },
         },
       },
@@ -116,8 +112,11 @@ describe("server config", () => {
 
     const resolved = await Effect.runPromise(
       resolvePtoolsConfig(config, {
+        NODE_BIN: "node",
+        SERVER_FILE: "server.js",
         SOURCE_TOKEN: "secret-token",
-        REMOTE_AUTH: "Bearer secret",
+        REMOTE_HOST: "example.com",
+        REMOTE_AUTH: "secret",
       }),
     );
 
@@ -126,6 +125,7 @@ describe("server config", () => {
         local: {
           transport: "stdio",
           command: "node",
+          args: ["server.js"],
           env: {
             LOG_LEVEL: "info",
             TOKEN: "secret-token",
@@ -146,14 +146,13 @@ describe("server config", () => {
     });
   });
 
-  it("fails when an env ref is missing", async () => {
+  it("fails when an env placeholder is missing", async () => {
     const config = await parseConfig({
       mcpServers: {
         local: {
-          transport: "stdio",
           command: "node",
-          envFrom: {
-            TOKEN: "MISSING_TOKEN",
+          env: {
+            TOKEN: "${env:MISSING_TOKEN}",
           },
         },
       },
@@ -167,7 +166,157 @@ describe("server config", () => {
 
     if (Either.isLeft(result)) {
       expect(result.left.message).toContain("MISSING_TOKEN");
+      expect(result.left).toBeInstanceOf(ServerConfigError);
     }
+  });
+
+  it("infers stdio and HTTP transport from command and url", async () => {
+    const config = await parseConfig({
+      mcpServers: {
+        local: { command: "node" },
+        remote: { url: "https://example.com/mcp" },
+      },
+    });
+
+    const resolved = await Effect.runPromise(resolvePtoolsConfig(config, {}));
+
+    expect(resolved.mcpServers.local).toMatchObject({ transport: "stdio" });
+    expect(resolved.mcpServers.remote).toMatchObject({ transport: "http" });
+  });
+
+  it("fails when both command and url are present", async () => {
+    const result = await Effect.runPromise(
+      parsePtoolsConfigJson(
+        JSON.stringify({
+          mcpServers: {
+            bad: {
+              command: "node",
+              url: "https://example.com/mcp",
+            },
+          },
+        }),
+      ).pipe(Effect.either),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left.message).toContain("not both");
+    }
+  });
+
+  it("fails when neither command nor url is present", async () => {
+    const result = await Effect.runPromise(
+      parsePtoolsConfigJson(
+        JSON.stringify({
+          mcpServers: {
+            bad: {
+              args: ["server.js"],
+            },
+          },
+        }),
+      ).pipe(Effect.either),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left.message).toContain("must provide command");
+    }
+  });
+
+  it("rejects transport and type fields clearly", async () => {
+    for (const field of ["transport", "type"]) {
+      const result = await Effect.runPromise(
+        parsePtoolsConfigJson(
+          JSON.stringify({
+            mcpServers: {
+              bad: {
+                [field]: "stdio",
+                command: "node",
+              },
+            },
+          }),
+        ).pipe(Effect.either),
+      );
+
+      expect(Either.isLeft(result), field).toBe(true);
+
+      if (Either.isLeft(result)) {
+        expect(result.left.message).toContain("use command");
+        expect(result.left.message).toContain("url");
+      }
+    }
+  });
+
+  it("rejects unsupported behavior-altering copied fields", async () => {
+    const result = await Effect.runPromise(
+      parsePtoolsConfigJson(
+        JSON.stringify({
+          mcpServers: {
+            bad: {
+              command: "node",
+              envFile: ".env",
+            },
+          },
+        }),
+      ).pipe(Effect.either),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left.message).toContain("envFile");
+      expect(result.left.message).toContain("not supported");
+    }
+  });
+
+  it("accepts neutral enabled and disabled fields", async () => {
+    const config = await parseConfig({
+      mcpServers: {
+        a: { command: "node", disabled: false },
+        b: { url: "https://example.com/mcp", enabled: true },
+      },
+    });
+
+    expect(Object.keys(config.mcpServers)).toEqual(["a", "b"]);
+  });
+
+  it("excludes disabled servers", async () => {
+    const config = await parseConfig({
+      mcpServers: {
+        enabled: { command: "node" },
+        disabled: { command: "node", disabled: true },
+        notEnabled: { url: "https://example.com/mcp", enabled: false },
+      },
+    });
+
+    const resolved = await Effect.runPromise(resolvePtoolsConfig(config, {}));
+
+    expect(Object.keys(resolved.mcpServers)).toEqual(["enabled"]);
+  });
+
+  it("resolves relative stdio cwd values from the config file directory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ptools-core-config-"));
+    const configPath = join(dir, "ptools.config.json");
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        mcpServers: {
+          fixture: {
+            command: "node",
+            cwd: "servers",
+          },
+        },
+      }),
+    );
+
+    const resolved = await Effect.runPromise(loadPtoolsConfig(configPath, {}));
+
+    expect(resolved.mcpServers.fixture).toMatchObject({
+      cwd: join(dir, "servers"),
+    });
   });
 
   it("fails invalid config shape", async () => {
@@ -176,8 +325,7 @@ describe("server config", () => {
         JSON.stringify({
           mcpServers: {
             bad: {
-              transport: "websocket",
-              url: "wss://example.com",
+              url: 42,
             },
           },
         }),
@@ -189,11 +337,15 @@ describe("server config", () => {
 
   it("resolves config path from argv or env", async () => {
     await expect(
-      Effect.runPromise(resolveConfigPath(["--config", "ptools.json"], {}, "/repo")),
+      Effect.runPromise(
+        resolveConfigPath(["--config", "ptools.json"], {}, "/repo"),
+      ),
     ).resolves.toBe("/repo/ptools.json");
 
     await expect(
-      Effect.runPromise(resolveConfigPath([], { PTOOLS_CONFIG: "/tmp/x.json" }, "/repo")),
+      Effect.runPromise(
+        resolveConfigPath([], { PTOOLS_CONFIG: "/tmp/x.json" }, "/repo"),
+      ),
     ).resolves.toBe("/tmp/x.json");
   });
 });

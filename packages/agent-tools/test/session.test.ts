@@ -1,3 +1,7 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CodeMode,
   type CodeModeDiagnostic,
@@ -5,9 +9,14 @@ import {
   type CodeModeSearchRequest,
   type CodeModeToolSchemaRequest,
 } from "@ptools/code-mode";
+import { ServerConfigError } from "@ptools/core";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
-import { makePtoolsSession } from "../src/session.js";
+import {
+  createPtoolsSessionFromConfigFile,
+  loadPtoolsSessionConfig,
+  makePtoolsSession,
+} from "../src/session.js";
 import type { CodeModeToolName } from "../src/types.js";
 
 describe("PtoolsSession", () => {
@@ -123,6 +132,306 @@ describe("PtoolsSession", () => {
   });
 });
 
+describe("config-file session loading", () => {
+  it("loads a valid config file into session options", async () => {
+    const configPath = await writeConfig("valid", {
+      mcpServers: {
+        fixture: {
+          command: "node",
+          args: ["server.js"],
+        },
+      },
+      executor: {
+        defaultTimeoutMs: 1234,
+      },
+    });
+
+    await expect(loadPtoolsSessionConfig(configPath)).resolves.toEqual({
+      mcpServers: {
+        fixture: {
+          transport: "stdio",
+          command: "node",
+          args: ["server.js"],
+        },
+      },
+      executor: {
+        defaultTimeoutMs: 1234,
+      },
+    });
+  });
+
+  it("defaults to ptools.config.json in the provided cwd", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-default-"));
+    const configPath = join(dir, "ptools.config.json");
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        mcpServers: {
+          fixture: {
+            command: "node",
+          },
+        },
+      }),
+    );
+
+    await expect(
+      loadPtoolsSessionConfig(undefined, { cwd: dir }),
+    ).resolves.toMatchObject({
+      mcpServers: {
+        fixture: {
+          transport: "stdio",
+          command: "node",
+        },
+      },
+    });
+  });
+
+  it("resolves explicit relative config paths from the provided cwd", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-relative-"));
+    const configPath = join(dir, "nested.config.json");
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        mcpServers: {
+          docs: {
+            url: "https://example.com/mcp",
+          },
+        },
+      }),
+    );
+
+    await expect(
+      loadPtoolsSessionConfig("nested.config.json", { cwd: dir }),
+    ).resolves.toMatchObject({
+      mcpServers: {
+        docs: {
+          transport: "http",
+          url: "https://example.com/mcp",
+        },
+      },
+    });
+  });
+
+  it("resolves stdio cwd values from the config file directory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-cwd-"));
+    const configPath = join(dir, "nested.config.json");
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        mcpServers: {
+          fixture: {
+            command: "node",
+            cwd: "fixtures",
+          },
+        },
+      }),
+    );
+
+    await expect(loadPtoolsSessionConfig(configPath)).resolves.toMatchObject({
+      mcpServers: {
+        fixture: {
+          cwd: join(dir, "fixtures"),
+        },
+      },
+    });
+  });
+
+  it("resolves env placeholders from the provided env map", async () => {
+    const configPath = await writeConfig("env", {
+      mcpServers: {
+        fixture: {
+          command: "${env:NODE_BIN}",
+          env: {
+            TOKEN: "${env:FIXTURE_TOKEN}",
+          },
+        },
+        remote: {
+          url: "https://example.com/mcp",
+          headers: {
+            authorization: "Bearer ${env:REMOTE_TOKEN}",
+          },
+        },
+      },
+    });
+
+    await expect(
+      loadPtoolsSessionConfig(configPath, {
+        env: {
+          NODE_BIN: "node",
+          FIXTURE_TOKEN: "secret",
+          REMOTE_TOKEN: "remote-secret",
+        },
+      }),
+    ).resolves.toMatchObject({
+      mcpServers: {
+        fixture: {
+          command: "node",
+          env: {
+            TOKEN: "secret",
+          },
+        },
+        remote: {
+          headers: {
+            authorization: "Bearer remote-secret",
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects missing env placeholders with ServerConfigError", async () => {
+    const configPath = await writeConfig("missing-env", {
+      mcpServers: {
+        fixture: {
+          command: "${env:MISSING_NODE_BIN}",
+        },
+      },
+    });
+
+    await expect(
+      loadPtoolsSessionConfig(configPath, { env: {} }),
+    ).rejects.toThrow(ServerConfigError);
+    await expect(
+      loadPtoolsSessionConfig(configPath, { env: {} }),
+    ).rejects.toThrow("MISSING_NODE_BIN");
+  });
+
+  it("rejects invalid JSON and invalid config shape clearly", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-invalid-"));
+    const invalidJsonPath = join(dir, "invalid-json.config.json");
+    const invalidShapePath = join(dir, "invalid-shape.config.json");
+
+    await writeFile(invalidJsonPath, "{");
+    await writeFile(
+      invalidShapePath,
+      JSON.stringify({
+        mcpServers: {
+          fixture: {
+            command: 42,
+          },
+        },
+      }),
+    );
+
+    await expect(loadPtoolsSessionConfig(invalidJsonPath)).rejects.toThrow(
+      "Invalid JSON",
+    );
+    await expect(loadPtoolsSessionConfig(invalidShapePath)).rejects.toThrow(
+      "command must be a string",
+    );
+  });
+
+  it("rejects ambiguous and old transport/type configs clearly", async () => {
+    const ambiguous = await writeConfig("ambiguous", {
+      mcpServers: {
+        fixture: {
+          command: "node",
+          url: "https://example.com/mcp",
+        },
+      },
+    });
+    const withTransport = await writeConfig("transport", {
+      mcpServers: {
+        fixture: {
+          transport: "stdio",
+          command: "node",
+        },
+      },
+    });
+    const withType = await writeConfig("type", {
+      mcpServers: {
+        fixture: {
+          type: "stdio",
+          command: "node",
+        },
+      },
+    });
+
+    await expect(loadPtoolsSessionConfig(ambiguous)).rejects.toThrow(
+      "not both",
+    );
+    await expect(loadPtoolsSessionConfig(withTransport)).rejects.toThrow(
+      "use command",
+    );
+    await expect(loadPtoolsSessionConfig(withType)).rejects.toThrow(
+      "use command",
+    );
+  });
+
+  it("excludes disabled servers", async () => {
+    const configPath = await writeConfig("disabled", {
+      mcpServers: {
+        fixture: {
+          command: "node",
+          disabled: false,
+        },
+        off: {
+          command: "node",
+          disabled: true,
+        },
+        alsoOff: {
+          url: "https://example.com/mcp",
+          enabled: false,
+        },
+      },
+    });
+
+    await expect(loadPtoolsSessionConfig(configPath)).resolves.toMatchObject({
+      mcpServers: {
+        fixture: {
+          transport: "stdio",
+        },
+      },
+    });
+
+    const loaded = await loadPtoolsSessionConfig(configPath);
+
+    expect(Object.keys(loaded.mcpServers)).toEqual(["fixture"]);
+  });
+
+  it("runs a real Code Mode vertical slice from a config file", async () => {
+    const fixturePath = fileURLToPath(
+      new URL(
+        "../../mcp-registry/test/fixtures/stdio-mcp-server.ts",
+        import.meta.url,
+      ),
+    );
+    const configPath = await writeConfig("vertical", {
+      mcpServers: {
+        fixture: {
+          command: process.execPath,
+          args: ["--import", "tsx", fixturePath],
+        },
+      },
+    });
+    const ptools = await createPtoolsSessionFromConfigFile(configPath);
+
+    try {
+      const search = await ptools.callCodeModeTool("search", {});
+      const schema = await ptools.callCodeModeTool("get_tool_schema", {
+        tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+      });
+      const execution = await ptools.callCodeModeTool("execute", {
+        code: `async () => {
+          return await fixture.echo({ text: "hello from config file" });
+        }`,
+      });
+
+      expect(toToolKeys(search)).toEqual(["fixture.echo", "fixture.add"]);
+      expect(toSchemaToolKeys(schema)).toEqual(["fixture.echo"]);
+      expect(execution).toEqual({
+        value: { text: "hello from config file" },
+        logs: [],
+      });
+    } finally {
+      await ptools.close();
+    }
+  }, 30_000);
+});
+
 describe("input parsing", () => {
   const session = () =>
     makePtoolsSession(
@@ -149,21 +458,22 @@ describe("input parsing", () => {
     });
 
     it("accepts an object with no query field", async () => {
-      await expect(
-        session().callCodeModeTool("search", {}),
-      ).resolves.toEqual({ servers: [], diagnostics: [] });
+      await expect(session().callCodeModeTool("search", {})).resolves.toEqual({
+        servers: [],
+        diagnostics: [],
+      });
     });
 
     it("rejects null input", async () => {
-      await expect(
-        session().callCodeModeTool("search", null),
-      ).rejects.toThrow("search input must be an object");
+      await expect(session().callCodeModeTool("search", null)).rejects.toThrow(
+        "search input must be an object",
+      );
     });
 
     it("rejects array input", async () => {
-      await expect(
-        session().callCodeModeTool("search", []),
-      ).rejects.toThrow("search input must be an object");
+      await expect(session().callCodeModeTool("search", [])).rejects.toThrow(
+        "search input must be an object",
+      );
     });
 
     it("rejects a non-string query", async () => {
@@ -219,15 +529,15 @@ describe("input parsing", () => {
 
   describe("execute input", () => {
     it("rejects null input", async () => {
-      await expect(
-        session().callCodeModeTool("execute", null),
-      ).rejects.toThrow("execute input must be an object");
+      await expect(session().callCodeModeTool("execute", null)).rejects.toThrow(
+        "execute input must be an object",
+      );
     });
 
     it("rejects missing code field", async () => {
-      await expect(
-        session().callCodeModeTool("execute", {}),
-      ).rejects.toThrow("execute.code must be a string");
+      await expect(session().callCodeModeTool("execute", {})).rejects.toThrow(
+        "execute.code must be a string",
+      );
     });
 
     it("rejects non-string code field", async () => {
@@ -261,3 +571,36 @@ const diagnostic = (
   serverName: "fixture",
   message: "fixture diagnostic",
 });
+
+const writeConfig = async (name: string, value: unknown): Promise<string> => {
+  const dir = await mkdtemp(join(tmpdir(), `ptools-agent-tools-${name}-`));
+  const configPath = join(dir, "ptools.config.json");
+
+  await writeFile(configPath, JSON.stringify(value, null, 2));
+
+  return configPath;
+};
+
+const toToolKeys = (value: unknown): ReadonlyArray<string> => {
+  const context = value as {
+    readonly servers: ReadonlyArray<{
+      readonly jsServerName: string;
+      readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
+    }>;
+  };
+
+  return context.servers.flatMap((server) =>
+    server.tools.map((tool) => `${server.jsServerName}.${tool.jsToolName}`),
+  );
+};
+
+const toSchemaToolKeys = (value: unknown): ReadonlyArray<string> => {
+  const context = value as {
+    readonly tools: ReadonlyArray<{
+      readonly jsServerName: string;
+      readonly jsToolName: string;
+    }>;
+  };
+
+  return context.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`);
+};

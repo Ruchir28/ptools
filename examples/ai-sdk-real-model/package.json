@@ -12,7 +12,6 @@
     "@modelcontextprotocol/sdk": "latest",
     "@openrouter/ai-sdk-provider": "^2.9.0",
     "@ptools/agent-tools": "workspace:*",
-    "@ptools/core": "workspace:*",
     "ai": "latest",
     "effect": "latest",
     "zod": "latest"

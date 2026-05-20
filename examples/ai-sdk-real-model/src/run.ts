@@ -3,10 +3,8 @@ import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
-import { createPtoolsSession } from "@ptools/agent-tools";
-import { loadPtoolsConfig } from "@ptools/core";
+import { createPtoolsSessionFromConfigFile } from "@ptools/agent-tools";
 import { generateText, stepCountIs } from "ai";
-import { Effect } from "effect";
 
 const SYSTEM_PROMPT = `\
 You are a data analysis agent with access to MCP-backed provider APIs through ptools Code Mode.
@@ -28,9 +26,6 @@ const main = async (): Promise<void> => {
   loadDotEnvFile();
 
   const configPath = resolveConfigPath();
-  const config = await Effect.runPromise(
-    loadPtoolsConfig(configPath, process.env),
-  );
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) throw new Error("Missing OPENROUTER_API_KEY");
@@ -39,7 +34,7 @@ const main = async (): Promise<void> => {
   const prompt = readFlag("--prompt-file")
     ? readFileSync(readFlag("--prompt-file")!, "utf8")
     : "What drove the most revenue this period — which product and which seller led it, and how did performance vary across regions?";
-  const ptools = await createPtoolsSession(config);
+  const ptools = await createPtoolsSessionFromConfigFile(configPath);
 
   try {
     const diagnostics = await ptools.diagnostics();
@@ -102,7 +97,10 @@ const readFlag = (name: string): string | undefined => {
 };
 
 const loadDotEnvFile = (): void => {
-  const envPath = resolve(fileURLToPath(new URL("..", import.meta.url)), ".env");
+  const envPath = resolve(
+    fileURLToPath(new URL("..", import.meta.url)),
+    ".env",
+  );
 
   try {
     for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {

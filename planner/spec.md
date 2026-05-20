@@ -17,11 +17,11 @@ async () => {
   const issue = await github.create_issue({
     owner: "example",
     repo: "repo",
-    title: "Example"
+    title: "Example",
   });
 
   return issue;
-}
+};
 ```
 
 At runtime, `github.create_issue` is not a real SDK client inside the sandbox. It is a host-backed provider proxy that calls back to the Code Mode host, which dispatches through `McpRegistry.callTool(...)` to the original upstream MCP tool.
@@ -149,10 +149,10 @@ Implemented host-side MCP integration.
 Current key API:
 
 ```ts
-makeMcpRegistryLive(upstreams)
-McpRegistry.listTools
-McpRegistry.diagnostics
-McpRegistry.callTool
+makeMcpRegistryLive(upstreams);
+McpRegistry.listTools;
+McpRegistry.diagnostics;
+McpRegistry.callTool;
 ```
 
 Key internals:
@@ -176,8 +176,8 @@ execute({
   code,
   globals,
   providers,
-  timeoutMs
-})
+  timeoutMs,
+});
 ```
 
 The local executor:
@@ -242,8 +242,8 @@ Implemented combined MCP server entrypoint.
 Responsibilities:
 
 - parse `--config <path>` or `PTOOLS_CONFIG` env var
-- load and validate `ptools.config.json` using `Effect.Schema`
-- resolve `envFrom` / `headersFromEnv` into literal env/headers before passing to `makeMcpRegistryLive`
+- load and validate canonical MCP-style `ptools.config.json`
+- resolve `${env:NAME}` placeholders into literal command/args/cwd/env/url/headers values before passing to `makeMcpRegistryLive`
 - construct Effect layers: `makeMcpRegistryLive`, `makeLocalSandboxExecutorLive`, `makeCodeModeLive`
 - register `search`, `get_tool_schema`, and `execute` on an SDK `McpServer`
 - connect over stdio via `StdioServerTransport`
@@ -264,27 +264,29 @@ interface PtoolsConfig {
 
 type ServerMcpConfig =
   | {
-      readonly transport: "stdio";
       readonly command: string;
       readonly args?: ReadonlyArray<string>;
       readonly cwd?: string;
       readonly env?: Record<string, string>;
-      readonly envFrom?: Record<string, string>;
+      readonly enabled?: boolean;
+      readonly disabled?: boolean;
     }
   | {
-      readonly transport: "http";
       readonly url: string;
       readonly headers?: Record<string, string>;
-      readonly headersFromEnv?: Record<string, string>;
+      readonly enabled?: boolean;
+      readonly disabled?: boolean;
     };
 ```
 
 Resolution rules:
 
-- `env` and `headers` are literal values passed directly to the registry.
-- `envFrom` maps target env key to source `process.env` key; missing refs fail startup.
-- `headersFromEnv` maps target header key to source `process.env` key; missing refs fail startup.
-- After resolution, only literal `env` / `headers` are passed to `makeMcpRegistryLive`. The registry types do not include `envFrom` / `headersFromEnv`.
+- `command` implies stdio, `url` implies HTTP.
+- `transport` and `type` are rejected; use `command` or `url` instead.
+- `${env:NAME}` placeholders resolve from the supplied env map / `process.env`; missing refs fail startup.
+- `disabled: true` and `enabled: false` exclude the server from the resolved config.
+- Relative stdio `cwd` values resolve from the config file directory.
+- After resolution, only registry-compatible `transport`, `command`, `args`, `cwd`, `env`, `url`, and `headers` fields are passed to `makeMcpRegistryLive`.
 - The config key (e.g. `fixture`) becomes the user-facing provider namespace, regardless of the upstream MCP server's internal name.
 - Relative config paths resolve from `process.cwd()`.
 
@@ -294,24 +296,22 @@ Example config:
 {
   "mcpServers": {
     "github": {
-      "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
-      "envFrom": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "GITHUB_TOKEN"
-      }
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${env:GITHUB_TOKEN}",
+      },
     },
     "remoteDocs": {
-      "transport": "http",
       "url": "https://example.com/mcp",
-      "headersFromEnv": {
-        "authorization": "REMOTE_DOCS_AUTH"
-      }
-    }
+      "headers": {
+        "authorization": "Bearer ${env:REMOTE_DOCS_AUTH}",
+      },
+    },
   },
   "executor": {
-    "defaultTimeoutMs": 30000
-  }
+    "defaultTimeoutMs": 30000,
+  },
 }
 ```
 
@@ -409,13 +409,13 @@ Code Mode builds provider namespaces from `McpRegistry.listTools()` once at laye
 
 Provider handlers unwrap `CallToolResult` before returning to sandbox code. Unwrapping follows Cloudflare-style rules:
 
-| MCP result case | Runtime value returned to sandbox |
-| --- | --- |
-| `isError: true` | thrown `Error` with text content message |
-| `structuredContent` present | `structuredContent` object |
-| all `content` items are text | `JSON.parse` of joined text, or joined text string if parsing fails |
-| image/audio/resource/mixed content | raw `CallToolResult` (content preserved, not dropped) |
-| registry/protocol/dispatch failure | thrown provider error |
+| MCP result case                    | Runtime value returned to sandbox                                   |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `isError: true`                    | thrown `Error` with text content message                            |
+| `structuredContent` present        | `structuredContent` object                                          |
+| all `content` items are text       | `JSON.parse` of joined text, or joined text string if parsing fails |
+| image/audio/resource/mixed content | raw `CallToolResult` (content preserved, not dropped)               |
+| registry/protocol/dispatch failure | thrown provider error                                               |
 
 The typed output promise from a declaration (e.g. `Promise<FixtureAddOutput>`) reflects the expected `structuredContent` shape when `outputSchema` is present and valid. Tools without a valid `outputSchema` use `Promise<unknown>`.
 
@@ -464,10 +464,32 @@ Structured `McpRegistryDiagnostic` type:
 
 ```ts
 type McpRegistryDiagnostic =
-  | { code: "McpConnectionFailed"; severity: "error"; serverName: string; message: string }
-  | { code: "McpDiscoveryFailed";  severity: "error"; serverName: string; message: string }
-  | { code: "InvalidInputSchema";  severity: "error"; serverName: string; toolName: string; message: string }
-  | { code: "InvalidOutputSchema"; severity: "warning"; serverName: string; toolName: string; message: string };
+  | {
+      code: "McpConnectionFailed";
+      severity: "error";
+      serverName: string;
+      message: string;
+    }
+  | {
+      code: "McpDiscoveryFailed";
+      severity: "error";
+      serverName: string;
+      message: string;
+    }
+  | {
+      code: "InvalidInputSchema";
+      severity: "error";
+      serverName: string;
+      toolName: string;
+      message: string;
+    }
+  | {
+      code: "InvalidOutputSchema";
+      severity: "warning";
+      serverName: string;
+      toolName: string;
+      message: string;
+    };
 ```
 
 Diagnostics are surfaced in three places:
@@ -653,8 +675,10 @@ Config tests:
 
 - valid stdio/HTTP config resolves to registry-compatible config
 - literal `env` / `headers` preserved
-- `envFrom` / `headersFromEnv` resolved from env map
-- missing env refs fail loudly
+- `${env:NAME}` placeholders resolved from env map
+- missing env placeholders fail loudly
+- `transport` / `type` and unsupported copied client fields fail clearly
+- disabled servers are excluded from resolved config
 - invalid config shape fails
 - `--config` and `PTOOLS_CONFIG` path resolution
 
@@ -684,8 +708,9 @@ Decisions made across tickets 1–8, recorded here to prevent drift:
 - **Two-stage discovery**: `search` returns schema-free summaries; `get_tool_schema` returns batched full schemas per selected tool and self-contained declarations grouped by requested server.
 - **Precomputed full search result**: blank/absent `search` query returns a startup-cached schema-free `fullSearchResult`; no filtering or rendering occurs.
 - **Config key is the provider namespace**: the `mcpServers` config key determines the user-facing JS namespace (e.g. `fixture`), not the upstream server's internal self-reported name.
-- **`envFrom` / `headersFromEnv` are server-only**: secret resolution stays in `apps/server`. The `mcp-registry` types only accept resolved literal env/headers.
-- **Config validation uses `Effect.Schema`**: `apps/server` depends on `effect` for config parsing; `zod` is used only for MCP SDK tool schema registration.
+- **Config-file shape is normal MCP JSON**: `command` implies stdio and `url` implies HTTP; legacy `transport`, `type`, `envFrom`, and `headersFromEnv` are rejected with targeted messages.
+- **Config secret resolution is placeholder-based**: `${env:NAME}` placeholders resolve before the registry is constructed. The `mcp-registry` types only accept resolved literal env/headers.
+- **Config validation is fail-fast**: copied client fields that imply unsupported behavior are rejected instead of ignored. `zod` is used only for MCP SDK tool schema registration.
 - **No per-server strict/permissive config option**: output schema tolerance is uniform across all upstreams.
 - **No automatic schema repair**: broken schemas are flagged and preserved as-is; ptools does not mutate upstream schema metadata.
 - **Diagnostics in model-facing responses**: `McpRegistry.diagnostics` is included in `CodeModeSearchResult`, `CodeModeToolSchemaResult`, and startup `stderr` output.

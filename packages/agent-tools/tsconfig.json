@@ -3,6 +3,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     { "path": "../code-mode" },
+    { "path": "../core" },
     { "path": "../executor" },
     { "path": "../mcp-registry" }
   ],

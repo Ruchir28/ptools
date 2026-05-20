@@ -1,7 +1,6 @@
 {
   "mcpServers": {
     "fixture": {
-      "transport": "stdio",
       "command": "node",
       "args": [
         "--import",

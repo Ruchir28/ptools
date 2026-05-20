@@ -9,6 +9,11 @@ export interface CreatePtoolsSessionOptions {
   readonly executor?: LocalSandboxExecutorOptions;
 }
 
+export interface CreatePtoolsSessionFromConfigFileOptions {
+  readonly cwd?: string;
+  readonly env?: Record<string, string | undefined>;
+}
+
 export interface PtoolsSession {
   readonly callCodeModeTool: (
     name: CodeModeToolName,

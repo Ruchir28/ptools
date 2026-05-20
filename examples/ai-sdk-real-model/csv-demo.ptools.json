@@ -1,9 +1,13 @@
 {
   "mcpServers": {
     "dataset": {
-      "transport": "stdio",
       "command": "node",
-      "args": ["--import", "tsx", "src/csv-mcp-server.ts", "data/demo-sales.csv"]
+      "args": [
+        "--import",
+        "tsx",
+        "src/csv-mcp-server.ts",
+        "data/demo-sales.csv"
+      ]
     }
   },
   "executor": {

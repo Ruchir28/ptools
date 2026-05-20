@@ -133,7 +133,6 @@ const writeFixtureConfig = async (): Promise<string> => {
       {
         mcpServers: {
           fixture: {
-            transport: "stdio",
             command: process.execPath,
             args: ["--import", "tsx", fixtureServerPath],
           },
@@ -160,10 +159,7 @@ const fetchText = (url: string): Effect.Effect<string> =>
     return response.text();
   });
 
-const fetchJson = <T>(
-  url: string,
-  init?: RequestInit,
-): Effect.Effect<T> =>
+const fetchJson = <T>(url: string, init?: RequestInit): Effect.Effect<T> =>
   Effect.promise(async () => {
     const response = await fetch(url, init);
 

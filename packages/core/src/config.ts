@@ -1,53 +1,11 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
-import { Data, Effect, ParseResult, Schema } from "effect";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { Data, Effect } from "effect";
 
-export class ServerConfigError extends Data.TaggedError(
-  "ServerConfigError",
-)<{
+export class ServerConfigError extends Data.TaggedError("ServerConfigError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
-
-const StringRecordSchema = Schema.Record({
-  key: Schema.String,
-  value: Schema.String,
-});
-
-const StdioMcpConfigSchema = Schema.Struct({
-  transport: Schema.Literal("stdio"),
-  command: Schema.String,
-  args: Schema.optional(Schema.Array(Schema.String)),
-  cwd: Schema.optional(Schema.String),
-  env: Schema.optional(StringRecordSchema),
-  envFrom: Schema.optional(StringRecordSchema),
-});
-
-const HttpMcpConfigSchema = Schema.Struct({
-  transport: Schema.Literal("http"),
-  url: Schema.String,
-  headers: Schema.optional(StringRecordSchema),
-  headersFromEnv: Schema.optional(StringRecordSchema),
-});
-
-const ServerMcpConfigSchema = Schema.Union(
-  StdioMcpConfigSchema,
-  HttpMcpConfigSchema,
-);
-
-const PtoolsConfigSchema = Schema.Struct({
-  mcpServers: Schema.Record({
-    key: Schema.String,
-    value: ServerMcpConfigSchema,
-  }),
-  executor: Schema.optional(
-    Schema.Struct({
-      defaultTimeoutMs: Schema.optional(Schema.Number),
-    }),
-  ),
-});
-
-type DecodedPtoolsConfig = Schema.Schema.Type<typeof PtoolsConfigSchema>;
 
 export interface PtoolsConfig {
   readonly mcpServers: Readonly<Record<string, ServerMcpConfig>>;
@@ -63,13 +21,11 @@ export type ServerMcpConfig =
       readonly args?: ReadonlyArray<string>;
       readonly cwd?: string;
       readonly env?: Record<string, string>;
-      readonly envFrom?: Record<string, string>;
     }
   | {
       readonly transport: "http";
       readonly url: string;
       readonly headers?: Record<string, string>;
-      readonly headersFromEnv?: Record<string, string>;
     };
 
 export interface ResolvedPtoolsConfig {
@@ -95,6 +51,12 @@ export type ResolvedMcpConfig =
       readonly headers?: Record<string, string>;
     };
 
+export interface LoadPtoolsConfigOptions {
+  readonly baseDir?: string;
+}
+
+type ConfigEnv = Readonly<Record<string, string | undefined>>;
+
 /**
  * Parses CLI/env config path inputs into an absolute config file path.
  *
@@ -114,7 +76,8 @@ export const resolveConfigPath = (
   if (configPath === undefined || configPath.trim().length === 0) {
     return Effect.fail(
       new ServerConfigError({
-        message: "Missing config path. Pass --config <path> or set PTOOLS_CONFIG.",
+        message:
+          "Missing config path. Pass --config <path> or set PTOOLS_CONFIG.",
       }),
     );
   }
@@ -128,12 +91,13 @@ export const resolveConfigPath = (
  * Loads, parses, validates, and resolves a ptools JSON config file.
  *
  * @param path Absolute or relative config file path.
- * @param env Environment map used to resolve `envFrom` and `headersFromEnv`.
+ * @param env Environment map used to resolve `${env:NAME}` placeholders.
  * @returns Registry-compatible upstream MCP config plus executor options.
  */
 export const loadPtoolsConfig = (
   path: string,
-  env: NodeJS.ProcessEnv,
+  env: ConfigEnv,
+  options: LoadPtoolsConfigOptions = {},
 ): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError> =>
   Effect.gen(function* () {
     const raw = yield* Effect.tryPromise({
@@ -147,7 +111,9 @@ export const loadPtoolsConfig = (
 
     const parsed = yield* parsePtoolsConfigJson(raw, path);
 
-    return yield* resolvePtoolsConfig(parsed, env);
+    return yield* resolvePtoolsConfig(parsed, env, {
+      baseDir: options.baseDir ?? dirname(path),
+    });
   });
 
 /**
@@ -171,17 +137,7 @@ export const parsePtoolsConfigJson = (
         }),
     });
 
-    const decoded = yield* Schema.decodeUnknown(PtoolsConfigSchema)(value).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ServerConfigError({
-            message: `Invalid ptools config in ${source}: ${ParseResult.TreeFormatter.formatErrorSync(cause)}`,
-            cause,
-          }),
-      ),
-    );
-
-    return normalizeDecodedConfig(decoded);
+    return yield* parsePtoolsConfigValue(value, source);
   });
 
 /**
@@ -193,15 +149,18 @@ export const parsePtoolsConfigJson = (
  */
 export const resolvePtoolsConfig = (
   config: PtoolsConfig,
-  env: NodeJS.ProcessEnv,
+  env: ConfigEnv,
+  options: LoadPtoolsConfigOptions = {},
 ): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError> =>
   Effect.gen(function* () {
     const mcpServers: Record<string, ResolvedMcpConfig> = {};
 
-    for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
+    for (const [serverName, serverConfig] of Object.entries(
+      config.mcpServers,
+    )) {
       mcpServers[serverName] =
         serverConfig.transport === "stdio"
-          ? yield* resolveStdioConfig(serverName, serverConfig, env)
+          ? yield* resolveStdioConfig(serverName, serverConfig, env, options)
           : yield* resolveHttpConfig(serverName, serverConfig, env);
     }
 
@@ -224,22 +183,44 @@ const parseConfigArg = (argv: ReadonlyArray<string>): string | undefined => {
 const resolveStdioConfig = (
   serverName: string,
   config: Extract<ServerMcpConfig, { readonly transport: "stdio" }>,
-  env: NodeJS.ProcessEnv,
+  env: ConfigEnv,
+  options: LoadPtoolsConfigOptions,
 ): Effect.Effect<ResolvedMcpConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const resolvedEnv = yield* resolveEnvRecord(
+    const command = yield* resolveEnvString(
       serverName,
-      "envFrom",
-      config.env ?? {},
-      config.envFrom ?? {},
+      "command",
+      config.command,
       env,
     );
+    const args =
+      config.args === undefined
+        ? undefined
+        : yield* Effect.all(
+            config.args.map((arg, index) =>
+              resolveEnvString(serverName, `args[${index}]`, arg, env),
+            ),
+          );
+    const cwd =
+      config.cwd === undefined
+        ? undefined
+        : yield* resolveEnvString(serverName, "cwd", config.cwd, env).pipe(
+            Effect.map((resolvedCwd) =>
+              options.baseDir !== undefined && !isAbsolute(resolvedCwd)
+                ? resolve(options.baseDir, resolvedCwd)
+                : resolvedCwd,
+            ),
+          );
+    const resolvedEnv =
+      config.env === undefined
+        ? {}
+        : yield* resolveStringRecord(serverName, "env", config.env, env);
 
     return {
       transport: "stdio" as const,
-      command: config.command,
-      ...(config.args === undefined ? {} : { args: [...config.args] }),
-      ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
+      command,
+      ...(args === undefined ? {} : { args }),
+      ...(cwd === undefined ? {} : { cwd }),
       ...(Object.keys(resolvedEnv).length === 0 ? {} : { env: resolvedEnv }),
     };
   });
@@ -247,93 +228,416 @@ const resolveStdioConfig = (
 const resolveHttpConfig = (
   serverName: string,
   config: Extract<ServerMcpConfig, { readonly transport: "http" }>,
-  env: NodeJS.ProcessEnv,
+  env: ConfigEnv,
 ): Effect.Effect<ResolvedMcpConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const headers = yield* resolveEnvRecord(
-      serverName,
-      "headersFromEnv",
-      config.headers ?? {},
-      config.headersFromEnv ?? {},
-      env,
-    );
+    const url = yield* resolveEnvString(serverName, "url", config.url, env);
+    const headers =
+      config.headers === undefined
+        ? {}
+        : yield* resolveStringRecord(
+            serverName,
+            "headers",
+            config.headers,
+            env,
+          );
 
     return {
       transport: "http" as const,
-      url: config.url,
+      url,
       ...(Object.keys(headers).length === 0 ? {} : { headers }),
     };
   });
 
-const resolveEnvRecord = (
+const resolveStringRecord = (
   serverName: string,
   fieldName: string,
-  literal: Readonly<Record<string, string>>,
-  refs: Readonly<Record<string, string>>,
-  env: NodeJS.ProcessEnv,
+  record: Readonly<Record<string, string>>,
+  env: ConfigEnv,
 ): Effect.Effect<Record<string, string>, ServerConfigError> =>
   Effect.gen(function* () {
-    const result: Record<string, string> = { ...literal };
+    const result: Record<string, string> = {};
 
-    for (const [targetKey, sourceKey] of Object.entries(refs)) {
-      const value = env[sourceKey];
-
-      if (value === undefined) {
-        return yield* Effect.fail(
-          new ServerConfigError({
-            message: `Missing environment variable ${sourceKey} for ${fieldName}.${targetKey} on MCP server ${serverName}`,
-          }),
-        );
-      }
-
-      result[targetKey] = value;
+    for (const [key, value] of Object.entries(record)) {
+      result[key] = yield* resolveEnvString(
+        serverName,
+        `${fieldName}.${key}`,
+        value,
+        env,
+      );
     }
 
     return result;
   });
 
-const normalizeDecodedConfig = (
-  decoded: DecodedPtoolsConfig,
-): PtoolsConfig => {
-  const mcpServers: Record<string, ServerMcpConfig> = {};
+const ENV_PLACEHOLDER_PATTERN = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
-  for (const [serverName, serverConfig] of Object.entries(decoded.mcpServers)) {
-    mcpServers[serverName] =
-      serverConfig.transport === "stdio"
-        ? {
-            transport: "stdio",
-            command: serverConfig.command,
-            ...(serverConfig.args === undefined
-              ? {}
-              : { args: serverConfig.args }),
-            ...(serverConfig.cwd === undefined ? {} : { cwd: serverConfig.cwd }),
-            ...(serverConfig.env === undefined ? {} : { env: serverConfig.env }),
-            ...(serverConfig.envFrom === undefined
-              ? {}
-              : { envFrom: serverConfig.envFrom }),
-          }
-        : {
-            transport: "http",
-            url: serverConfig.url,
-            ...(serverConfig.headers === undefined
-              ? {}
-              : { headers: serverConfig.headers }),
-            ...(serverConfig.headersFromEnv === undefined
-              ? {}
-              : { headersFromEnv: serverConfig.headersFromEnv }),
-          };
-  }
+const resolveEnvString = (
+  serverName: string,
+  fieldName: string,
+  value: string,
+  env: ConfigEnv,
+): Effect.Effect<string, ServerConfigError> =>
+  Effect.gen(function* () {
+    const missing: string[] = [];
+    const resolved = value.replace(
+      ENV_PLACEHOLDER_PATTERN,
+      (_, name: string) => {
+        const envValue = env[name];
 
-  return {
-    mcpServers,
-    ...(decoded.executor === undefined
-      ? {}
-      : {
-          executor: {
-            ...(decoded.executor.defaultTimeoutMs === undefined
-              ? {}
-              : { defaultTimeoutMs: decoded.executor.defaultTimeoutMs }),
-          },
+        if (envValue === undefined) {
+          missing.push(name);
+          return "";
+        }
+
+        return envValue;
+      },
+    );
+
+    if (missing.length > 0) {
+      return yield* Effect.fail(
+        new ServerConfigError({
+          message: `Missing environment variable ${missing[0]} for ${fieldName} on MCP server ${serverName}`,
         }),
-  };
+      );
+    }
+
+    return resolved;
+  });
+
+const parsePtoolsConfigValue = (
+  value: unknown,
+  source: string,
+): Effect.Effect<PtoolsConfig, ServerConfigError> =>
+  Effect.gen(function* () {
+    const root = yield* expectRecord(
+      value,
+      `Invalid ptools config in ${source}`,
+    );
+    const rootKeys = new Set(Object.keys(root));
+
+    for (const key of rootKeys) {
+      if (key !== "mcpServers" && key !== "executor") {
+        return yield* invalidConfig(
+          source,
+          `Unsupported top-level field ${key}`,
+        );
+      }
+    }
+
+    const mcpServers = yield* expectRecord(
+      root.mcpServers,
+      `Invalid ptools config in ${source}: mcpServers must be an object`,
+    );
+    const executor =
+      root.executor === undefined
+        ? undefined
+        : yield* parseExecutorConfig(root.executor, source);
+    const parsedServers: Record<string, ServerMcpConfig> = {};
+
+    for (const [serverName, rawServerConfig] of Object.entries(mcpServers)) {
+      const parsed = yield* parseServerConfig(
+        serverName,
+        rawServerConfig,
+        source,
+      );
+
+      if (parsed !== undefined) {
+        parsedServers[serverName] = parsed;
+      }
+    }
+
+    return {
+      mcpServers: parsedServers,
+      ...(executor === undefined ? {} : { executor }),
+    };
+  });
+
+const parseExecutorConfig = (
+  value: unknown,
+  source: string,
+): Effect.Effect<{ readonly defaultTimeoutMs?: number }, ServerConfigError> =>
+  Effect.gen(function* () {
+    const executor = yield* expectRecord(
+      value,
+      `Invalid ptools config in ${source}: executor must be an object`,
+    );
+
+    for (const key of Object.keys(executor)) {
+      if (key !== "defaultTimeoutMs") {
+        return yield* invalidConfig(
+          source,
+          `Unsupported executor field ${key}`,
+        );
+      }
+    }
+
+    if (
+      executor.defaultTimeoutMs !== undefined &&
+      typeof executor.defaultTimeoutMs !== "number"
+    ) {
+      return yield* invalidConfig(
+        source,
+        "executor.defaultTimeoutMs must be a number",
+      );
+    }
+
+    return executor.defaultTimeoutMs === undefined
+      ? {}
+      : { defaultTimeoutMs: executor.defaultTimeoutMs };
+  });
+
+const parseServerConfig = (
+  serverName: string,
+  value: unknown,
+  source: string,
+): Effect.Effect<ServerMcpConfig | undefined, ServerConfigError> =>
+  Effect.gen(function* () {
+    const config = yield* expectRecord(
+      value,
+      `Invalid ptools config in ${source}: mcpServers.${serverName} must be an object`,
+    );
+
+    for (const field of Object.keys(config)) {
+      const unsupported = unsupportedServerFieldMessage(field);
+
+      if (unsupported !== undefined) {
+        return yield* invalidServerConfig(source, serverName, unsupported);
+      }
+    }
+
+    const enabled = config.enabled;
+    const disabled = config.disabled;
+
+    if (enabled !== undefined && typeof enabled !== "boolean") {
+      return yield* invalidServerConfig(
+        source,
+        serverName,
+        "enabled must be a boolean when provided",
+      );
+    }
+
+    if (disabled !== undefined && typeof disabled !== "boolean") {
+      return yield* invalidServerConfig(
+        source,
+        serverName,
+        "disabled must be a boolean when provided",
+      );
+    }
+
+    if (enabled === false || disabled === true) {
+      return undefined;
+    }
+
+    const hasCommand = config.command !== undefined;
+    const hasUrl = config.url !== undefined;
+
+    if (hasCommand && hasUrl) {
+      return yield* invalidServerConfig(
+        source,
+        serverName,
+        "must use either command for stdio or url for HTTP, not both",
+      );
+    }
+
+    if (!hasCommand && !hasUrl) {
+      return yield* invalidServerConfig(
+        source,
+        serverName,
+        "must provide command for stdio or url for HTTP",
+      );
+    }
+
+    return hasCommand
+      ? yield* parseStdioServerConfig(serverName, config, source)
+      : yield* parseHttpServerConfig(serverName, config, source);
+  });
+
+const parseStdioServerConfig = (
+  serverName: string,
+  config: Readonly<Record<string, unknown>>,
+  source: string,
+): Effect.Effect<ServerMcpConfig, ServerConfigError> =>
+  Effect.gen(function* () {
+    const command = yield* expectStringField(
+      config.command,
+      source,
+      serverName,
+      "command",
+    );
+    const args =
+      config.args === undefined
+        ? undefined
+        : yield* expectStringArrayField(
+            config.args,
+            source,
+            serverName,
+            "args",
+          );
+    const cwd =
+      config.cwd === undefined
+        ? undefined
+        : yield* expectStringField(config.cwd, source, serverName, "cwd");
+    const env =
+      config.env === undefined
+        ? undefined
+        : yield* expectStringRecordField(config.env, source, serverName, "env");
+
+    return {
+      transport: "stdio",
+      command,
+      ...(args === undefined ? {} : { args }),
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(env === undefined ? {} : { env }),
+    };
+  });
+
+const parseHttpServerConfig = (
+  serverName: string,
+  config: Readonly<Record<string, unknown>>,
+  source: string,
+): Effect.Effect<ServerMcpConfig, ServerConfigError> =>
+  Effect.gen(function* () {
+    const url = yield* expectStringField(config.url, source, serverName, "url");
+    const headers =
+      config.headers === undefined
+        ? undefined
+        : yield* expectStringRecordField(
+            config.headers,
+            source,
+            serverName,
+            "headers",
+          );
+
+    return {
+      transport: "http",
+      url,
+      ...(headers === undefined ? {} : { headers }),
+    };
+  });
+
+const unsupportedServerFieldMessage = (field: string): string | undefined => {
+  switch (field) {
+    case "command":
+    case "args":
+    case "cwd":
+    case "env":
+    case "url":
+    case "headers":
+    case "enabled":
+    case "disabled":
+      return undefined;
+    case "transport":
+    case "type":
+      return `${field} is not part of the ptools config shape; use command for stdio servers or url for HTTP servers`;
+    case "serverUrl":
+      return "serverUrl is not supported; use url for HTTP MCP servers";
+    case "envFrom":
+      return "envFrom is not supported; use ${env:NAME} placeholders inside env values";
+    case "headersFromEnv":
+      return "headersFromEnv is not supported; use ${env:NAME} placeholders inside headers values";
+    case "tools":
+    case "enabled_tools":
+    case "disabled_tools":
+    case "envFile":
+    case "oauth":
+    case "auth":
+    case "authorization":
+    case "approvalPolicy":
+    case "approval_policy":
+      return `${field} is not supported in ptools MCP server config yet`;
+    default:
+      return `Unsupported MCP server field ${field}`;
+  }
 };
+
+const expectStringField = (
+  value: unknown,
+  source: string,
+  serverName: string,
+  fieldName: string,
+): Effect.Effect<string, ServerConfigError> =>
+  typeof value === "string"
+    ? Effect.succeed(value)
+    : invalidServerConfig(source, serverName, `${fieldName} must be a string`);
+
+const expectStringArrayField = (
+  value: unknown,
+  source: string,
+  serverName: string,
+  fieldName: string,
+): Effect.Effect<ReadonlyArray<string>, ServerConfigError> =>
+  Effect.gen(function* () {
+    if (!Array.isArray(value)) {
+      return yield* invalidServerConfig(
+        source,
+        serverName,
+        `${fieldName} must be an array of strings`,
+      );
+    }
+
+    for (const [index, item] of value.entries()) {
+      if (typeof item !== "string") {
+        return yield* invalidServerConfig(
+          source,
+          serverName,
+          `${fieldName}[${index}] must be a string`,
+        );
+      }
+    }
+
+    return value;
+  });
+
+const expectStringRecordField = (
+  value: unknown,
+  source: string,
+  serverName: string,
+  fieldName: string,
+): Effect.Effect<Record<string, string>, ServerConfigError> =>
+  Effect.gen(function* () {
+    const record = yield* expectRecord(
+      value,
+      `Invalid ptools config in ${source}: mcpServers.${serverName}.${fieldName} must be an object of strings`,
+    );
+    const result: Record<string, string> = {};
+
+    for (const [key, item] of Object.entries(record)) {
+      if (typeof item !== "string") {
+        return yield* invalidServerConfig(
+          source,
+          serverName,
+          `${fieldName}.${key} must be a string`,
+        );
+      }
+
+      result[key] = item;
+    }
+
+    return result;
+  });
+
+const expectRecord = (
+  value: unknown,
+  message: string,
+): Effect.Effect<Record<string, unknown>, ServerConfigError> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? Effect.succeed(value as Record<string, unknown>)
+    : Effect.fail(new ServerConfigError({ message }));
+
+const invalidConfig = (
+  source: string,
+  message: string,
+): Effect.Effect<never, ServerConfigError> =>
+  Effect.fail(
+    new ServerConfigError({
+      message: `Invalid ptools config in ${source}: ${message}`,
+    }),
+  );
+
+const invalidServerConfig = (
+  source: string,
+  serverName: string,
+  message: string,
+): Effect.Effect<never, ServerConfigError> =>
+  invalidConfig(source, `mcpServers.${serverName} ${message}`);

@@ -5,11 +5,14 @@ import {
   type CodeModeToolSchemaRequest,
   makeCodeModeLive,
 } from "@ptools/code-mode";
+import { loadPtoolsConfig } from "@ptools/core";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { Effect, Either, Layer, ManagedRuntime } from "effect";
 import type {
   CodeModeToolName,
+  CreatePtoolsSessionFromConfigFileOptions,
   CreatePtoolsSessionOptions,
   PtoolsSession,
 } from "./types.js";
@@ -36,6 +39,34 @@ export const createPtoolsSession = async (
 
   return makePtoolsSession(runtime);
 };
+
+export const loadPtoolsSessionConfig = async (
+  path = "ptools.config.json",
+  options: CreatePtoolsSessionFromConfigFileOptions = {},
+): Promise<CreatePtoolsSessionOptions> => {
+  const resolvedPath = resolveConfigFilePath(
+    path,
+    options.cwd ?? process.cwd(),
+  );
+
+  const result = await Effect.runPromise(
+    loadPtoolsConfig(resolvedPath, options.env ?? process.env, {
+      baseDir: dirname(resolvedPath),
+    }).pipe(Effect.either),
+  );
+
+  if (Either.isLeft(result)) {
+    throw result.left;
+  }
+
+  return result.right;
+};
+
+export const createPtoolsSessionFromConfigFile = async (
+  path?: string,
+  options?: CreatePtoolsSessionFromConfigFileOptions,
+): Promise<PtoolsSession> =>
+  createPtoolsSession(await loadPtoolsSessionConfig(path, options));
 
 export const makePtoolsSession = (
   runtime: ManagedRuntime.ManagedRuntime<CodeMode, unknown>,
@@ -141,3 +172,6 @@ const expectRecord = (
 
   return value as Record<string, unknown>;
 };
+
+const resolveConfigFilePath = (path: string, cwd: string): string =>
+  isAbsolute(path) ? path : resolve(cwd, path);

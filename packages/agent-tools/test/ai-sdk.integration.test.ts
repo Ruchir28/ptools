@@ -1,9 +1,15 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateText, stepCountIs, type ToolSet } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { toAISDKTools } from "../src/ai-sdk.js";
-import { createPtoolsSession } from "../src/session.js";
+import {
+  createPtoolsSession,
+  createPtoolsSessionFromConfigFile,
+} from "../src/session.js";
 
 describe("AI SDK adapter integration", () => {
   it("runs a real Code Mode vertical slice through AI SDK tools", async () => {
@@ -202,6 +208,53 @@ describe("AI SDK adapter integration", () => {
       await ptools.close();
     }
   });
+
+  it("adapts a config-file session to AI SDK tools", async () => {
+    const fixturePath = fileURLToPath(
+      new URL(
+        "../../mcp-registry/test/fixtures/stdio-mcp-server.ts",
+        import.meta.url,
+      ),
+    );
+    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-ai-sdk-"));
+    const configPath = join(dir, "ptools.config.json");
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        mcpServers: {
+          fixture: {
+            command: process.execPath,
+            args: ["--import", "tsx", fixturePath],
+          },
+        },
+      }),
+    );
+
+    const ptools = await createPtoolsSessionFromConfigFile(configPath);
+
+    try {
+      const tools = toAISDKTools(ptools);
+
+      expect(Object.keys(tools)).toEqual([
+        "ptools_search",
+        "ptools_get_tool_schema",
+        "ptools_execute",
+      ]);
+      await expect(
+        runAISDKToolExecuteForTest(tools, "ptools_execute", {
+          code: `async () => {
+            return await fixture.echo({ text: "hello from config ai sdk" });
+          }`,
+        }),
+      ).resolves.toEqual({
+        value: { text: "hello from config ai sdk" },
+        logs: [],
+      });
+    } finally {
+      await ptools.close();
+    }
+  }, 30_000);
 });
 
 const runAISDKToolExecuteForTest = async (

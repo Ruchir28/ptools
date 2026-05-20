@@ -280,7 +280,6 @@ const writeFixtureConfig = async (): Promise<string> => {
       {
         mcpServers: {
           fixture: {
-            transport: "stdio",
             command: process.execPath,
             args: ["--import", "tsx", fixtureServerPath],
           },
@@ -304,7 +303,6 @@ const writeAllFailConfig = async (): Promise<string> => {
       {
         mcpServers: {
           unavailable: {
-            transport: "stdio",
             command: "/path/that/does/not/exist",
           },
         },
@@ -327,7 +325,6 @@ const writeBrokenOutputConfig = async (): Promise<string> => {
       {
         mcpServers: {
           broken: {
-            transport: "stdio",
             command: process.execPath,
             args: ["--import", "tsx", brokenOutputFixtureServerPath],
           },
