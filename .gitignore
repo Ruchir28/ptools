@@ -1,7 +1,10 @@
 node_modules
+.DS_Store
+.env
 .pnpm-store
 dist
 *.tsbuildinfo
 opencode.json
 opencode*.md
 ptools*.config.json
+.env

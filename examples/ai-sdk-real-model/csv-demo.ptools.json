@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "dataset": {
+      "transport": "stdio",
+      "command": "node",
+      "args": ["--import", "tsx", "src/csv-mcp-server.ts", "data/demo-sales.csv"]
+    }
+  },
+  "executor": {
+    "defaultTimeoutMs": 60000
+  }
+}

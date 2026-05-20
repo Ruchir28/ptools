@@ -1,0 +1,25 @@
+{
+  "name": "@ptools/example-ai-sdk-real-model",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "pnpm --filter @ptools/agent-tools build && tsx src/run.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "latest",
+    "@modelcontextprotocol/sdk": "latest",
+    "@openrouter/ai-sdk-provider": "^2.9.0",
+    "@ptools/agent-tools": "workspace:*",
+    "@ptools/core": "workspace:*",
+    "ai": "latest",
+    "effect": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@ptools/agent-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk.d.ts",
+      "default": "./dist/ai-sdk.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run --exclude \"**/dist/**\""
+  },
+  "dependencies": {
+    "@ptools/code-mode": "workspace:*",
+    "@ptools/executor": "workspace:*",
+    "@ptools/mcp-registry": "workspace:*",
+    "ai": "latest",
+    "effect": "latest",
+    "zod": "latest"
+  }
+}

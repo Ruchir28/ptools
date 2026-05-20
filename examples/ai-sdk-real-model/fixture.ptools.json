@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "fixture": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "--import",
+        "tsx",
+        "packages/mcp-registry/test/fixtures/stdio-mcp-server.ts"
+      ],
+      "cwd": "../.."
+    }
+  },
+  "executor": {
+    "defaultTimeoutMs": 60000
+  }
+}
