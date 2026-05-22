@@ -6,6 +6,9 @@ CSV at `data/demo-sales.csv`, then asks the model to discover the dataset
 tools, fetch only the schemas it needs, inspect the data shape, choose columns
 from observed metadata, and execute compact calculations through Code Mode.
 
+For the installable package API, config shape, and lifecycle guidance, see
+`../../packages/agent-tools/README.md`.
+
 ## Run with Vercel AI Gateway
 
 ```bash

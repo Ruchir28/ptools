@@ -1,8 +1,28 @@
 {
   "name": "@ptools/agent-tools",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ruchir28/ptools.git",
+    "directory": "packages/agent-tools"
+  },
+  "homepage": "https://github.com/Ruchir28/ptools#readme",
+  "bugs": {
+    "url": "https://github.com/Ruchir28/ptools/issues"
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.js.map",
+    "dist/*.d.ts",
+    "dist/*.d.ts.map",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -23,8 +43,8 @@
     "@ptools/core": "workspace:*",
     "@ptools/executor": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
-    "ai": "latest",
-    "effect": "latest",
-    "zod": "latest"
+    "ai": "6.0.184",
+    "effect": "3.21.2",
+    "zod": "4.4.3"
   }
 }
