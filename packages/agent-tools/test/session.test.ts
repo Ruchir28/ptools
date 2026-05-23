@@ -6,6 +6,7 @@ import {
   CodeMode,
   type CodeModeDiagnostic,
   type CodeModeExecuteRequest,
+  type CodeModeSearchProvidersRequest,
   type CodeModeSearchRequest,
   type CodeModeToolSchemaRequest,
 } from "@ptools/code-mode";
@@ -27,10 +28,15 @@ describe("PtoolsSession", () => {
       ManagedRuntime.make(
         Layer.succeed(CodeMode, {
           diagnostics: Effect.succeed(diagnostics),
-          search: (request?: CodeModeSearchRequest) =>
+          searchProviders: (request?: CodeModeSearchProvidersRequest) =>
+            Effect.sync(() => {
+              calls.push({ name: "search_providers", input: request });
+              return { providers: [], diagnostics };
+            }),
+          search: (request: CodeModeSearchRequest) =>
             Effect.sync(() => {
               calls.push({ name: "search", input: request });
-              return { servers: [], diagnostics };
+              return { actions: [], diagnostics };
             }),
           toolSchema: (request: CodeModeToolSchemaRequest) =>
             Effect.sync(() => {
@@ -47,8 +53,11 @@ describe("PtoolsSession", () => {
     );
 
     await expect(
+      session.callCodeModeTool("search_providers", {}),
+    ).resolves.toEqual({ providers: [], diagnostics });
+    await expect(
       session.callCodeModeTool("search", { query: "issues" }),
-    ).resolves.toEqual({ servers: [], diagnostics });
+    ).resolves.toEqual({ actions: [], diagnostics });
     await expect(
       session.callCodeModeTool("get_tool_schema", {
         tools: [{ jsServerName: "github", jsToolName: "create_issue" }],
@@ -62,6 +71,7 @@ describe("PtoolsSession", () => {
     ).resolves.toEqual({ value: "async () => 1", logs: [] });
 
     expect(calls).toEqual([
+      { name: "search_providers", input: {} },
       { name: "search", input: { query: "issues" } },
       {
         name: "get_tool_schema",
@@ -81,7 +91,9 @@ describe("PtoolsSession", () => {
       ManagedRuntime.make(
         Layer.succeed(CodeMode, {
           diagnostics: Effect.succeed([]),
-          search: () => Effect.succeed({ servers: [], diagnostics: [] }),
+          searchProviders: () =>
+            Effect.succeed({ providers: [], diagnostics: [] }),
+          search: () => Effect.succeed({ actions: [], diagnostics: [] }),
           toolSchema: () =>
             Effect.succeed({
               tools: [],
@@ -107,7 +119,9 @@ describe("PtoolsSession", () => {
         Effect.acquireRelease(
           Effect.succeed({
             diagnostics: Effect.succeed(diagnostics),
-            search: () => Effect.succeed({ servers: [], diagnostics }),
+            searchProviders: () =>
+              Effect.succeed({ providers: [], diagnostics }),
+            search: () => Effect.succeed({ actions: [], diagnostics }),
             toolSchema: () =>
               Effect.succeed({
                 tools: [],
@@ -410,9 +424,10 @@ describe("config-file session loading", () => {
     const ptools = await createPtoolsSessionFromConfigFile(configPath);
 
     try {
-      const search = await ptools.callCodeModeTool("search", {});
+      const providers = await ptools.callCodeModeTool("search_providers", {});
+      const search = await ptools.callCodeModeTool("search", { query: "echo" });
       const schema = await ptools.callCodeModeTool("get_tool_schema", {
-        tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+        toolIds: ["fixture.echo"],
       });
       const execution = await ptools.callCodeModeTool("execute", {
         code: `async () => {
@@ -420,7 +435,8 @@ describe("config-file session loading", () => {
         }`,
       });
 
-      expect(toToolKeys(search)).toEqual(["fixture.echo", "fixture.add"]);
+      expect(toProviderNames(providers)).toEqual(["fixture"]);
+      expect(toToolKeys(search)).toEqual(["fixture.echo"]);
       expect(toSchemaToolKeys(schema)).toEqual(["fixture.echo"]);
       expect(execution).toEqual({
         value: { text: "hello from config file" },
@@ -438,7 +454,9 @@ describe("input parsing", () => {
       ManagedRuntime.make(
         Layer.succeed(CodeMode, {
           diagnostics: Effect.succeed([]),
-          search: () => Effect.succeed({ servers: [], diagnostics: [] }),
+          searchProviders: () =>
+            Effect.succeed({ providers: [], diagnostics: [] }),
+          search: () => Effect.succeed({ actions: [], diagnostics: [] }),
           toolSchema: () =>
             Effect.succeed({
               tools: [],
@@ -450,20 +468,32 @@ describe("input parsing", () => {
       ),
     );
 
-  describe("search input", () => {
-    it("accepts undefined as an empty search", async () => {
+  describe("search_providers input", () => {
+    it("accepts undefined as provider inventory search", async () => {
       await expect(
-        session().callCodeModeTool("search", undefined),
-      ).resolves.toEqual({ servers: [], diagnostics: [] });
+        session().callCodeModeTool("search_providers", undefined),
+      ).resolves.toEqual({ providers: [], diagnostics: [] });
     });
 
-    it("accepts an object with no query field", async () => {
-      await expect(session().callCodeModeTool("search", {})).resolves.toEqual({
-        servers: [],
+    it("accepts an object with no query field for provider inventory", async () => {
+      await expect(
+        session().callCodeModeTool("search_providers", {}),
+      ).resolves.toEqual({
+        providers: [],
         diagnostics: [],
       });
     });
 
+    it("rejects non-string provider query", async () => {
+      await expect(
+        session().callCodeModeTool("search_providers", { query: 42 }),
+      ).rejects.toThrow(
+        "search_providers.query must be a string when provided",
+      );
+    });
+  });
+
+  describe("search input", () => {
     it("rejects null input", async () => {
       await expect(session().callCodeModeTool("search", null)).rejects.toThrow(
         "search input must be an object",
@@ -479,7 +509,19 @@ describe("input parsing", () => {
     it("rejects a non-string query", async () => {
       await expect(
         session().callCodeModeTool("search", { query: 42 }),
-      ).rejects.toThrow("search.query must be a string when provided");
+      ).rejects.toThrow("search.query must be a non-blank string");
+    });
+
+    it("rejects a missing query", async () => {
+      await expect(session().callCodeModeTool("search", {})).rejects.toThrow(
+        "search.query must be a non-blank string",
+      );
+    });
+
+    it("accepts a task query", async () => {
+      await expect(
+        session().callCodeModeTool("search", { query: "echo" }),
+      ).resolves.toEqual({ actions: [], diagnostics: [] });
     });
   });
 
@@ -490,10 +532,22 @@ describe("input parsing", () => {
       ).rejects.toThrow("get_tool_schema input must be an object");
     });
 
-    it("rejects missing tools field", async () => {
+    it("rejects missing selector fields", async () => {
       await expect(
         session().callCodeModeTool("get_tool_schema", {}),
-      ).rejects.toThrow("get_tool_schema.tools must be an array");
+      ).rejects.toThrow("get_tool_schema requires toolIds or tools");
+    });
+
+    it("accepts toolIds", async () => {
+      await expect(
+        session().callCodeModeTool("get_tool_schema", {
+          toolIds: ["fixture.echo"],
+        }),
+      ).resolves.toEqual({
+        tools: [],
+        declarationsByServer: [],
+        diagnostics: [],
+      });
     });
 
     it("rejects non-array tools field", async () => {
@@ -583,15 +637,18 @@ const writeConfig = async (name: string, value: unknown): Promise<string> => {
 
 const toToolKeys = (value: unknown): ReadonlyArray<string> => {
   const context = value as {
-    readonly servers: ReadonlyArray<{
-      readonly jsServerName: string;
-      readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
-    }>;
+    readonly actions: ReadonlyArray<{ readonly toolId: string }>;
   };
 
-  return context.servers.flatMap((server) =>
-    server.tools.map((tool) => `${server.jsServerName}.${tool.jsToolName}`),
-  );
+  return context.actions.map((action) => action.toolId);
+};
+
+const toProviderNames = (value: unknown): ReadonlyArray<string> => {
+  const context = value as {
+    readonly providers: ReadonlyArray<{ readonly provider: string }>;
+  };
+
+  return context.providers.map((provider) => provider.provider);
 };
 
 const toSchemaToolKeys = (value: unknown): ReadonlyArray<string> => {

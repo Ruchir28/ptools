@@ -18,7 +18,6 @@ import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/CodeMode.js";
 import {
   buildExecutorProviders,
-  filterCodeModeServers,
   groupDiscoveredMcpTools,
 } from "../src/context.js";
 import {
@@ -71,22 +70,29 @@ describe("Code Mode context and search", () => {
     );
   });
 
-  it("search returns the full API surface when query is absent", async () => {
+  it("searchProviders returns compact provider inventory when query is absent", async () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search();
+        return yield* codeMode.searchProviders();
       }),
       [fixtureAddTool(), fixtureEchoTool()],
     );
 
-    expect(toToolKeys(result)).toEqual(["fixture.add", "fixture.echo"]);
-    expect(result.servers[0]?.tools[0]).not.toHaveProperty("inputSchema");
-    expect(result.servers[0]?.tools[0]).not.toHaveProperty("outputSchema");
+    expect(result.providers).toEqual([
+      expect.objectContaining({
+        provider: "fixture",
+        displayName: "fixture",
+        toolCount: 2,
+        exampleQueries: ["Add", "Echo"],
+      }),
+    ]);
+    expect(result.providers[0]).not.toHaveProperty("description");
+    expect(result.providers[0]).not.toHaveProperty("tools");
     expect(result).not.toHaveProperty("declarations");
   });
 
-  it("search filters schema-free metadata by query", async () => {
+  it("search returns flat schema-free action candidates by query", async () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
@@ -96,20 +102,114 @@ describe("Code Mode context and search", () => {
     );
 
     expect(toToolKeys(result)).toEqual(["fixture.echo"]);
-    expect(result.servers[0]?.tools[0]).toEqual(
+    expect(result.actions[0]).toEqual(
       expect.objectContaining({
-        jsToolName: "echo",
-        inputSchemaAvailable: true,
-        outputSchemaAvailable: true,
+        toolId: "fixture.echo",
+        provider: "fixture",
+        action: "echo",
+        call: "fixture.echo({ ... })",
+        inputFields: ["text"],
       }),
     );
   });
 
-  it("search does not mark invalid output schemas as available", async () => {
+  it("searchProviders applies a positive result limit", async () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search();
+        return yield* codeMode.searchProviders({ limit: 1 });
+      }),
+      [
+        fixtureAddTool(),
+        fixtureEchoTool(),
+        mcpTool({
+          serverName: "slack",
+          jsServerName: "slack",
+          originalToolName: "send-message",
+          jsToolName: "send_message",
+        }),
+      ],
+    );
+
+    expect(result.providers.map((provider) => provider.provider)).toEqual([
+      "fixture",
+    ]);
+  });
+
+  it("searchProviders rejects non-positive limits", async () => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        runWithCodeModeEffect(
+          Effect.gen(function* () {
+            const codeMode = yield* CodeMode;
+            return yield* codeMode.searchProviders({ limit: 0 });
+          }),
+          [fixtureAddTool()],
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.left.message).toBe(
+        "search.limit must be a positive integer when provided",
+      );
+    }
+  });
+
+  it("search applies a positive result limit", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.search({ query: "tool", limit: 1 });
+      }),
+      [
+        mcpTool({
+          originalToolName: "first-tool",
+          jsToolName: "first_tool",
+          title: "First Tool",
+        }),
+        mcpTool({
+          originalToolName: "second-tool",
+          jsToolName: "second_tool",
+          title: "Second Tool",
+        }),
+      ],
+    );
+
+    expect(toToolKeys(result)).toEqual(["fixture.first_tool"]);
+  });
+
+  it("search rejects non-positive limits", async () => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        runWithCodeModeEffect(
+          Effect.gen(function* () {
+            const codeMode = yield* CodeMode;
+            return yield* codeMode.search({ query: "echo", limit: 0 });
+          }),
+          [fixtureEchoTool()],
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.left.message).toBe(
+        "search.limit must be a positive integer when provided",
+      );
+    }
+  });
+
+  it("action search does not expose raw schemas", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.search({ query: "broken" });
       }),
       [
         mcpTool({
@@ -126,15 +226,13 @@ describe("Code Mode context and search", () => {
       ],
     );
 
-    expect(result.servers[0]?.tools[0]).toEqual(
+    expect(result.actions[0]).toEqual(
       expect.objectContaining({
-        jsToolName: "broken_output",
-        outputSchemaInvalid: true,
+        toolId: "fixture.broken_output",
       }),
     );
-    expect(result.servers[0]?.tools[0]).not.toHaveProperty(
-      "outputSchemaAvailable",
-    );
+    expect(result.actions[0]).not.toHaveProperty("inputSchema");
+    expect(result.actions[0]).not.toHaveProperty("outputSchema");
   });
 
   it("toolSchema returns full schemas per tool and merged declarations per requested server", async () => {
@@ -151,10 +249,9 @@ describe("Code Mode context and search", () => {
       [fixtureAddTool(), fixtureEchoTool()],
     );
 
-    expect(result.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`)).toEqual([
-      "fixture.add",
-      "fixture.echo",
-    ]);
+    expect(
+      result.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`),
+    ).toEqual(["fixture.add", "fixture.echo"]);
     expect(result.tools[0]?.inputSchema).toEqual(
       expect.objectContaining({ type: "object" }),
     );
@@ -248,12 +345,12 @@ describe("Code Mode context and search", () => {
       ],
     );
 
-    expect(result.declarationsByServer.map((item) => item.jsServerName)).toEqual([
-      "fixture",
-      "slack",
-    ]);
+    expect(
+      result.declarationsByServer.map((item) => item.jsServerName),
+    ).toEqual(["fixture", "slack"]);
 
-    expect(result.declarationsByServer[0]?.declaration).toBe(`declare namespace fixture {
+    expect(result.declarationsByServer[0]?.declaration)
+      .toBe(`declare namespace fixture {
   interface FixtureAddInput {
     a: number;
     b?: number;
@@ -290,7 +387,8 @@ describe("Code Mode context and search", () => {
   function echo(input: FixtureEchoInput): Promise<FixtureEchoOutput>;
 }
 `);
-    expect(result.declarationsByServer[1]?.declaration).toBe(`declare namespace slack {
+    expect(result.declarationsByServer[1]?.declaration)
+      .toBe(`declare namespace slack {
   interface SlackSendMessageInput {
     channel: string;
     text: string;
@@ -336,8 +434,53 @@ describe("Code Mode context and search", () => {
 
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(CodeModeInvariantError);
-      expect(result.left.message).toBe("Unknown Code Mode tool: fixture.missing");
+      expect(result.left.message).toBe(
+        "Unknown Code Mode tool: fixture.missing",
+      );
     }
+  });
+
+  it.each(["", ".echo", "fixture."])(
+    "toolSchema rejects malformed toolId %j",
+    async (toolId) => {
+      const result = await Effect.runPromise(
+        Effect.either(
+          runWithCodeModeEffect(
+            Effect.gen(function* () {
+              const codeMode = yield* CodeMode;
+              return yield* codeMode.toolSchema({ toolIds: [toolId] });
+            }),
+            [fixtureEchoTool()],
+          ),
+        ),
+      );
+
+      expect(Either.isLeft(result)).toBe(true);
+
+      if (Either.isLeft(result)) {
+        expect(result.left).toBeInstanceOf(CodeModeInvariantError);
+        expect(result.left.message).toBe(`Invalid Code Mode toolId: ${toolId}`);
+      }
+    },
+  );
+
+  it("toolSchema parses toolIds using the first dot as the provider separator", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.toolSchema({ toolIds: ["fixture.foo.bar"] });
+      }),
+      [
+        mcpTool({
+          originalToolName: "foo.bar",
+          jsToolName: "foo.bar",
+        }),
+      ],
+    );
+
+    expect(
+      result.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`),
+    ).toEqual(["fixture.foo.bar"]);
   });
 
   it("search carries registry diagnostics in structured context", async () => {
@@ -352,7 +495,7 @@ describe("Code Mode context and search", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        const context = yield* codeMode.search();
+        const context = yield* codeMode.searchProviders();
         const directDiagnostics = yield* codeMode.diagnostics;
 
         return { context, directDiagnostics };
@@ -374,18 +517,163 @@ describe("Code Mode context and search", () => {
     expect(result.directDiagnostics).toEqual(diagnostics);
   });
 
-  it("filters by server names, tool names, titles, and descriptions", () => {
-    const servers = groupDiscoveredMcpTools([
-      fixtureAddTool(),
-      fixtureEchoTool(),
-    ]);
+  it("search uses provider terms as a boost without matching every provider action", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.search({ query: "fixture echo" });
+      }),
+      [fixtureAddTool(), fixtureEchoTool()],
+    );
 
-    expect(
-      toToolKeys({ servers: filterCodeModeServers(servers, "numbers") }),
-    ).toEqual(["fixture.add"]);
-    expect(
-      toToolKeys({ servers: filterCodeModeServers(servers, "fixture") }),
-    ).toEqual(["fixture.add", "fixture.echo"]);
+    expect(toToolKeys(result)).toEqual(["fixture.echo"]);
+  });
+
+  it("search can narrow action results by provider", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.search({ provider: "fixture", query: "echo" });
+      }),
+      [
+        fixtureEchoTool(),
+        mcpTool({
+          serverName: "other",
+          jsServerName: "other",
+          originalToolName: "echo",
+          jsToolName: "echo",
+          title: "Echo",
+          description: "Echo from another provider",
+        }),
+      ],
+    );
+
+    expect(toToolKeys(result)).toEqual(["fixture.echo"]);
+  });
+
+  it("search rejects unknown provider scopes", async () => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        runWithCodeModeEffect(
+          Effect.gen(function* () {
+            const codeMode = yield* CodeMode;
+            return yield* codeMode.search({
+              provider: "missing",
+              query: "echo",
+            });
+          }),
+          [fixtureEchoTool()],
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.left.message).toBe("Unknown Code Mode provider: missing");
+    }
+  });
+
+  it("search does not treat provider-only queries as action intent", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.search({ query: "fixture" });
+      }),
+      [fixtureAddTool(), fixtureEchoTool()],
+    );
+
+    expect(toToolKeys(result)).toEqual([]);
+  });
+
+  it("provider-scoped search still requires action terms", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.search({
+          provider: "fixture",
+          query: "fixture",
+        });
+      }),
+      [fixtureAddTool(), fixtureEchoTool()],
+    );
+
+    expect(toToolKeys(result)).toEqual([]);
+  });
+
+  it("searchProviders can find providers by capability hints", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.searchProviders({ query: "numbers" });
+      }),
+      [fixtureAddTool(), fixtureEchoTool()],
+    );
+
+    expect(result.providers.map((provider) => provider.provider)).toEqual([
+      "fixture",
+    ]);
+  });
+
+  it("provider example queries humanize underscores and hyphens", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+        return yield* codeMode.searchProviders();
+      }),
+      [
+        mcpTool({
+          originalToolName: "create_issue",
+          jsToolName: "create_issue",
+        }),
+        mcpTool({
+          originalToolName: "send-message",
+          jsToolName: "send-message",
+        }),
+      ],
+    );
+
+    expect(result.providers[0]?.exampleQueries).toEqual([
+      "create issue",
+      "send message",
+    ]);
+  });
+
+  it("action input field extraction ignores non-object property maps", async () => {
+    const result = await runWithCodeMode(
+      Effect.gen(function* () {
+        const codeMode = yield* CodeMode;
+
+        return yield* codeMode.search({ query: "schema" });
+      }),
+      [
+        mcpTool({
+          originalToolName: "null-schema",
+          jsToolName: "null_schema",
+          title: "Null Schema",
+          inputSchema: null,
+        }),
+        mcpTool({
+          originalToolName: "empty-schema",
+          jsToolName: "empty_schema",
+          title: "Empty Schema",
+          inputSchema: {},
+        }),
+        mcpTool({
+          originalToolName: "null-properties-schema",
+          jsToolName: "null_properties_schema",
+          title: "Null Properties Schema",
+          inputSchema: { properties: null },
+        }),
+      ],
+    );
+
+    expect(result.actions.map((action) => action.inputFields)).toEqual([
+      [],
+      [],
+      [],
+    ]);
   });
 
   it("does not recompile schemas for repeated filtered search calls", async () => {
@@ -728,8 +1016,7 @@ describe("Provider generation and MCP result unwrapping", () => {
 const runWithCodeMode = <A, E>(
   effect: Effect.Effect<A, E, CodeMode>,
   tools: ReadonlyArray<DiscoveredMcpTool>,
-): Promise<A> =>
-  Effect.runPromise(runWithCodeModeEffect(effect, tools));
+): Promise<A> => Effect.runPromise(runWithCodeModeEffect(effect, tools));
 
 const runWithCodeModeEffect = <A, E>(
   effect: Effect.Effect<A, E, CodeMode>,
@@ -858,16 +1145,8 @@ const mcpTool = (options: {
 });
 
 const toToolKeys = (context: {
-  readonly servers: ReadonlyArray<{
-    readonly jsServerName: string;
-    readonly tools: ReadonlyArray<{
-      readonly jsToolName: string;
-    }>;
-  }>;
-}) =>
-  context.servers.flatMap((server) =>
-    server.tools.map((tool) => `${server.jsServerName}.${tool.jsToolName}`),
-  );
+  readonly actions: ReadonlyArray<{ readonly toolId: string }>;
+}) => context.actions.map((action) => action.toolId);
 
 const expectInterfaceFields = (
   declarations: string,

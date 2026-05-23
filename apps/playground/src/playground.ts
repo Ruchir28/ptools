@@ -12,10 +12,7 @@ import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Data, Effect, Either, Layer, Scope } from "effect";
-import {
-  createServer as createViteServer,
-  type ViteDevServer,
-} from "vite";
+import { createServer as createViteServer, type ViteDevServer } from "vite";
 
 export class PlaygroundServerError extends Data.TaggedError(
   "PlaygroundServerError",
@@ -101,11 +98,7 @@ export const startPlaygroundServer = (
 
 const runPlaygroundHttp = (
   options: PlaygroundServerOptions,
-): Effect.Effect<
-  void,
-  PlaygroundServerError,
-  CodeMode | Scope.Scope
-> =>
+): Effect.Effect<void, PlaygroundServerError, CodeMode | Scope.Scope> =>
   Effect.gen(function* () {
     const vite = yield* makeViteDevServer;
     const started = yield* startPlaygroundServer({ ...options, vite });
@@ -134,17 +127,30 @@ const handleRequest = (
 
     if (request.method === "GET" && url.pathname === "/api/context") {
       const query = url.searchParams.get("query")?.trim();
-      const result = yield* codeMode
-        .search(query === undefined || query.length === 0 ? {} : { query })
-        .pipe(Effect.either);
+      const context =
+        query === undefined || query.length === 0
+          ? yield* codeMode
+              .searchProviders({})
+              .pipe(
+                Effect.map(toPlaygroundContext),
+                Effect.mapError(toErrorBody),
+                Effect.either,
+              )
+          : yield* codeMode
+              .search({ query })
+              .pipe(
+                Effect.map(toPlaygroundContext),
+                Effect.mapError(toErrorBody),
+                Effect.either,
+              );
 
-      if (Either.isLeft(result)) {
-        return yield* sendJson(response, 500, toErrorBody(result.left));
+      if (Either.isLeft(context)) {
+        return yield* sendJson(response, 500, context.left);
       }
 
       return yield* sendJson(response, 200, {
-        context: result.right,
-        summary: summarizeContext(result.right),
+        context: context.right,
+        summary: summarizeContext(context.right),
       });
     }
 
@@ -155,7 +161,9 @@ const handleRequest = (
         return yield* sendJson(response, 400, toErrorBody(parsed.left));
       }
 
-      const result = yield* codeMode.toolSchema(parsed.right).pipe(Effect.either);
+      const result = yield* codeMode
+        .toolSchema(parsed.right)
+        .pipe(Effect.either);
 
       if (Either.isLeft(result)) {
         return yield* sendJson(response, 500, toErrorBody(result.left));
@@ -212,6 +220,89 @@ const summarizeContext = (context: {
   ),
   diagnosticCount: context.diagnostics.length,
 });
+
+const toPlaygroundContext = (
+  result:
+    | {
+        readonly providers: ReadonlyArray<{
+          readonly provider: string;
+          readonly displayName: string;
+        }>;
+        readonly diagnostics: ReadonlyArray<unknown>;
+      }
+    | {
+        readonly actions: ReadonlyArray<{
+          readonly toolId: string;
+          readonly provider: string;
+          readonly action: string;
+          readonly title?: string;
+          readonly description?: string;
+        }>;
+        readonly diagnostics: ReadonlyArray<unknown>;
+      },
+) => {
+  if ("providers" in result) {
+    return {
+      servers: result.providers.map((provider) => ({
+        serverName: provider.displayName,
+        jsServerName: provider.provider,
+        tools: [],
+      })),
+      diagnostics: result.diagnostics,
+    };
+  }
+
+  const servers = new Map<
+    string,
+    {
+      readonly serverName: string;
+      readonly jsServerName: string;
+      readonly tools: Array<{
+        readonly originalToolName: string;
+        readonly jsToolName: string;
+        readonly title?: string;
+        readonly description?: string;
+        readonly inputSchemaAvailable: true;
+      }>;
+    }
+  >();
+
+  for (const action of result.actions) {
+    const existing =
+      servers.get(action.provider) ??
+      ({
+        serverName: action.provider,
+        jsServerName: action.provider,
+        tools: [],
+      } satisfies {
+        readonly serverName: string;
+        readonly jsServerName: string;
+        readonly tools: Array<{
+          readonly originalToolName: string;
+          readonly jsToolName: string;
+          readonly title?: string;
+          readonly description?: string;
+          readonly inputSchemaAvailable: true;
+        }>;
+      });
+
+    existing.tools.push({
+      originalToolName: action.action,
+      jsToolName: action.action,
+      ...(action.title === undefined ? {} : { title: action.title }),
+      ...(action.description === undefined
+        ? {}
+        : { description: action.description }),
+      inputSchemaAvailable: true,
+    });
+    servers.set(action.provider, existing);
+  }
+
+  return {
+    servers: [...servers.values()],
+    diagnostics: result.diagnostics,
+  };
+};
 
 const resolvePlaygroundPort = (
   argv: ReadonlyArray<string>,
@@ -371,28 +462,25 @@ const makeViteDevServer: Effect.Effect<
   ViteDevServer,
   PlaygroundServerError,
   Scope.Scope
-> =
-  Effect.acquireRelease(
-    Effect.tryPromise({
-      try: () =>
-        createViteServer({
-          appType: "spa",
-          root: getPlaygroundRoot(),
-          server: {
-            middlewareMode: true,
-          },
-        }),
-      catch: (cause) =>
-        new PlaygroundServerError({
-          message: "Unable to start Vite middleware.",
-          cause,
-        }),
-    }),
-    (vite) =>
-      Effect.promise(() => vite.close()).pipe(
-        Effect.catchAll(() => Effect.void),
-      ),
-  );
+> = Effect.acquireRelease(
+  Effect.tryPromise({
+    try: () =>
+      createViteServer({
+        appType: "spa",
+        root: getPlaygroundRoot(),
+        server: {
+          middlewareMode: true,
+        },
+      }),
+    catch: (cause) =>
+      new PlaygroundServerError({
+        message: "Unable to start Vite middleware.",
+        cause,
+      }),
+  }),
+  (vite) =>
+    Effect.promise(() => vite.close()).pipe(Effect.catchAll(() => Effect.void)),
+);
 
 const serveClient = (
   request: IncomingMessage,
@@ -403,7 +491,9 @@ const serveClient = (
     return serveWithVite(request, response, vite);
   }
 
-  return loadIndexHtml().pipe(Effect.flatMap((html) => sendHtml(response, html)));
+  return loadIndexHtml().pipe(
+    Effect.flatMap((html) => sendHtml(response, html)),
+  );
 };
 
 const serveWithVite = (
@@ -508,27 +598,29 @@ const closeServer = (
       }),
   );
 
-const waitForProcessClose: Effect.Effect<void> = Effect.async<void>((resume) => {
-  const done = (): void => {
-    process.stdin.off("close", done);
-    process.stdin.off("end", done);
-    process.off("SIGINT", done);
-    process.off("SIGTERM", done);
-    resume(Effect.void);
-  };
+const waitForProcessClose: Effect.Effect<void> = Effect.async<void>(
+  (resume) => {
+    const done = (): void => {
+      process.stdin.off("close", done);
+      process.stdin.off("end", done);
+      process.off("SIGINT", done);
+      process.off("SIGTERM", done);
+      resume(Effect.void);
+    };
 
-  process.stdin.once("close", done);
-  process.stdin.once("end", done);
-  process.once("SIGINT", done);
-  process.once("SIGTERM", done);
+    process.stdin.once("close", done);
+    process.stdin.once("end", done);
+    process.once("SIGINT", done);
+    process.once("SIGTERM", done);
 
-  return Effect.sync(() => {
-    process.stdin.off("close", done);
-    process.stdin.off("end", done);
-    process.off("SIGINT", done);
-    process.off("SIGTERM", done);
-  });
-});
+    return Effect.sync(() => {
+      process.stdin.off("close", done);
+      process.stdin.off("end", done);
+      process.off("SIGINT", done);
+      process.off("SIGTERM", done);
+    });
+  },
+);
 
 const readJson = (
   request: IncomingMessage,
@@ -597,7 +689,9 @@ const sendResponse = (
       }),
   });
 
-const toErrorBody = (cause: unknown): {
+const toErrorBody = (
+  cause: unknown,
+): {
   readonly error: string;
   readonly tag?: string;
 } => {

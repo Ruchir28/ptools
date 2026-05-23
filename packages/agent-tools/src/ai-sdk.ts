@@ -7,16 +7,30 @@ import type {
 } from "./types.js";
 
 const CODE_MODE_TOOL_NAMES: ReadonlyArray<CodeModeToolName> = [
+  "search_providers",
   "search",
   "get_tool_schema",
   "execute",
 ];
 
-const SearchInputSchema = z.object({
+const SearchProvidersInputSchema = z.object({
   query: z.string().optional(),
+  limit: z.number().int().positive().optional(),
+});
+
+const SearchInputSchema = z.object({
+  query: z.string().trim().min(1),
+  provider: z.string().trim().min(1).optional(),
+  limit: z.number().int().positive().optional(),
 });
 
 const ToolSchemaInputSchema = z.object({
+  toolIds: z
+    .array(z.string().trim().min(1))
+    .optional()
+    .describe(
+      "Preferred copy-safe tool IDs returned by search, such as github.create_issue.",
+    ),
   tools: z
     .array(
       z.object({
@@ -24,8 +38,9 @@ const ToolSchemaInputSchema = z.object({
         jsToolName: z.string().trim().min(1),
       }),
     )
+    .optional()
     .describe(
-      "Selected tools from search whose full schemas and TypeScript declarations are needed.",
+      "Compatibility selector for tools selected from search when toolIds are not used.",
     ),
 });
 
@@ -95,17 +110,24 @@ const makeAISDKTool = (
   };
 
   switch (canonicalName) {
+    case "search_providers":
+      return tool({
+        description:
+          'Find configured MCP provider namespaces. Call with {} to list all providers, or with { query: "..." } to find providers by name or capability. Use a returned provider value to narrow ptools_search when helpful.',
+        inputSchema: SearchProvidersInputSchema,
+        execute,
+      });
     case "search":
       return tool({
         description:
-          "Enumerate available MCP-backed provider APIs. Call with no arguments first to list every provider and tool, then optionally pass a query to narrow results. Always start without a query so you know what providers exist before searching for specific terms.",
+          'Find MCP-backed actions for a task. Call with { query: "..." }, optionally with { provider: "..." } to narrow. Use returned action.toolId values with ptools_get_tool_schema before ptools_execute.',
         inputSchema: SearchInputSchema,
         execute,
       });
     case "get_tool_schema":
       return tool({
         description:
-          "Fetch full JSON schemas and TypeScript declaration snippets for selected ptools Code Mode tools before writing execute code.",
+          "Fetch full JSON schemas and TypeScript declaration snippets for selected ptools Code Mode actions before writing execute code. Prefer toolIds returned by ptools_search.",
         inputSchema: ToolSchemaInputSchema,
         execute,
       });

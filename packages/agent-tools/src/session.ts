@@ -1,6 +1,7 @@
 import {
   CodeMode,
   type CodeModeExecuteRequest,
+  type CodeModeSearchProvidersRequest,
   type CodeModeSearchRequest,
   type CodeModeToolSchemaRequest,
   makeCodeModeLive,
@@ -77,6 +78,10 @@ export const makePtoolsSession = (
         const codeMode = yield* CodeMode;
 
         switch (name as CodeModeToolName | string) {
+          case "search_providers":
+            return yield* codeMode.searchProviders(
+              parseSearchProvidersInput(input),
+            );
           case "search":
             return yield* codeMode.search(parseSearchInput(input));
           case "get_tool_schema":
@@ -101,48 +106,115 @@ export const makePtoolsSession = (
   close: () => runtime.dispose(),
 });
 
-const parseSearchInput = (input: unknown): CodeModeSearchRequest => {
+const parseSearchProvidersInput = (
+  input: unknown,
+): CodeModeSearchProvidersRequest => {
   if (input === undefined) {
     return {};
   }
 
-  const value = expectRecord(input, "search input");
+  const value = expectRecord(input, "search_providers input");
 
   if (value.query !== undefined && typeof value.query !== "string") {
-    throw new TypeError("search.query must be a string when provided");
+    throw new TypeError(
+      "search_providers.query must be a string when provided",
+    );
   }
 
-  return value.query === undefined ? {} : { query: value.query };
+  if (value.limit !== undefined && !isPositiveInteger(value.limit)) {
+    throw new TypeError(
+      "search_providers.limit must be a positive integer when provided",
+    );
+  }
+
+  return {
+    ...(value.query === undefined ? {} : { query: value.query }),
+    ...(value.limit === undefined ? {} : { limit: value.limit }),
+  };
+};
+
+const parseSearchInput = (input: unknown): CodeModeSearchRequest => {
+  const value = expectRecord(input, "search input");
+
+  if (typeof value.query !== "string" || value.query.trim() === "") {
+    throw new TypeError("search.query must be a non-blank string");
+  }
+
+  if (value.provider !== undefined && typeof value.provider !== "string") {
+    throw new TypeError("search.provider must be a string when provided");
+  }
+
+  if (value.limit !== undefined && !isPositiveInteger(value.limit)) {
+    throw new TypeError(
+      "search.limit must be a positive integer when provided",
+    );
+  }
+
+  return {
+    query: value.query,
+    ...(value.provider === undefined ? {} : { provider: value.provider }),
+    ...(value.limit === undefined ? {} : { limit: value.limit }),
+  };
 };
 
 const parseToolSchemaInput = (input: unknown): CodeModeToolSchemaRequest => {
   const value = expectRecord(input, "get_tool_schema input");
 
-  if (!Array.isArray(value.tools)) {
+  if (value.toolIds !== undefined && !Array.isArray(value.toolIds)) {
+    throw new TypeError("get_tool_schema.toolIds must be an array");
+  }
+
+  if (value.tools !== undefined && !Array.isArray(value.tools)) {
     throw new TypeError("get_tool_schema.tools must be an array");
   }
 
+  if (value.toolIds === undefined && value.tools === undefined) {
+    throw new TypeError(
+      "get_tool_schema requires toolIds or tools to be provided",
+    );
+  }
+
   return {
-    tools: value.tools.map((tool, index) => {
-      const selected = expectRecord(tool, `get_tool_schema.tools[${index}]`);
+    ...(value.toolIds === undefined
+      ? {}
+      : {
+          toolIds: value.toolIds.map((toolId, index) => {
+            if (typeof toolId !== "string" || toolId.trim() === "") {
+              throw new TypeError(
+                `get_tool_schema.toolIds[${index}] must be a non-blank string`,
+              );
+            }
 
-      if (typeof selected.jsServerName !== "string") {
-        throw new TypeError(
-          `get_tool_schema.tools[${index}].jsServerName must be a string`,
-        );
-      }
+            return toolId;
+          }),
+        }),
+    ...(value.tools === undefined
+      ? {}
+      : {
+          tools: value.tools.map((tool, index) => {
+            const selected = expectRecord(
+              tool,
+              `get_tool_schema.tools[${index}]`,
+            );
 
-      if (typeof selected.jsToolName !== "string") {
-        throw new TypeError(
-          `get_tool_schema.tools[${index}].jsToolName must be a string`,
-        );
-      }
+            if (typeof selected.jsServerName !== "string") {
+              throw new TypeError(
+                `get_tool_schema.tools[${index}].jsServerName must be a string`,
+              );
+            }
 
-      return {
-        jsServerName: selected.jsServerName,
-        jsToolName: selected.jsToolName,
-      };
-    }),
+            if (typeof selected.jsToolName !== "string") {
+              throw new TypeError(
+                `get_tool_schema.tools[${index}].jsToolName must be a string`,
+              );
+            }
+
+            return {
+              jsServerName: selected.jsServerName,
+              jsToolName: selected.jsToolName,
+            };
+          }),
+        }),
   };
 };
 
@@ -172,6 +244,9 @@ const expectRecord = (
 
   return value as Record<string, unknown>;
 };
+
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0;
 
 const resolveConfigFilePath = (path: string, cwd: string): string =>
   isAbsolute(path) ? path : resolve(cwd, path);

@@ -18,10 +18,10 @@ describe("CodeMode stdio MCP integration", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        const fullSearchResult = yield* codeMode.search();
+        const providerResult = yield* codeMode.searchProviders();
         const echoContext = yield* codeMode.search({ query: "echo" });
         const echoSchema = yield* codeMode.toolSchema({
-          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+          toolIds: ["fixture.echo"],
         });
         const echoRun = yield* codeMode.execute({
           code: `async () => {
@@ -55,7 +55,7 @@ describe("CodeMode stdio MCP integration", () => {
         );
 
         return {
-          fullSearchResult,
+          providerResult,
           echoContext,
           echoSchema,
           echoRun,
@@ -66,12 +66,11 @@ describe("CodeMode stdio MCP integration", () => {
       }).pipe(Effect.provide(makeIntegrationLive(fixturePath))),
     );
 
-    expect(toToolKeys(result.fullSearchResult)).toEqual([
-      "fixture.echo",
-      "fixture.add",
-    ]);
+    expect(
+      result.providerResult.providers.map((item) => item.provider),
+    ).toEqual(["fixture"]);
     expect(toToolKeys(result.echoContext)).toEqual(["fixture.echo"]);
-    expect(result.fullSearchResult).not.toHaveProperty("declarations");
+    expect(result.providerResult).not.toHaveProperty("declarations");
     expect(result.echoSchema.tools[0]).not.toHaveProperty("declaration");
     expect(result.echoSchema.declarationsByServer[0]?.declaration).toContain(
       "declare namespace fixture",
@@ -111,11 +110,5 @@ const makeIntegrationLive = (fixturePath: string) =>
   );
 
 const toToolKeys = (context: {
-  readonly servers: ReadonlyArray<{
-    readonly jsServerName: string;
-    readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
-  }>;
-}) =>
-  context.servers.flatMap((server) =>
-    server.tools.map((tool) => `${server.jsServerName}.${tool.jsToolName}`),
-  );
+  readonly actions: ReadonlyArray<{ readonly toolId: string }>;
+}) => context.actions.map((action) => action.toolId);

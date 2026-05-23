@@ -4,10 +4,11 @@ import { toAISDKTools } from "../src/ai-sdk.js";
 import type { CodeModeToolName, PtoolsSession } from "../src/types.js";
 
 describe("toAISDKTools", () => {
-  it("returns exactly three default-prefixed tools", () => {
+  it("returns exactly four default-prefixed tools", () => {
     const tools = toAISDKTools(fakeSession());
 
     expect(Object.keys(tools)).toEqual([
+      "ptools_search_providers",
       "ptools_search",
       "ptools_get_tool_schema",
       "ptools_execute",
@@ -18,6 +19,7 @@ describe("toAISDKTools", () => {
     const tools = toAISDKTools(fakeSession(), { toolNamePrefix: false });
 
     expect(Object.keys(tools)).toEqual([
+      "search_providers",
       "search",
       "get_tool_schema",
       "execute",
@@ -28,6 +30,7 @@ describe("toAISDKTools", () => {
     const tools = toAISDKTools(fakeSession(), { toolNamePrefix: "mcp_" });
 
     expect(Object.keys(tools)).toEqual([
+      "mcp_search_providers",
       "mcp_search",
       "mcp_get_tool_schema",
       "mcp_execute",
@@ -41,6 +44,9 @@ describe("toAISDKTools", () => {
     }> = [];
     const tools = toAISDKTools(fakeSession(calls), { toolNamePrefix: "mcp_" });
 
+    await expect(
+      runAISDKToolExecuteForTest(tools, "mcp_search_providers", {}),
+    ).resolves.toEqual({ name: "search_providers", input: {} });
     await expect(
       runAISDKToolExecuteForTest(tools, "mcp_search", { query: "auth" }),
     ).resolves.toEqual({ name: "search", input: { query: "auth" } });
@@ -64,6 +70,7 @@ describe("toAISDKTools", () => {
     });
 
     expect(calls.map((call) => call.name)).toEqual([
+      "search_providers",
       "search",
       "get_tool_schema",
       "execute",
@@ -95,6 +102,7 @@ describe("toAISDKTools", () => {
     const tools = toAISDKTools(fakeSession(), { toolNamePrefix: "" });
 
     expect(Object.keys(tools)).toEqual([
+      "search_providers",
       "search",
       "get_tool_schema",
       "execute",
@@ -111,7 +119,7 @@ describe("toAISDKTools", () => {
     });
 
     await expect(
-      runAISDKToolExecuteForTest(tools, "ptools_search", {}),
+      runAISDKToolExecuteForTest(tools, "ptools_search_providers", {}),
     ).rejects.toThrow("code mode failed");
   });
 });

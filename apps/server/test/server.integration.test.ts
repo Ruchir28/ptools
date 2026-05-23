@@ -48,37 +48,28 @@ describe("combined Code Mode MCP server", () => {
       "execute",
       "get_tool_schema",
       "search",
+      "search_providers",
     ]);
 
-    const fullSearch = await client.callTool({
-      name: "search",
+    const providerSearch = await client.callTool({
+      name: "search_providers",
       arguments: {},
     });
-    const fullSearchResult = fullSearch.structuredContent as {
-      readonly servers: ReadonlyArray<{
-        readonly jsServerName: string;
-        readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
-      }>;
+    const providerSearchResult = providerSearch.structuredContent as {
+      readonly providers: ReadonlyArray<{ readonly provider: string }>;
     };
 
-    expect([...toToolKeys(fullSearchResult)].sort()).toEqual([
-      "fixture.add",
-      "fixture.echo",
-    ]);
-    expect(fullSearchResult).not.toHaveProperty("declarations");
-    expect(fullSearchResult.servers[0]?.tools[0]).not.toHaveProperty(
-      "inputSchema",
+    expect(providerSearchResult.providers.map((item) => item.provider)).toEqual(
+      ["fixture"],
     );
-    expect(extractTextContent(fullSearch)).toContain(
-      "code must be a JavaScript function expression",
-    );
-    expect(extractTextContent(fullSearch)).toContain("get_tool_schema");
-    expect(extractTextContent(fullSearch)).not.toContain("Diagnostics:");
+    expect(providerSearchResult).not.toHaveProperty("declarations");
+    expect(extractTextContent(providerSearch)).toContain("Provider discovery");
+    expect(extractTextContent(providerSearch)).not.toContain("Diagnostics:");
 
     const schema = await client.callTool({
       name: "get_tool_schema",
       arguments: {
-        tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+        toolIds: ["fixture.echo"],
       },
     });
     const schemaResult = schema.structuredContent as {
@@ -108,7 +99,9 @@ describe("combined Code Mode MCP server", () => {
       name: "search",
       arguments: { query: "echo" },
     });
-    const echoContext = echoSearch.structuredContent as typeof fullSearchResult;
+    const echoContext = echoSearch.structuredContent as {
+      readonly actions: ReadonlyArray<{ readonly toolId: string }>;
+    };
 
     expect(toToolKeys(echoContext)).toEqual(["fixture.echo"]);
 
@@ -160,21 +153,22 @@ describe("combined Code Mode MCP server", () => {
       "execute",
       "get_tool_schema",
       "search",
+      "search_providers",
     ]);
 
     const search = await client.callTool({
-      name: "search",
+      name: "search_providers",
       arguments: {},
     });
     const context = search.structuredContent as {
-      readonly servers: ReadonlyArray<unknown>;
+      readonly providers: ReadonlyArray<unknown>;
       readonly diagnostics: ReadonlyArray<{
         readonly code: string;
         readonly serverName: string;
       }>;
     };
 
-    expect(context.servers).toEqual([]);
+    expect(context.providers).toEqual([]);
     expect(context.diagnostics).toEqual([
       expect.objectContaining({
         code: "McpConnectionFailed",
@@ -203,13 +197,10 @@ describe("combined Code Mode MCP server", () => {
 
     const search = await client.callTool({
       name: "search",
-      arguments: {},
+      arguments: { query: "upload" },
     });
     const context = search.structuredContent as {
-      readonly servers: ReadonlyArray<{
-        readonly jsServerName: string;
-        readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
-      }>;
+      readonly actions: ReadonlyArray<{ readonly toolId: string }>;
       readonly diagnostics: ReadonlyArray<{
         readonly code: string;
         readonly serverName: string;
@@ -339,14 +330,8 @@ const writeBrokenOutputConfig = async (): Promise<string> => {
 };
 
 const toToolKeys = (context: {
-  readonly servers: ReadonlyArray<{
-    readonly jsServerName: string;
-    readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
-  }>;
-}): ReadonlyArray<string> =>
-  context.servers.flatMap((server) =>
-    server.tools.map((tool) => `${server.jsServerName}.${tool.jsToolName}`),
-  );
+  readonly actions: ReadonlyArray<{ readonly toolId: string }>;
+}): ReadonlyArray<string> => context.actions.map((action) => action.toolId);
 
 const extractTextContent = (result: unknown): string => {
   const content =

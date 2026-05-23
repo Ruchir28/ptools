@@ -22,7 +22,23 @@ The sandbox/executor is a code execution detail. The authoritative layer is alwa
 - `packages/code-mode`: reserved for search/execute orchestration over registry metadata and runtime proxies.
 - `packages/executor`: reserved for configurable code execution implementations.
 - `apps/server`: reserved for the combined MCP server entrypoint.
-- `planner/spec.md`: project-wide spec and current direction.
+- Private planning docs live outside the git repo at `../planner` when this
+  checkout is under `ptools-project/ptools`. Use those docs for agent planning,
+  but do not move them back into the repo or treat them as public artifacts.
+
+## Local Project Layout
+
+The preferred local layout is:
+
+```txt
+ptools-project/
+  ptools/   # this git repo
+  planner/  # private planning notes for agents, outside git
+```
+
+When a task references planner tickets or specs, check `../planner` first. The
+planner folder is intentionally private so the repo can become public-safe
+later.
 
 ## Implementation Rules
 

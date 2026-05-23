@@ -2,14 +2,37 @@ import type { CapturedLog } from "@ptools/executor";
 import type { McpRegistryDiagnostic } from "@ptools/mcp-registry";
 
 /**
- * Request for discovering the currently available Code Mode API surface.
+ * Request for discovering configured provider namespaces.
+ */
+export interface CodeModeSearchProvidersRequest {
+  /**
+   * Optional text query used to filter providers by name or capability hints.
+   * Blank or missing means "return every provider".
+   */
+  readonly query?: string;
+  /**
+   * Optional maximum number of provider rows to return.
+   */
+  readonly limit?: number;
+}
+
+/**
+ * Request for discovering callable Code Mode actions.
  */
 export interface CodeModeSearchRequest {
   /**
-   * Optional text query used to filter servers/tools by name, title, or
-   * description. Blank or missing means "return everything".
+   * Text query used to filter actions by provider, name, title, description,
+   * or top-level input fields. Must be non-blank.
    */
-  readonly query?: string;
+  readonly query: string;
+  /**
+   * Optional generated-code provider namespace used to narrow action search.
+   */
+  readonly provider?: string;
+  /**
+   * Optional maximum number of action rows to return.
+   */
+  readonly limit?: number;
 }
 
 /**
@@ -17,9 +40,13 @@ export interface CodeModeSearchRequest {
  */
 export interface CodeModeToolSchemaRequest {
   /**
-   * Batched list of sanitized provider/tool names selected from `search()`.
+   * Copy-safe tool IDs returned by action search, e.g. `github.create_issue`.
    */
-  readonly tools: ReadonlyArray<{
+  readonly toolIds?: ReadonlyArray<string>;
+  /**
+   * Batched list of sanitized provider/tool names selected from action search.
+   */
+  readonly tools?: ReadonlyArray<{
     readonly jsServerName: string;
     readonly jsToolName: string;
   }>;
@@ -66,13 +93,28 @@ export interface CodeModeRunResult {
 }
 
 /**
- * Model-facing discovery payload returned by `search`.
+ * Model-facing provider discovery payload returned by `search_providers`.
+ */
+export interface CodeModeSearchProvidersResult {
+  /**
+   * Compact provider summaries for matching upstream MCP servers.
+   */
+  readonly providers: ReadonlyArray<CodeModeProviderSummary>;
+  /**
+   * Registry diagnostics collected while connecting and discovering upstream
+   * MCP servers. Empty means every configured upstream loaded cleanly.
+   */
+  readonly diagnostics: ReadonlyArray<CodeModeDiagnostic>;
+}
+
+/**
+ * Model-facing action discovery payload returned by `search`.
  */
 export interface CodeModeSearchResult {
   /**
-   * Grouped server/tool summaries for the matching API surface.
+   * Flat action candidates for the matching callable API surface.
    */
-  readonly servers: ReadonlyArray<CodeModeServerSummary>;
+  readonly actions: ReadonlyArray<CodeModeActionCandidate>;
   /**
    * Registry diagnostics collected while connecting and discovering upstream
    * MCP servers. Empty means every configured upstream loaded cleanly.
@@ -104,6 +146,61 @@ export interface CodeModeServerDeclaration {
    * code and includes referenced input/output types.
    */
   readonly declaration: string;
+}
+
+/**
+ * Compact provider summary used by provider discovery.
+ */
+export interface CodeModeProviderSummary {
+  /**
+   * Generated-code provider namespace.
+   */
+  readonly provider: string;
+  /**
+   * Human-facing provider display name.
+   */
+  readonly displayName: string;
+  /**
+   * Number of actions available under this provider.
+   */
+  readonly toolCount: number;
+  /**
+   * Optional provider description from real upstream/server metadata when
+   * available. Omitted rather than filled with generic boilerplate.
+   */
+  readonly description?: string;
+  /**
+   * Short query examples derived from discovered action names.
+   */
+  readonly exampleQueries: ReadonlyArray<string>;
+}
+
+/**
+ * Flat schema-free action row used by action discovery.
+ */
+export interface CodeModeActionCandidate {
+  /**
+   * Copy-safe selector accepted by `get_tool_schema`.
+   */
+  readonly toolId: string;
+  /**
+   * Generated-code provider namespace.
+   */
+  readonly provider: string;
+  /**
+   * Generated-code action/function name.
+   */
+  readonly action: string;
+  /**
+   * Short code-shaped call hint.
+   */
+  readonly call: string;
+  readonly title?: string;
+  readonly description?: string;
+  /**
+   * Best-effort top-level input field names from the input schema.
+   */
+  readonly inputFields: ReadonlyArray<string>;
 }
 
 /**

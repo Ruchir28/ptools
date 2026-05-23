@@ -2,7 +2,11 @@ import type { CodeModeDiagnostic } from "@ptools/code-mode";
 import type { LocalSandboxExecutorOptions } from "@ptools/executor";
 import type { UpstreamMcpServers } from "@ptools/mcp-registry";
 
-export type CodeModeToolName = "search" | "get_tool_schema" | "execute";
+export type CodeModeToolName =
+  | "search_providers"
+  | "search"
+  | "get_tool_schema"
+  | "execute";
 
 export interface CreatePtoolsSessionOptions {
   readonly mcpServers: UpstreamMcpServers;

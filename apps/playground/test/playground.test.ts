@@ -91,17 +91,11 @@ describe("Code Mode playground", () => {
     expect(result.page).toContain("ptools MCP Playground");
     expect(result.context.summary).toEqual({
       serverCount: 1,
-      toolCount: 2,
+      toolCount: 0,
       diagnosticCount: 0,
     });
-    expect(toToolKeys(result.context.context)).toEqual([
-      "fixture.echo",
-      "fixture.add",
-    ]);
+    expect(toToolKeys(result.context.context)).toEqual([]);
     expect(result.context.context).not.toHaveProperty("declarations");
-    expect(result.context.context.servers[0]?.tools[0]).not.toHaveProperty(
-      "inputSchema",
-    );
     expect(toToolKeys(result.filtered.context)).toEqual(["fixture.echo"]);
     expect(result.addSchema.tools[0]).not.toHaveProperty("declaration");
     expect(result.addSchema.declarationsByServer[0]?.declaration).toContain(

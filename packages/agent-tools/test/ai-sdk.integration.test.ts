@@ -31,16 +31,19 @@ describe("AI SDK adapter integration", () => {
 
     try {
       const tools = toAISDKTools(ptools);
-      const search = await runAISDKToolExecuteForTest(
+      const providers = await runAISDKToolExecuteForTest(
         tools,
-        "ptools_search",
+        "ptools_search_providers",
         {},
       );
+      const search = await runAISDKToolExecuteForTest(tools, "ptools_search", {
+        query: "echo",
+      });
       const schema = await runAISDKToolExecuteForTest(
         tools,
         "ptools_get_tool_schema",
         {
-          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+          toolIds: ["fixture.echo"],
         },
       );
       const run = await runAISDKToolExecuteForTest(tools, "ptools_execute", {
@@ -49,8 +52,8 @@ describe("AI SDK adapter integration", () => {
         }`,
       });
 
-      expect(toToolKeys(search)).toEqual(["fixture.echo", "fixture.add"]);
-      console.log("schema", JSON.stringify(schema, null, 2));
+      expect(toProviderNames(providers)).toEqual(["fixture"]);
+      expect(toToolKeys(search)).toEqual(["fixture.echo"]);
       expect(toSchemaToolKeys(schema)).toEqual(["fixture.echo"]);
       expect(run).toEqual(
         expect.objectContaining({
@@ -87,10 +90,12 @@ describe("AI SDK adapter integration", () => {
 
         switch (generateCount) {
           case 1:
-            return mockModelToolCall("call-search", "ptools_search", {});
+            return mockModelToolCall("call-search", "ptools_search", {
+              query: "echo",
+            });
           case 2:
             return mockModelToolCall("call-schema", "ptools_get_tool_schema", {
-              tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+              toolIds: ["fixture.echo"],
             });
           case 3:
             return mockModelToolCall("call-execute", "ptools_execute", {
@@ -128,19 +133,20 @@ describe("AI SDK adapter integration", () => {
       );
       expect(model.doGenerateCalls).toHaveLength(4);
       expect(model.doGenerateCalls[0]?.tools?.map((tool) => tool.name)).toEqual(
-        ["ptools_search", "ptools_get_tool_schema", "ptools_execute"],
+        [
+          "ptools_search_providers",
+          "ptools_search",
+          "ptools_get_tool_schema",
+          "ptools_execute",
+        ],
       );
       expect(result.steps[0]?.toolResults[0]).toEqual(
         expect.objectContaining({
           toolName: "ptools_search",
           output: expect.objectContaining({
-            servers: [
+            actions: [
               expect.objectContaining({
-                jsServerName: "fixture",
-                tools: [
-                  expect.objectContaining({ jsToolName: "echo" }),
-                  expect.objectContaining({ jsToolName: "add" }),
-                ],
+                toolId: "fixture.echo",
               }),
             ],
           }),
@@ -156,9 +162,9 @@ describe("AI SDK adapter integration", () => {
             output: expect.objectContaining({
               type: "json",
               value: expect.objectContaining({
-                servers: [
+                actions: [
                   expect.objectContaining({
-                    jsServerName: "fixture",
+                    toolId: "fixture.echo",
                   }),
                 ],
               }),
@@ -237,6 +243,7 @@ describe("AI SDK adapter integration", () => {
       const tools = toAISDKTools(ptools);
 
       expect(Object.keys(tools)).toEqual([
+        "ptools_search_providers",
         "ptools_search",
         "ptools_get_tool_schema",
         "ptools_execute",
@@ -274,15 +281,18 @@ const runAISDKToolExecuteForTest = async (
 
 const toToolKeys = (value: unknown): ReadonlyArray<string> => {
   const context = value as {
-    readonly servers: ReadonlyArray<{
-      readonly jsServerName: string;
-      readonly tools: ReadonlyArray<{ readonly jsToolName: string }>;
-    }>;
+    readonly actions: ReadonlyArray<{ readonly toolId: string }>;
   };
 
-  return context.servers.flatMap((server) =>
-    server.tools.map((tool) => `${server.jsServerName}.${tool.jsToolName}`),
-  );
+  return context.actions.map((action) => action.toolId);
+};
+
+const toProviderNames = (value: unknown): ReadonlyArray<string> => {
+  const context = value as {
+    readonly providers: ReadonlyArray<{ readonly provider: string }>;
+  };
+
+  return context.providers.map((provider) => provider.provider);
 };
 
 const toSchemaToolKeys = (value: unknown): ReadonlyArray<string> => {

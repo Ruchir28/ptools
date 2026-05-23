@@ -17,14 +17,17 @@ import {
 } from "./declarations.js";
 import { CodeModeInvariantError } from "./errors.js";
 import type {
+  CodeModeActionCandidate,
+  CodeModeProviderSummary,
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchProvidersResult,
   CodeModeSearchResult,
   CodeModeServerMetadata,
-  CodeModeServerSummary,
   CodeModeToolSchemaRequest,
   CodeModeToolSchemaResult,
   CodeModeToolSchema,
   CodeModeToolMetadata,
-  CodeModeToolSummary,
+  CodeModeSearchRequest,
 } from "./types.js";
 import { unwrapMcpToolResult } from "./unwrap.js";
 
@@ -38,7 +41,7 @@ export interface CodeModeRuntime {
   readonly servers: ReadonlyArray<CodeModeServerMetadata>;
   readonly providers: ExecutorProviders;
   readonly declarationIndex: DeclarationIndex;
-  readonly fullSearchResult: CodeModeSearchResult;
+  readonly fullProviderSearchResult: CodeModeSearchProvidersResult;
   readonly diagnostics: ReadonlyArray<McpRegistryDiagnostic>;
 }
 
@@ -77,31 +80,62 @@ export const buildCodeModeRuntime = (
       servers,
       options.schemaCompiler,
     );
-    const fullSearchResult = makeCodeModeSearchResult(servers, diagnostics);
+    const fullProviderSearchResult = makeCodeModeSearchProvidersResult(
+      servers,
+      diagnostics,
+    );
 
     return {
       servers,
       providers,
       declarationIndex,
-      fullSearchResult,
+      fullProviderSearchResult,
       diagnostics,
     };
   });
 
 /**
- * Builds a schema-free model-facing Code Mode search result.
+ * Builds a schema-free model-facing provider search result.
  *
  * @param servers Grouped server/tool metadata.
  * @param diagnostics Registry diagnostics to carry alongside search results.
- * @returns Metadata summaries without raw schemas or declaration bundles.
+ * @param request Optional provider-search request.
+ * @returns Compact provider summaries without raw schemas or declaration bundles.
+ */
+export const makeCodeModeSearchProvidersResult = (
+  servers: ReadonlyArray<CodeModeServerMetadata>,
+  diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
+  request: CodeModeSearchProvidersRequest = {},
+): CodeModeSearchProvidersResult => ({
+  providers: limitRows(
+    rankProviders(servers, tokenize(request.query)).map(
+      toCodeModeProviderSummary,
+    ),
+    request.limit,
+  ),
+  diagnostics,
+});
+
+/**
+ * Builds a schema-free model-facing action search result.
+ *
+ * @param servers Grouped server/tool metadata.
+ * @param diagnostics Registry diagnostics to carry alongside search results.
+ * @param request Required action-search request.
+ * @returns Flat action candidates without raw schemas or declaration bundles.
  */
 export const makeCodeModeSearchResult = (
   servers: ReadonlyArray<CodeModeServerMetadata>,
-  diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
-): CodeModeSearchResult => ({
-  servers: servers.map(toCodeModeServerSummary),
-  diagnostics,
-});
+  diagnostics: ReadonlyArray<McpRegistryDiagnostic>,
+  request: CodeModeSearchRequest,
+): Effect.Effect<CodeModeSearchResult, CodeModeInvariantError> =>
+  Effect.try({
+    try: () => ({
+      actions: limitRows(searchActions(servers, request), request.limit),
+      diagnostics,
+    }),
+    catch: normalizeInvariantError,
+  });
 
 /**
  * Looks up full schema/declaration details for selected tools.
@@ -124,42 +158,45 @@ export const makeCodeModeToolSchemaResult = (
           readonly tools: Array<CodeModeToolMetadata>;
         }
       >();
-      const tools: Array<CodeModeToolSchema> = request.tools.map((requested) => {
-        const resolved = resolveCodeModeTool(servers, requested);
-        const group = grouped.get(resolved.server.jsServerName);
+      const selectedTools = normalizeToolSchemaSelectors(request);
+      const tools: Array<CodeModeToolSchema> = selectedTools.map(
+        (requested) => {
+          const resolved = resolveCodeModeTool(servers, requested);
+          const group = grouped.get(resolved.server.jsServerName);
 
-        if (group === undefined) {
-          grouped.set(resolved.server.jsServerName, {
-            server: resolved.server,
-            tools: [resolved.tool],
-          });
-        } else {
-          group.tools.push(resolved.tool);
-        }
+          if (group === undefined) {
+            grouped.set(resolved.server.jsServerName, {
+              server: resolved.server,
+              tools: [resolved.tool],
+            });
+          } else {
+            group.tools.push(resolved.tool);
+          }
 
-        return {
-          serverName: resolved.server.serverName,
-          jsServerName: resolved.server.jsServerName,
-          originalToolName: resolved.tool.originalToolName,
-          jsToolName: resolved.tool.jsToolName,
-          ...(resolved.tool.title === undefined
-            ? {}
-            : { title: resolved.tool.title }),
-          ...(resolved.tool.description === undefined
-            ? {}
-            : { description: resolved.tool.description }),
-          inputSchema: resolved.tool.inputSchema,
-          ...(resolved.tool.outputSchema === undefined
-            ? {}
-            : { outputSchema: resolved.tool.outputSchema }),
-          ...(resolved.tool.outputSchemaInvalid === undefined
-            ? {}
-            : { outputSchemaInvalid: resolved.tool.outputSchemaInvalid }),
-          ...(resolved.tool.annotations === undefined
-            ? {}
-            : { annotations: resolved.tool.annotations }),
-        };
-      });
+          return {
+            serverName: resolved.server.serverName,
+            jsServerName: resolved.server.jsServerName,
+            originalToolName: resolved.tool.originalToolName,
+            jsToolName: resolved.tool.jsToolName,
+            ...(resolved.tool.title === undefined
+              ? {}
+              : { title: resolved.tool.title }),
+            ...(resolved.tool.description === undefined
+              ? {}
+              : { description: resolved.tool.description }),
+            inputSchema: resolved.tool.inputSchema,
+            ...(resolved.tool.outputSchema === undefined
+              ? {}
+              : { outputSchema: resolved.tool.outputSchema }),
+            ...(resolved.tool.outputSchemaInvalid === undefined
+              ? {}
+              : { outputSchemaInvalid: resolved.tool.outputSchemaInvalid }),
+            ...(resolved.tool.annotations === undefined
+              ? {}
+              : { annotations: resolved.tool.annotations }),
+          };
+        },
+      );
 
       return {
         tools,
@@ -177,36 +214,6 @@ export const makeCodeModeToolSchemaResult = (
     },
     catch: normalizeInvariantError,
   });
-
-/**
- * Filters grouped server metadata for `search({ query })`.
- *
- * @param servers Full or already-filtered server metadata.
- * @param query Optional whitespace-separated query string.
- * @returns Matching servers with only matching tools; returns the same array
- * reference when the query is absent or blank.
- */
-export const filterCodeModeServers = (
-  servers: ReadonlyArray<CodeModeServerMetadata>,
-  query?: string,
-): ReadonlyArray<CodeModeServerMetadata> => {
-  const tokens = query
-    ?.trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((token) => token.length > 0);
-
-  if (tokens === undefined || tokens.length === 0) {
-    return servers;
-  }
-
-  return servers
-    .map((server) => ({
-      ...server,
-      tools: server.tools.filter((tool) => matchesTool(server, tool, tokens)),
-    }))
-    .filter((server) => server.tools.length > 0);
-};
 
 /**
  * Groups the registry's flat discovered-tool list by sanitized JS server name.
@@ -343,31 +350,6 @@ const toCodeModeToolMetadata = (
   ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
 });
 
-const toCodeModeServerSummary = (
-  server: CodeModeServerMetadata,
-): CodeModeServerSummary => ({
-  serverName: server.serverName,
-  jsServerName: server.jsServerName,
-  tools: server.tools.map(toCodeModeToolSummary),
-});
-
-const toCodeModeToolSummary = (
-  tool: CodeModeToolMetadata,
-): CodeModeToolSummary => ({
-  originalToolName: tool.originalToolName,
-  jsToolName: tool.jsToolName,
-  ...(tool.title === undefined ? {} : { title: tool.title }),
-  ...(tool.description === undefined ? {} : { description: tool.description }),
-  inputSchemaAvailable: true,
-  ...(tool.outputSchema === undefined || tool.outputSchemaInvalid === true
-    ? {}
-    : { outputSchemaAvailable: true }),
-  ...(tool.outputSchemaInvalid === undefined
-    ? {}
-    : { outputSchemaInvalid: tool.outputSchemaInvalid }),
-  ...(tool.annotations === undefined ? {} : { annotations: tool.annotations }),
-});
-
 const resolveCodeModeTool = (
   servers: ReadonlyArray<CodeModeServerMetadata>,
   requested: {
@@ -401,32 +383,282 @@ const resolveCodeModeTool = (
   return { server, tool };
 };
 
-/**
- * Checks whether a tool should be included for a tokenized search query.
- *
- * @param server Server metadata used for searchable server names.
- * @param tool Tool metadata used for searchable tool names/title/description.
- * @param tokens Lowercase query tokens.
- * @returns `true` when any token appears in the combined searchable text.
- */
-const matchesTool = (
+const normalizeToolSchemaSelectors = (
+  request: CodeModeToolSchemaRequest,
+): ReadonlyArray<{
+  readonly jsServerName: string;
+  readonly jsToolName: string;
+}> => {
+  const fromToolIds =
+    request.toolIds?.map((toolId) => {
+      const separator = toolId.indexOf(".");
+
+      if (separator <= 0 || separator === toolId.length - 1) {
+        throw new CodeModeInvariantError({
+          message: `Invalid Code Mode toolId: ${toolId}`,
+        });
+      }
+
+      return {
+        jsServerName: toolId.slice(0, separator),
+        jsToolName: toolId.slice(separator + 1),
+      };
+    }) ?? [];
+  const fromTools = request.tools ?? [];
+  const selected = [...fromToolIds, ...fromTools];
+
+  if (selected.length === 0) {
+    throw new CodeModeInvariantError({
+      message: "get_tool_schema requires at least one toolId or tool selector",
+    });
+  }
+
+  return selected;
+};
+
+const searchActions = (
+  servers: ReadonlyArray<CodeModeServerMetadata>,
+  request: CodeModeSearchRequest,
+): ReadonlyArray<CodeModeActionCandidate> => {
+  const queryTokens = tokenize(request.query);
+
+  if (queryTokens.length === 0) {
+    throw new CodeModeInvariantError({
+      message: "search.query must be a non-blank string",
+    });
+  }
+
+  const scopedServers =
+    request.provider === undefined
+      ? servers
+      : [resolveProvider(servers, request.provider)];
+
+  return scopedServers
+    .flatMap((server) =>
+      server.tools
+        .map((tool, index) => ({
+          candidate: toCodeModeActionCandidate(server, tool),
+          score: scoreAction(server, tool, queryTokens, request.provider),
+          order: index,
+        }))
+        .filter((match) => match.score > 0)
+        .map((match) => ({
+          ...match,
+          providerOrder: servers.findIndex(
+            (serverMetadata) =>
+              serverMetadata.jsServerName === server.jsServerName,
+          ),
+        })),
+    )
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.providerOrder - right.providerOrder ||
+        left.order - right.order,
+    )
+    .map((match) => match.candidate);
+};
+
+const resolveProvider = (
+  servers: ReadonlyArray<CodeModeServerMetadata>,
+  provider: string,
+): CodeModeServerMetadata => {
+  const server = servers.find(
+    (candidate) => candidate.jsServerName === provider,
+  );
+
+  if (server === undefined) {
+    throw new CodeModeInvariantError({
+      message: `Unknown Code Mode provider: ${provider}`,
+    });
+  }
+
+  return server;
+};
+
+const rankProviders = (
+  servers: ReadonlyArray<CodeModeServerMetadata>,
+  tokens: ReadonlyArray<string>,
+): ReadonlyArray<CodeModeServerMetadata> => {
+  if (tokens.length === 0) {
+    return servers;
+  }
+
+  return servers
+    .map((server, index) => ({
+      server,
+      index,
+      score: scoreProvider(server, tokens),
+    }))
+    .filter((match) => match.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((match) => match.server);
+};
+
+const toCodeModeProviderSummary = (
+  server: CodeModeServerMetadata,
+): CodeModeProviderSummary => {
+  const exampleQueries = server.tools
+    .slice(0, 3)
+    .map((tool) => humanizeIdentifier(tool.title ?? tool.jsToolName));
+
+  return {
+    provider: server.jsServerName,
+    displayName: server.serverName,
+    toolCount: server.tools.length,
+    exampleQueries,
+  };
+};
+
+const toCodeModeActionCandidate = (
+  server: CodeModeServerMetadata,
+  tool: CodeModeToolMetadata,
+): CodeModeActionCandidate => ({
+  toolId: `${server.jsServerName}.${tool.jsToolName}`,
+  provider: server.jsServerName,
+  action: tool.jsToolName,
+  call: `${server.jsServerName}.${tool.jsToolName}({ ... })`,
+  ...(tool.title === undefined ? {} : { title: tool.title }),
+  ...(tool.description === undefined ? {} : { description: tool.description }),
+  inputFields: extractInputFields(tool.inputSchema),
+});
+
+const scoreProvider = (
+  server: CodeModeServerMetadata,
+  tokens: ReadonlyArray<string>,
+): number => {
+  const ownText = [
+    server.jsServerName,
+    server.serverName,
+    ...server.tools
+      .slice(0, 3)
+      .map((tool) => humanizeIdentifier(tool.jsToolName)),
+  ].join(" ");
+  const capabilityText = server.tools
+    .map((tool) =>
+      [
+        tool.originalToolName,
+        tool.jsToolName,
+        tool.title,
+        tool.description,
+        ...extractInputFields(tool.inputSchema),
+      ]
+        .filter((value): value is string => value !== undefined)
+        .join(" "),
+    )
+    .join(" ");
+
+  return tokens.reduce((score, token) => {
+    if (containsToken(ownText, token)) {
+      return score + 10;
+    }
+
+    if (containsToken(capabilityText, token)) {
+      return score + 2;
+    }
+
+    return score;
+  }, 0);
+};
+
+const scoreAction = (
   server: CodeModeServerMetadata,
   tool: CodeModeToolMetadata,
   tokens: ReadonlyArray<string>,
-): boolean => {
-  const searchable = [
-    server.serverName,
-    server.jsServerName,
+  scopedProvider: string | undefined,
+): number => {
+  const providerTokens = new Set([
+    server.jsServerName.toLowerCase(),
+    server.serverName.toLowerCase(),
+  ]);
+  const actionText = [
     tool.originalToolName,
     tool.jsToolName,
     tool.title,
     tool.description,
+    ...extractInputFields(tool.inputSchema),
   ]
     .filter((value): value is string => value !== undefined)
-    .join(" ")
-    .toLowerCase();
+    .join(" ");
+  // Provider words narrow/boost the provider; remaining words must describe
+  // the action. A provider-only action query is not enough intent to list
+  // every action under that provider.
+  const actionTokens = tokens.filter((token) => !providerTokens.has(token));
 
-  return tokens.some((token) => searchable.includes(token));
+  if (actionTokens.length === 0) {
+    return 0;
+  }
+
+  const matchedActionTokens = actionTokens.filter((token) =>
+    containsToken(actionText, token),
+  );
+
+  if (actionTokens.length > 0 && matchedActionTokens.length === 0) {
+    return 0;
+  }
+
+  const providerScore = tokens.some((token) =>
+    containsToken(`${server.jsServerName} ${server.serverName}`, token),
+  )
+    ? 5
+    : 0;
+  const exactNameScore = tokens.some(
+    (token) =>
+      tool.jsToolName.toLowerCase() === token ||
+      tool.originalToolName.toLowerCase() === token,
+  )
+    ? 20
+    : 0;
+
+  return providerScore + exactNameScore + matchedActionTokens.length * 10;
+};
+
+const limitRows = <T>(
+  rows: ReadonlyArray<T>,
+  limit: number | undefined,
+): ReadonlyArray<T> => {
+  if (limit === undefined) {
+    return rows;
+  }
+
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new CodeModeInvariantError({
+      message: "search.limit must be a positive integer when provided",
+    });
+  }
+
+  return rows.slice(0, limit);
+};
+
+const tokenize = (query: string | undefined): ReadonlyArray<string> =>
+  query
+    ?.trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length > 0) ?? [];
+
+const containsToken = (text: string, token: string): boolean =>
+  text.toLowerCase().includes(token);
+
+const humanizeIdentifier = (identifier: string): string =>
+  identifier.replaceAll("_", " ").replaceAll("-", " ");
+
+const extractInputFields = (schema: unknown): ReadonlyArray<string> => {
+  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) {
+    return [];
+  }
+
+  const properties = (schema as { readonly properties?: unknown }).properties;
+
+  if (
+    properties === null ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return [];
+  }
+
+  return Object.keys(properties);
 };
 
 /**

@@ -96,13 +96,29 @@ try {
 
 ## What Tools The Model Sees
 
-The AI SDK adapter exposes three Code Mode tools with a `ptools_` prefix:
+The AI SDK adapter exposes four Code Mode tools with a `ptools_` prefix:
 
-- `ptools_search`: discover configured MCP providers and tools.
+- `ptools_search_providers`: find configured MCP provider namespaces.
+- `ptools_search`: find callable actions for a task query.
 - `ptools_get_tool_schema`: fetch full schemas and TypeScript declarations for
-  selected tools.
+  selected action `toolId`s.
 - `ptools_execute`: run generated JavaScript against the discovered provider
   APIs.
+
+Use provider discovery when the model is unsure what namespace exists, then use
+action search with task words:
+
+```txt
+ptools_search_providers({ query: "github" })
+ptools_search({ provider: "github", query: "issue" })
+ptools_get_tool_schema({ toolIds: ["github.create_issue"] })
+ptools_execute({ code: "..." })
+```
+
+Provider words in `ptools_search.query` are only context. A provider-only action
+query such as `ptools_search({ query: "github" })` intentionally does not list
+every GitHub action; add action terms like `issue`, `repository`, or `pull
+request`.
 
 The upstream MCP tool names stay inside the host registry. Generated code uses
 sanitized provider APIs, such as `github.createIssue(...)`, and ptools dispatches
