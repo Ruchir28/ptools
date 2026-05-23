@@ -33,6 +33,16 @@ export const publishablePackages = [
       "@ptools/mcp-registry",
     ],
   },
+  {
+    name: "@ptools/mcp-server",
+    dir: "packages/mcp-server",
+    internalDeps: [
+      "@ptools/code-mode",
+      "@ptools/core",
+      "@ptools/executor",
+      "@ptools/mcp-registry",
+    ],
+  },
 ];
 
 export const distFileGlobs = [

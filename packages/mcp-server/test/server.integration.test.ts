@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const serverMainPath = join(repoRoot, "apps/server/src/main.ts");
+const serverMainPath = join(repoRoot, "packages/mcp-server/src/cli.ts");
 const fixtureServerPath = join(
   repoRoot,
   "packages/mcp-registry/test/fixtures/stdio-mcp-server.ts",

@@ -21,7 +21,7 @@ The sandbox/executor is a code execution detail. The authoritative layer is alwa
 - `packages/mcp-registry`: owns upstream MCP client connections, discovery, name sanitization, and dispatch.
 - `packages/code-mode`: reserved for search/execute orchestration over registry metadata and runtime proxies.
 - `packages/executor`: reserved for configurable code execution implementations.
-- `apps/server`: reserved for the combined MCP server entrypoint.
+- `packages/mcp-server`: publishable combined MCP server package and CLI entrypoint.
 - Private planning docs live outside the git repo at `../planner` when this
   checkout is under `ptools-project/ptools`. Use those docs for agent planning,
   but do not move them back into the repo or treat them as public artifacts.

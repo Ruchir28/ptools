@@ -452,7 +452,7 @@ code { font-family: 'Fira Code', 'Monaco', monospace; }
 // ====== DATA ======
 const nodesGlobal = [
   {id:'user',x:80,y:150,label:'User / LLM', color:'#71717a'},
-  {id:'server',x:280,y:150,label:'apps/server', color:'#10b981'},
+  {id:'server',x:280,y:150,label:'packages/mcp-server', color:'#10b981'},
   {id:'codemode',x:480,y:150,label:'CodeMode Service', color:'#10b981'},
   {id:'context',x:700,y:80,label:'context.ts\n(Stitching)', color:'#3b82f6'},
   {id:'decl',x:700,y:220,label:'declarations.ts\n(Index)', color:'#eab308'},
@@ -629,7 +629,7 @@ window.onload = () => {
   drawGraph('global', nodesGlobal, edgesGlobal, n => {
     const map = {
       user: {title:'User / LLM', body:'The consumer of the Code Mode service.'},
-      server: {title:'apps/server', body:'The host application.'},
+      server: {title:'packages/mcp-server', body:'The publishable MCP server package.'},
       codemode: {title:'CodeMode Service', body:'The core Effect service.'},
       context: {title:'context.ts', body:'Now handles sync stitching and cached runtime building.'},
       decl: {title:'declarations.ts', body:'Maintains the fragment cache built at startup.'},

@@ -422,14 +422,3 @@ const safeErrorMessage = (cause: unknown): string => {
 
   return String(cause);
 };
-
-const main = async (): Promise<void> => {
-  await Effect.runPromise(
-    runServer(process.argv.slice(2), process.env, process.cwd()),
-  );
-};
-
-main().catch((cause: unknown) => {
-  process.stderr.write(`${safeErrorMessage(cause)}\n`);
-  process.exitCode = 1;
-});

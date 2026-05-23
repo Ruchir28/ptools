@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { Data, Effect } from "effect";
 
@@ -57,6 +57,11 @@ export interface LoadPtoolsConfigOptions {
 
 type ConfigEnv = Readonly<Record<string, string | undefined>>;
 
+export const DEFAULT_CONFIG_PATHS = [
+  ".ptools/config.json",
+  "ptools.config.json",
+] as const;
+
 /**
  * Parses CLI/env config path inputs into an absolute config file path.
  *
@@ -69,23 +74,44 @@ export const resolveConfigPath = (
   argv: ReadonlyArray<string>,
   env: NodeJS.ProcessEnv,
   cwd: string,
-): Effect.Effect<string, ServerConfigError> => {
-  const cliPath = parseConfigArg(argv);
-  const configPath = cliPath ?? env.PTOOLS_CONFIG;
+): Effect.Effect<string, ServerConfigError> =>
+  Effect.gen(function* () {
+    const cliPath = yield* parseConfigArg(argv);
 
-  if (configPath === undefined || configPath.trim().length === 0) {
-    return Effect.fail(
+    if (cliPath !== undefined) {
+      return resolveConfigFilePath(cliPath, cwd);
+    }
+
+    const envPath = env.PTOOLS_CONFIG;
+
+    if (envPath !== undefined) {
+      if (envPath.trim().length === 0) {
+        return yield* Effect.fail(
+          new ServerConfigError({
+            message: "PTOOLS_CONFIG must not be empty.",
+          }),
+        );
+      }
+
+      return resolveConfigFilePath(envPath, cwd);
+    }
+
+    for (const candidate of DEFAULT_CONFIG_PATHS) {
+      const candidatePath = resolve(cwd, candidate);
+      const exists = yield* fileExists(candidatePath);
+
+      if (exists) {
+        return candidatePath;
+      }
+    }
+
+    return yield* Effect.fail(
       new ServerConfigError({
         message:
-          "Missing config path. Pass --config <path> or set PTOOLS_CONFIG.",
+          "Missing config file. Pass --config <path>, set PTOOLS_CONFIG, or create .ptools/config.json in the launch directory.",
       }),
     );
-  }
-
-  return Effect.succeed(
-    isAbsolute(configPath) ? configPath : resolve(cwd, configPath),
-  );
-};
+  });
 
 /**
  * Loads, parses, validates, and resolves a ptools JSON config file.
@@ -170,15 +196,37 @@ export const resolvePtoolsConfig = (
     };
   });
 
-const parseConfigArg = (argv: ReadonlyArray<string>): string | undefined => {
+const parseConfigArg = (
+  argv: ReadonlyArray<string>,
+): Effect.Effect<string | undefined, ServerConfigError> => {
   const index = argv.indexOf("--config");
 
   if (index === -1) {
-    return undefined;
+    return Effect.succeed(undefined);
   }
 
-  return argv[index + 1];
+  const value = argv[index + 1];
+
+  if (value === undefined || value.trim().length === 0) {
+    return Effect.fail(
+      new ServerConfigError({
+        message: "Missing value for --config.",
+      }),
+    );
+  }
+
+  return Effect.succeed(value);
 };
+
+const resolveConfigFilePath = (path: string, cwd: string): string =>
+  isAbsolute(path) ? path : resolve(cwd, path);
+
+const fileExists = (path: string): Effect.Effect<boolean, never> =>
+  Effect.promise(() =>
+    access(path)
+      .then(() => true)
+      .catch(() => false),
+  );
 
 const resolveStdioConfig = (
   serverName: string,

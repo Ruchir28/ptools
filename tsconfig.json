@@ -6,7 +6,7 @@
     { "path": "./packages/executor" },
     { "path": "./packages/code-mode" },
     { "path": "./packages/agent-tools" },
-    { "path": "./apps/server" },
+    { "path": "./packages/mcp-server" },
     { "path": "./apps/playground" }
   ]
 }

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "echo": {
+      "command": "tsx",
+      "args": ["src/echo-mcp-server.ts"],
+      "cwd": ".."
+    }
+  }
+}

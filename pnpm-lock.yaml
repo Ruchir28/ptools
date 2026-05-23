@@ -110,47 +110,23 @@ importers:
         specifier: ^8.0.13
         version: 8.0.13(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)
 
-  apps/server:
-    dependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: latest
-        version: 1.29.0(zod@4.4.3)
-      '@ptools/code-mode':
-        specifier: workspace:*
-        version: link:../../packages/code-mode
-      '@ptools/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@ptools/executor':
-        specifier: workspace:*
-        version: link:../../packages/executor
-      '@ptools/mcp-registry':
-        specifier: workspace:*
-        version: link:../../packages/mcp-registry
-      effect:
-        specifier: latest
-        version: 3.21.2
-      zod:
-        specifier: latest
-        version: 4.4.3
-
   examples/ai-sdk-real-model:
     dependencies:
       '@ai-sdk/openai':
         specifier: latest
-        version: 3.0.64(zod@4.4.3)
+        version: 3.0.65(zod@4.4.3)
       '@modelcontextprotocol/sdk':
         specifier: latest
         version: 1.29.0(zod@4.4.3)
       '@openrouter/ai-sdk-provider':
         specifier: ^2.9.0
-        version: 2.9.0(ai@6.0.188(zod@4.4.3))(zod@4.4.3)
+        version: 2.9.0(ai@6.0.190(zod@4.4.3))(zod@4.4.3)
       '@ptools/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools
       ai:
         specifier: latest
-        version: 6.0.188(zod@4.4.3)
+        version: 6.0.190(zod@4.4.3)
       effect:
         specifier: latest
         version: 3.21.2
@@ -166,6 +142,28 @@ importers:
         version: 4.22.3
       typescript:
         specifier: latest
+        version: 6.0.3
+
+  examples/mcp-server:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
+      '@ptools/mcp-server':
+        specifier: workspace:*
+        version: link:../../packages/mcp-server
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 25.9.1
+        version: 25.9.1
+      tsx:
+        specifier: 4.22.3
+        version: 4.22.3
+      typescript:
+        specifier: 6.0.3
         version: 6.0.3
 
   packages/agent-tools:
@@ -240,6 +238,30 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
+  packages/mcp-server:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
+      '@ptools/code-mode':
+        specifier: workspace:*
+        version: link:../code-mode
+      '@ptools/core':
+        specifier: workspace:*
+        version: link:../core
+      '@ptools/executor':
+        specifier: workspace:*
+        version: link:../executor
+      '@ptools/mcp-registry':
+        specifier: workspace:*
+        version: link:../mcp-registry
+      effect:
+        specifier: 3.21.2
+        version: 3.21.2
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+
 packages:
 
   '@ai-sdk/gateway@3.0.115':
@@ -248,14 +270,14 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/gateway@3.0.118':
-    resolution: {integrity: sha512-XYPbVoDo1TDMVLe5Eg42gIjdOyxaizh9H0kiSSnTXr+AdrqZvutk/ypLOiqBXPV3D1K3+BSm/sbFeomZJlM64A==}
+  '@ai-sdk/gateway@3.0.119':
+    resolution: {integrity: sha512-VAhfRWC+JexZakkVfmjaJKaTj00x7/UHdE8kMWL3NhuQAlf8oXtg9r4dfvFZrByXxchGRBvYE3biEUyibkg0xg==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/openai@3.0.64':
-    resolution: {integrity: sha512-epO4iS6QwktaY2PF6uBcPnDTJ3BxPOfsGS7/OEtBe3GtNj7C8h8gMDVtIe5K8W16HNDbn0tbR4dcQfpfs+XVFg==}
+  '@ai-sdk/openai@3.0.65':
+    resolution: {integrity: sha512-ZlVoWH+zrdiYDiUt6n/xvfCsk33mzsB81TUQkBRVx79rxU1FKZqVH9J/QCtEpSLqx0cUzjvtIw9l9p7EbUv+dw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -1517,8 +1539,8 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  ai@6.0.188:
-    resolution: {integrity: sha512-kNwIl1MM4ESzeOPDYuN+FidJ2QY5kGWHLtTMru6HHPW/JJ6nPuvHRhJ8tMX/Y2Tijx9DCiv2W7y5IBouuB712g==}
+  ai@6.0.190:
+    resolution: {integrity: sha512-T+ixHbWZ6jmHRREpVVJTkFyWJeCekCdzLPan7lp1F32jG5OUw4+odlVYjtMRXVzogU+pWzpMmXdRiHUmdL/q0w==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -2333,14 +2355,14 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
-  '@ai-sdk/gateway@3.0.118(zod@4.4.3)':
+  '@ai-sdk/gateway@3.0.119(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
-  '@ai-sdk/openai@3.0.64(zod@4.4.3)':
+  '@ai-sdk/openai@3.0.65(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
@@ -2530,9 +2552,9 @@ snapshots:
       '@tybys/wasm-util': 0.10.2
     optional: true
 
-  '@openrouter/ai-sdk-provider@2.9.0(ai@6.0.188(zod@4.4.3))(zod@4.4.3)':
+  '@openrouter/ai-sdk-provider@2.9.0(ai@6.0.190(zod@4.4.3))(zod@4.4.3)':
     dependencies:
-      ai: 6.0.188(zod@4.4.3)
+      ai: 6.0.190(zod@4.4.3)
       zod: 4.4.3
 
   '@opentelemetry/api@1.9.1': {}
@@ -3523,9 +3545,9 @@ snapshots:
       '@opentelemetry/api': 1.9.1
       zod: 4.4.3
 
-  ai@6.0.188(zod@4.4.3):
+  ai@6.0.190(zod@4.4.3):
     dependencies:
-      '@ai-sdk/gateway': 3.0.118(zod@4.4.3)
+      '@ai-sdk/gateway': 3.0.119(zod@4.4.3)
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
       '@opentelemetry/api': 1.9.1

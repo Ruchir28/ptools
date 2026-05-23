@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect, Either } from "effect";
@@ -335,7 +335,7 @@ describe("server config", () => {
     expect(Either.isLeft(result)).toBe(true);
   });
 
-  it("resolves config path from argv or env", async () => {
+  it("resolves config path from argv, env, or default project files", async () => {
     await expect(
       Effect.runPromise(
         resolveConfigPath(["--config", "ptools.json"], {}, "/repo"),
@@ -347,6 +347,38 @@ describe("server config", () => {
         resolveConfigPath([], { PTOOLS_CONFIG: "/tmp/x.json" }, "/repo"),
       ),
     ).resolves.toBe("/tmp/x.json");
+
+    const dir = await mkdtemp(join(tmpdir(), "ptools-core-config-path-"));
+    await mkdir(join(dir, ".ptools"));
+    await writeFile(join(dir, ".ptools", "config.json"), "{}");
+    await writeFile(join(dir, "ptools.config.json"), "{}");
+
+    await expect(Effect.runPromise(resolveConfigPath([], {}, dir))).resolves.toBe(
+      join(dir, ".ptools", "config.json"),
+    );
+
+    const legacyDir = await mkdtemp(
+      join(tmpdir(), "ptools-core-config-legacy-"),
+    );
+    await writeFile(join(legacyDir, "ptools.config.json"), "{}");
+
+    await expect(
+      Effect.runPromise(resolveConfigPath([], {}, legacyDir)),
+    ).resolves.toBe(join(legacyDir, "ptools.config.json"));
+  });
+
+  it("fails clearly when no config path can be resolved", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ptools-core-missing-config-"));
+
+    const result = await Effect.runPromise(
+      resolveConfigPath([], {}, dir).pipe(Effect.either),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(ServerConfigError);
+      expect(result.left.message).toContain(".ptools/config.json");
+    }
   });
 });
 
