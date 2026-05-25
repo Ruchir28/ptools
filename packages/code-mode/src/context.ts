@@ -2,12 +2,12 @@ import type {
   ExecutorProvider,
   ExecutorProviderHandler,
   ExecutorProviders,
-} from "@p_tools/executor";
+} from "@ptools/executor";
 import type {
   CallToolRequest,
   DiscoveredMcpTool,
   McpRegistryDiagnostic,
-} from "@p_tools/mcp-registry";
+} from "@ptools/mcp-registry";
 import { Effect } from "effect";
 import {
   buildDeclarationIndex,

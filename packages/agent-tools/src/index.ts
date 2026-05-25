@@ -1,4 +1,4 @@
-export { ServerConfigError } from "@p_tools/core";
+export { ServerConfigError } from "@ptools/core";
 
 export {
   createPtoolsSession,

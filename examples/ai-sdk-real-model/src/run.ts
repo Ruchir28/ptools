@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { toAISDKTools } from "@p_tools/agent-tools/ai-sdk";
-import { createPtoolsSessionFromConfigFile } from "@p_tools/agent-tools";
+import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
+import { createPtoolsSessionFromConfigFile } from "@ptools/agent-tools";
 import { generateText, stepCountIs } from "ai";
 
 const SYSTEM_PROMPT = `\

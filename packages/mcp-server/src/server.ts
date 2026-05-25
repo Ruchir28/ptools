@@ -7,10 +7,10 @@ import {
   type CodeModeSearchResult,
   type CodeModeAuthStatusResult,
   type CodeModeToolSchemaResult,
-} from "@p_tools/code-mode";
-import { loadPtoolsConfig, resolveConfigPath } from "@p_tools/core";
-import { makeLocalSandboxExecutorLive } from "@p_tools/executor";
-import { makeMcpRegistryLive } from "@p_tools/mcp-registry";
+} from "@ptools/code-mode";
+import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
+import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Context, Effect, Either, Layer, Scope } from "effect";
 import { z } from "zod";
 
@@ -118,7 +118,7 @@ export const runServer = (
   Effect.gen(function* () {
     const configPath = yield* resolveConfigPath(argv, env, cwd);
     const config = yield* loadPtoolsConfig(configPath, env);
-    const live: Layer.Layer<CodeMode, unknown, never> = makeCodeModeLive().pipe(
+    const live = makeCodeModeLive().pipe(
       Layer.provide(
         Layer.merge(
           makeMcpRegistryLive(config.mcpServers),

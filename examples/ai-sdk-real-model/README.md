@@ -1,6 +1,6 @@
 # AI SDK real model example
 
-This example runs the `@p_tools/agent-tools` AI SDK adapter with a real model.
+This example runs the `@ptools/agent-tools` AI SDK adapter with a real model.
 It uses `csv-demo.ptools.json` to connect a local stdio MCP server for the
 CSV at `data/demo-sales.csv`, then asks the model to discover the dataset
 tools, fetch only the schemas it needs, inspect the data shape, choose columns

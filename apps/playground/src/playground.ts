@@ -7,10 +7,10 @@ import type { AddressInfo } from "node:net";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CodeMode, makeCodeModeLive } from "@p_tools/code-mode";
-import { loadPtoolsConfig, resolveConfigPath } from "@p_tools/core";
-import { makeLocalSandboxExecutorLive } from "@p_tools/executor";
-import { makeMcpRegistryLive } from "@p_tools/mcp-registry";
+import { CodeMode, makeCodeModeLive } from "@ptools/code-mode";
+import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
+import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Data, Effect, Either, Layer, Scope } from "effect";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 
@@ -49,7 +49,7 @@ export const runPlayground = (
     const configPath = yield* resolveConfigPath(argv, env, cwd);
     const port = yield* resolvePlaygroundPort(argv, env);
     const config = yield* loadPtoolsConfig(configPath, env);
-    const live: Layer.Layer<CodeMode, unknown, never> = makeCodeModeLive().pipe(
+    const live = makeCodeModeLive().pipe(
       Layer.provide(
         Layer.merge(
           makeMcpRegistryLive(config.mcpServers),

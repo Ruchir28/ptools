@@ -4,14 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "pnpm --filter @p_tools/agent-tools build && tsx src/run.ts",
+    "start": "pnpm --filter @ptools/agent-tools build && tsx src/run.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@ai-sdk/openai": "latest",
     "@modelcontextprotocol/sdk": "latest",
     "@openrouter/ai-sdk-provider": "^2.9.0",
-    "@p_tools/agent-tools": "workspace:*",
+    "@ptools/agent-tools": "workspace:*",
     "ai": "latest",
     "effect": "latest",
     "zod": "latest"

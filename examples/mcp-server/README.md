@@ -1,6 +1,6 @@
 # MCP server example
 
-This example shows how to run the publishable `@p_tools/mcp-server` package.
+This example shows how to run the publishable `@ptools/mcp-server` package.
 It starts `ptools-mcp` without passing `--config`; ptools discovers
 `.ptools/config.json` from the example package directory by default. That config
 connects one local upstream MCP server named `echo`, which exposes simple

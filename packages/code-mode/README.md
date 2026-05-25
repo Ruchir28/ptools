@@ -1,4 +1,4 @@
-# @p_tools/code-mode
+# @ptools/code-mode
 
 Internal runtime building block for ptools packages.
 
@@ -19,4 +19,4 @@ every GitHub action; use `search_providers({ query: "github" })` first, then
 search with a task-specific action query such as
 `search({ provider: "github", query: "issue" })`.
 
-For the alpha user guide, install and use `@p_tools/agent-tools`.
+For the alpha user guide, install and use `@ptools/agent-tools`.

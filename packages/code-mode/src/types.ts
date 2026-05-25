@@ -1,8 +1,8 @@
-import type { CapturedLog } from "@p_tools/executor";
+import type { CapturedLog } from "@ptools/executor";
 import type {
   McpAuthStatus,
   McpRegistryDiagnostic,
-} from "@p_tools/mcp-registry";
+} from "@ptools/mcp-registry";
 
 /**
  * Request for discovering configured provider namespaces.

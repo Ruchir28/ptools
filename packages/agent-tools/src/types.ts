@@ -1,6 +1,6 @@
-import type { CodeModeDiagnostic } from "@p_tools/code-mode";
-import type { LocalSandboxExecutorOptions } from "@p_tools/executor";
-import type { UpstreamMcpServers } from "@p_tools/mcp-registry";
+import type { CodeModeDiagnostic } from "@ptools/code-mode";
+import type { LocalSandboxExecutorOptions } from "@ptools/executor";
+import type { UpstreamMcpServers } from "@ptools/mcp-registry";
 
 export type CodeModeToolName =
   | "search_providers"

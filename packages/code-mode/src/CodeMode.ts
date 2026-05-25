@@ -1,8 +1,8 @@
-import { CodeExecutor } from "@p_tools/executor";
+import { CodeExecutor } from "@ptools/executor";
 import {
   McpRegistry,
   type DiscoveredMcpTool,
-} from "@p_tools/mcp-registry";
+} from "@ptools/mcp-registry";
 import { Context, Effect, Layer } from "effect";
 import {
   buildCodeModeRuntime,

@@ -5,10 +5,10 @@ import {
   type CodeModeSearchRequest,
   type CodeModeToolSchemaRequest,
   makeCodeModeLive,
-} from "@p_tools/code-mode";
-import { loadPtoolsConfig } from "@p_tools/core";
-import { makeLocalSandboxExecutorLive } from "@p_tools/executor";
-import { makeMcpRegistryLive } from "@p_tools/mcp-registry";
+} from "@ptools/code-mode";
+import { loadPtoolsConfig } from "@ptools/core";
+import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { Effect, Either, Layer, ManagedRuntime } from "effect";
 import type {
@@ -21,7 +21,7 @@ import type {
 export const createPtoolsSession = async (
   options: CreatePtoolsSessionOptions,
 ): Promise<PtoolsSession> => {
-  const live: Layer.Layer<CodeMode, unknown, never> = makeCodeModeLive().pipe(
+  const live = makeCodeModeLive().pipe(
     Layer.provide(
       Layer.merge(
         makeMcpRegistryLive(options.mcpServers),
