@@ -117,6 +117,9 @@ ptools-mcp --config ./config/ptools.json
 PTOOLS_CONFIG=./config/ptools.json ptools-mcp
 ```
 
+For concrete Claude Code and OpenCode setup files, see
+`examples/mcp-hosts` in the repository.
+
 ## Embed
 
 ```ts

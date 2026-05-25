@@ -6,6 +6,9 @@ It starts `ptools-mcp` without passing `--config`; ptools discovers
 connects one local upstream MCP server named `echo`, which exposes simple
 echo/math tools plus a small product inventory and quoting workflow.
 
+For user-facing Claude Code and OpenCode setup, use `examples/mcp-hosts`
+instead. This folder is mainly a repo-local smoke fixture.
+
 ## Run an end-to-end smoke
 
 From the repo root:

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ptools": {
+      "type": "stdio",
+      "command": "sh",
+      "args": [
+        "-lc",
+        "exec npx -y @ptools/mcp-server --config \"$CLAUDE_PROJECT_DIR/.ptools/config.json\""
+      ]
+    }
+  }
+}
