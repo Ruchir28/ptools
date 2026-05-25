@@ -3,6 +3,7 @@ import { PtoolsAuthManager } from "./auth.js";
 import { closeClients, connectConfiguredMcpClients } from "./connect.js";
 import { discoverAllToolsDegraded } from "./discovery.js";
 import { dispatchToolCall } from "./dispatch.js";
+import type { NameCollisionError } from "./errors.js";
 import { McpRegistry } from "./registry.js";
 import type {
   ConnectedMcpClient,
@@ -17,7 +18,9 @@ interface McpRegistryState {
   readonly diagnostics: ReadonlyArray<McpRegistryDiagnostic>;
 }
 
-export const makeMcpRegistryLive = (upstreams: UpstreamMcpServers) =>
+export const makeMcpRegistryLive = (
+  upstreams: UpstreamMcpServers,
+): Layer.Layer<McpRegistry, NameCollisionError, never> =>
   Layer.scoped(
     McpRegistry,
     Effect.gen(function* () {
