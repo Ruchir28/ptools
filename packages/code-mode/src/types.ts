@@ -1,5 +1,8 @@
 import type { CapturedLog } from "@ptools/executor";
-import type { McpRegistryDiagnostic } from "@ptools/mcp-registry";
+import type {
+  McpAuthStatus,
+  McpRegistryDiagnostic,
+} from "@ptools/mcp-registry";
 
 /**
  * Request for discovering configured provider namespaces.
@@ -123,6 +126,8 @@ export interface CodeModeSearchResult {
 }
 
 export type CodeModeDiagnostic = McpRegistryDiagnostic;
+
+export type CodeModeAuthStatusResult = McpAuthStatus;
 
 /**
  * Full schema/declaration payload returned for selected tools.

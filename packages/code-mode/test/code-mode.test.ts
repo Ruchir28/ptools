@@ -11,6 +11,7 @@ import type {
   McpCallError,
   McpRegistryDiagnostic,
   ToolNotFound,
+  UpstreamAuthRequired,
 } from "@ptools/mcp-registry";
 import { McpRegistry } from "@ptools/mcp-registry";
 import { Effect, Either, Layer } from "effect";
@@ -1011,6 +1012,62 @@ describe("Provider generation and MCP result unwrapping", () => {
       );
     }
   });
+
+  it("uses generic auth-center guidance when auth errors do not include a URL", async () => {
+    const providers = buildExecutorProviders(
+      groupDiscoveredMcpTools([fixtureAddTool()]),
+      {
+        callTool: () =>
+          Effect.fail({
+            _tag: "UpstreamAuthRequired",
+            serverName: "fixture",
+            toolName: "add",
+          }),
+      },
+    );
+    const add = providers[0]?.fns.add;
+    const result = await Effect.runPromise(
+      Effect.either(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(Error);
+      expect((result.left as Error).message).toBe(
+        "UPSTREAM_AUTH_REQUIRED: fixture.add requires authorization before this tool can run. Ask the user to open the ptools auth center, authorize the server, then retry.",
+      );
+    }
+  });
+
+  it("treats empty auth URLs as unavailable in auth error messages", async () => {
+    const providers = buildExecutorProviders(
+      groupDiscoveredMcpTools([fixtureAddTool()]),
+      {
+        callTool: () =>
+          Effect.fail({
+            _tag: "UpstreamAuthRequired",
+            serverName: "fixture",
+            toolName: "add",
+            authUrl: "",
+          }),
+      },
+    );
+    const add = providers[0]?.fns.add;
+    const result = await Effect.runPromise(
+      Effect.either(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(Error);
+      expect((result.left as Error).message).not.toContain("open ,");
+      expect((result.left as Error).message).toContain(
+        "Ask the user to open the ptools auth center",
+      );
+    }
+  });
 });
 
 const runWithCodeMode = <A, E>(
@@ -1038,13 +1095,18 @@ const makeRegistryLayer = (
     request: CallToolRequest,
   ) => Effect.Effect<
     unknown,
-    ToolNotFound | InvalidToolArguments | McpCallError
+    ToolNotFound | InvalidToolArguments | McpCallError | UpstreamAuthRequired
   > = () => Effect.dieMessage("callTool not implemented"),
   diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
 ) =>
   Layer.succeed(McpRegistry, {
     listTools: Effect.succeed(tools),
     diagnostics: Effect.succeed(diagnostics),
+    authStatus: Effect.succeed({
+      authUrl: "http://127.0.0.1:9999/auth",
+      servers: [],
+    }),
+    refresh: Effect.void,
     callTool,
   });
 

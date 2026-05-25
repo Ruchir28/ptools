@@ -1,22 +1,26 @@
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Effect } from "effect";
 import {
   InvalidToolArguments,
   McpCallError,
   ToolNotFound,
+  UpstreamAuthRequired,
 } from "./errors.js";
 import type {
   CallToolRequest,
   ConnectedMcpClient,
   DiscoveredMcpTool,
+  McpAuthStatus,
 } from "./types.js";
 
 export const dispatchToolCall = (
   clients: ReadonlyArray<ConnectedMcpClient>,
   tools: ReadonlyArray<DiscoveredMcpTool>,
   request: CallToolRequest,
+  authStatus?: McpAuthStatus,
 ): Effect.Effect<
   unknown,
-  ToolNotFound | InvalidToolArguments | McpCallError
+  ToolNotFound | InvalidToolArguments | McpCallError | UpstreamAuthRequired
 > =>
   Effect.gen(function* () {
     const tool = tools.find(
@@ -65,12 +69,30 @@ export const dispatchToolCall = (
           name: tool.originalToolName,
           arguments: toolArguments,
         }),
-      catch: (cause) =>
-        new McpCallError({
+      catch: (cause) => {
+        if (cause instanceof UnauthorizedError) {
+          const serverAuth = authStatus?.servers.find(
+            (server) => server.serverName === tool.serverName,
+          );
+
+          return new UpstreamAuthRequired({
+            serverName: tool.serverName,
+            toolName: tool.originalToolName,
+            ...(authStatus?.authUrl === undefined
+              ? {}
+              : { authUrl: authStatus.authUrl }),
+            ...(serverAuth?.authorizeUrl === undefined
+              ? {}
+              : { authorizeUrl: serverAuth.authorizeUrl }),
+          });
+        }
+
+        return new McpCallError({
           serverName: tool.serverName,
           toolName: tool.originalToolName,
           cause,
-        }),
+        });
+      },
     });
   });
 

@@ -4,6 +4,12 @@
       "command": "tsx",
       "args": ["src/echo-mcp-server.ts"],
       "cwd": ".."
+    },
+    "notion": {
+      "url": "https://mcp.notion.com/mcp"
+    },
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp/"
     }
   }
 }

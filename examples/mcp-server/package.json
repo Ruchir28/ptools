@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "pnpm --filter @ptools/mcp-server build && ptools-mcp",
-    "smoke": "pnpm --filter @ptools/mcp-server build && tsx src/smoke-client.ts",
+    "start": "pnpm --dir ../.. build && ptools-mcp",
+    "smoke": "pnpm --dir ../.. build && tsx src/smoke-client.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

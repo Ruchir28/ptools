@@ -1,9 +1,11 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Effect, Either } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   InvalidToolArguments,
   ToolNotFound,
+  UpstreamAuthRequired,
 } from "../src/errors.js";
 import { dispatchToolCall } from "../src/dispatch.js";
 import type {
@@ -90,6 +92,88 @@ describe("dispatchToolCall", () => {
 
     if (Either.isLeft(result) && result.left._tag === "InvalidToolArguments") {
       expect(result.left.value).toBe("not an object");
+    }
+  });
+
+  it("omits authUrl from auth errors when auth status is unavailable", async () => {
+    const clients: ReadonlyArray<ConnectedMcpClient> = [
+      {
+        serverName: "github",
+        jsServerName: "github",
+        client: fakeClient({
+          callTool: async () => {
+            throw new UnauthorizedError();
+          },
+        }),
+      },
+    ];
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        dispatchToolCall(clients, [githubCreateIssueTool], {
+          jsServerName: "github",
+          jsToolName: "create_issue",
+          arguments: { title: "Ship registry" },
+        }),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(UpstreamAuthRequired);
+      expect(result.left).not.toHaveProperty("authUrl");
+    }
+  });
+
+  it("includes auth URLs from auth status when available", async () => {
+    const clients: ReadonlyArray<ConnectedMcpClient> = [
+      {
+        serverName: "github",
+        jsServerName: "github",
+        client: fakeClient({
+          callTool: async () => {
+            throw new UnauthorizedError();
+          },
+        }),
+      },
+    ];
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        dispatchToolCall(
+          clients,
+          [githubCreateIssueTool],
+          {
+            jsServerName: "github",
+            jsToolName: "create_issue",
+            arguments: { title: "Ship registry" },
+          },
+          {
+            authUrl: "http://127.0.0.1:9999/auth",
+            servers: [
+              {
+                serverName: "github",
+                jsServerName: "github",
+                transport: "http",
+                status: "requires_auth",
+                authUrl: "http://127.0.0.1:9999/auth",
+                authorizeUrl: "http://127.0.0.1:9999/auth/github",
+              },
+            ],
+          },
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(UpstreamAuthRequired);
+      expect(result.left).toMatchObject({
+        authUrl: "http://127.0.0.1:9999/auth",
+        authorizeUrl: "http://127.0.0.1:9999/auth/github",
+      });
     }
   });
 });

@@ -1,11 +1,15 @@
 import { CodeExecutor } from "@ptools/executor";
-import { McpRegistry } from "@ptools/mcp-registry";
+import {
+  McpRegistry,
+  type DiscoveredMcpTool,
+} from "@ptools/mcp-registry";
 import { Context, Effect, Layer } from "effect";
 import {
   buildCodeModeRuntime,
   makeCodeModeSearchResult,
   makeCodeModeSearchProvidersResult,
   makeCodeModeToolSchemaResult,
+  type CodeModeRuntime,
 } from "./context.js";
 import type { SchemaCompiler } from "./declarations.js";
 import {
@@ -15,6 +19,7 @@ import {
 } from "./errors.js";
 import type {
   CodeModeDiagnostic,
+  CodeModeAuthStatusResult,
   CodeModeExecuteRequest,
   CodeModeRunResult,
   CodeModeSearchProvidersRequest,
@@ -40,7 +45,12 @@ export interface MakeCodeModeLiveOptions {
 export class CodeMode extends Context.Tag("@ptools/CodeMode")<
   CodeMode,
   {
-    readonly diagnostics: Effect.Effect<ReadonlyArray<CodeModeDiagnostic>>;
+    readonly diagnostics: Effect.Effect<
+      ReadonlyArray<CodeModeDiagnostic>,
+      CodeModeError
+    >;
+    readonly authStatus: Effect.Effect<CodeModeAuthStatusResult>;
+    readonly refresh: Effect.Effect<void, CodeModeError>;
     readonly searchProviders: (
       request?: CodeModeSearchProvidersRequest,
     ) => Effect.Effect<CodeModeSearchProvidersResult, CodeModeError>;
@@ -63,8 +73,8 @@ export class CodeMode extends Context.Tag("@ptools/CodeMode")<
  * - `McpRegistry` supplies discovered upstream MCP tools and dispatch.
  * - `CodeExecutor` runs generated sandbox code.
  *
- * Output is a `CodeMode` service whose providers are built once at startup
- * from the registry's discovered tool surface.
+ * Output is a `CodeMode` service whose providers are built from the current
+ * registry snapshot and cached until the registry refreshes.
  */
 export const makeCodeModeLive = (
   options: MakeCodeModeLiveOptions = {},
@@ -74,66 +84,127 @@ export const makeCodeModeLive = (
     Effect.gen(function* () {
       const registry = yield* McpRegistry;
       const executor = yield* CodeExecutor;
-      const tools = yield* registry.listTools;
-      const diagnostics = yield* registry.diagnostics;
-      const runtime = yield* buildCodeModeRuntime(tools, registry, {
-        diagnostics,
-        ...(options.schemaCompiler === undefined
-          ? {}
-          : { schemaCompiler: options.schemaCompiler }),
+      let cachedTools: ReadonlyArray<DiscoveredMcpTool> | undefined;
+      let cachedDiagnostics: ReadonlyArray<CodeModeDiagnostic> | undefined;
+      let cachedRuntime: CodeModeRuntime | undefined;
+      const buildRuntime = Effect.gen(function* () {
+        const tools = yield* registry.listTools;
+        const diagnostics = yield* registry.diagnostics;
+
+        if (
+          cachedRuntime !== undefined &&
+          cachedTools === tools &&
+          cachedDiagnostics === diagnostics
+        ) {
+          return cachedRuntime;
+        }
+
+        const runtime = yield* buildCodeModeRuntime(tools, registry, {
+          diagnostics,
+          ...(options.schemaCompiler === undefined
+            ? {}
+            : { schemaCompiler: options.schemaCompiler }),
+        });
+
+        cachedTools = tools;
+        cachedDiagnostics = diagnostics;
+        cachedRuntime = runtime;
+
+        return runtime;
       });
 
+      const refresh = registry.refresh.pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            cachedTools = undefined;
+            cachedDiagnostics = undefined;
+            cachedRuntime = undefined;
+          }),
+        ),
+        Effect.mapError(
+          (cause) =>
+            new CodeModeInvariantError({
+              message: "Failed to refresh MCP registry",
+              cause,
+            }),
+        ),
+      );
+
+      const diagnostics = buildRuntime.pipe(
+        Effect.map((runtime) => runtime.diagnostics),
+      );
+
       return {
-        diagnostics: Effect.succeed(runtime.diagnostics),
+        diagnostics,
+        authStatus: registry.authStatus,
+        refresh,
         searchProviders: (request?: CodeModeSearchProvidersRequest) =>
-          request === undefined ||
-          ((request.query === undefined || request.query.trim() === "") &&
-            request.limit === undefined)
-            ? Effect.succeed(runtime.fullProviderSearchResult)
-            : Effect.try({
-                try: () =>
-                  makeCodeModeSearchProvidersResult(
-                    runtime.servers,
-                    runtime.diagnostics,
-                    request,
-                  ),
-                catch: (cause) =>
-                  cause instanceof CodeModeInvariantError
-                    ? cause
-                    : new CodeModeInvariantError({
-                        message: "Failed to search Code Mode providers",
-                        cause,
-                      }),
-              }),
+          buildRuntime.pipe(
+            Effect.flatMap((runtime) =>
+              request === undefined ||
+              ((request.query === undefined || request.query.trim() === "") &&
+                request.limit === undefined)
+                ? Effect.succeed(runtime.fullProviderSearchResult)
+                : Effect.try({
+                    try: () =>
+                      makeCodeModeSearchProvidersResult(
+                        runtime.servers,
+                        runtime.diagnostics,
+                        request,
+                      ),
+                    catch: (cause) =>
+                      cause instanceof CodeModeInvariantError
+                        ? cause
+                        : new CodeModeInvariantError({
+                            message: "Failed to search Code Mode providers",
+                            cause,
+                          }),
+                  }),
+            ),
+          ),
         search: (request: CodeModeSearchRequest) =>
-          makeCodeModeSearchResult(
-            runtime.servers,
-            runtime.diagnostics,
-            request,
+          buildRuntime.pipe(
+            Effect.flatMap((runtime) =>
+              makeCodeModeSearchResult(
+                runtime.servers,
+                runtime.diagnostics,
+                request,
+              ),
+            ),
           ),
         toolSchema: (request: CodeModeToolSchemaRequest) =>
-          makeCodeModeToolSchemaResult(
-            runtime.servers,
-            runtime.declarationIndex,
-            request,
-            runtime.diagnostics,
+          buildRuntime.pipe(
+            Effect.flatMap((runtime) =>
+              makeCodeModeToolSchemaResult(
+                runtime.servers,
+                runtime.declarationIndex,
+                request,
+                runtime.diagnostics,
+              ),
+            ),
           ),
         execute: (request: CodeModeExecuteRequest) =>
-          executor
-            .execute({
-              code: request.code,
-              providers: runtime.providers,
-              ...(request.timeoutMs === undefined
-                ? {}
-                : { timeoutMs: request.timeoutMs }),
-            })
-            .pipe(
-              Effect.map((result) => ({
-                value: result.value,
-                logs: result.logs,
-              })),
-              Effect.mapError((cause) => new CodeModeExecuteError({ cause })),
+          buildRuntime.pipe(
+            Effect.flatMap((runtime) =>
+              executor
+                .execute({
+                  code: request.code,
+                  providers: runtime.providers,
+                  ...(request.timeoutMs === undefined
+                    ? {}
+                    : { timeoutMs: request.timeoutMs }),
+                })
+                .pipe(
+                  Effect.map((result) => ({
+                    value: result.value,
+                    logs: result.logs,
+                  })),
+                  Effect.mapError(
+                    (cause) => new CodeModeExecuteError({ cause }),
+                  ),
+                ),
             ),
+          ),
       };
     }),
   );

@@ -16,6 +16,15 @@ export class McpCallError extends Data.TaggedError("McpCallError")<{
   readonly cause: unknown;
 }> {}
 
+export class UpstreamAuthRequired extends Data.TaggedError(
+  "UpstreamAuthRequired",
+)<{
+  readonly serverName: string;
+  readonly toolName: string;
+  readonly authUrl?: string;
+  readonly authorizeUrl?: string;
+}> {}
+
 export class ToolNotFound extends Data.TaggedError("ToolNotFound")<{
   readonly serverName: string;
   readonly toolName: string;
@@ -29,9 +38,7 @@ export class InvalidToolArguments extends Data.TaggedError(
   readonly value: unknown;
 }> {}
 
-export class NameCollisionError extends Data.TaggedError(
-  "NameCollisionError",
-)<{
+export class NameCollisionError extends Data.TaggedError("NameCollisionError")<{
   readonly scope: string;
   readonly jsName: string;
   readonly originals: ReadonlyArray<string>;

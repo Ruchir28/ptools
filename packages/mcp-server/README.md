@@ -54,6 +54,48 @@ Environment variables can be referenced explicitly:
 }
 ```
 
+Remote HTTP MCP servers can opt into OAuth metadata overrides when discovery is
+not enough:
+
+```json
+{
+  "mcpServers": {
+    "notion": {
+      "url": "https://example.com/mcp",
+      "auth": {
+        "type": "oauth",
+        "scope": "read write",
+        "clientId": "optional-pre-registered-client-id",
+        "clientSecret": "${env:OPTIONAL_CLIENT_SECRET}"
+      }
+    }
+  }
+}
+```
+
+When an upstream HTTP server needs OAuth, ptools stays connected and prints a
+local auth center URL:
+
+```txt
+[ptools] Auth center: http://127.0.0.1:7342/auth
+```
+
+Open that URL to see every configured upstream MCP server, its auth state, and
+OAuth actions such as authorize or retry. OAuth tokens are stored in the OS
+credential store, not in `.ptools/config.json`.
+
+Some MCP servers use an OAuth provider that does not support Dynamic Client
+Registration. In that case ptools marks the server as `needs_config` and shows
+setup options in the auth center:
+
+- add a pre-registered OAuth `clientId` and `clientSecret`
+- add only `clientId` when the provider supports public PKCE clients
+- use an `Authorization: Bearer ${env:TOKEN}` header when that MCP server
+  supports static bearer tokens
+
+ptools keeps running in this state, so other upstream MCP servers continue to
+work while the user fixes that server's config.
+
 ## Run
 
 As an installed binary:
@@ -88,8 +130,10 @@ await Effect.runPromise(
 
 ## Tools
 
-The server exposes four MCP tools:
+The server exposes six MCP tools:
 
+- `auth_status` shows the auth center URL and upstream server auth states.
+- `refresh` reconnects and rediscovers upstream servers after auth changes.
 - `search_providers` finds configured MCP provider namespaces.
 - `search` finds callable actions for a task query.
 - `get_tool_schema` fetches full schemas and TypeScript declarations.

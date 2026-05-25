@@ -45,8 +45,10 @@ describe("combined Code Mode MCP server", () => {
     const tools = await client.listTools();
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+      "auth_status",
       "execute",
       "get_tool_schema",
+      "refresh",
       "search",
       "search_providers",
     ]);
@@ -150,8 +152,10 @@ describe("combined Code Mode MCP server", () => {
     const tools = await client.listTools();
 
     expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+      "auth_status",
       "execute",
       "get_tool_schema",
+      "refresh",
       "search",
       "search_providers",
     ]);

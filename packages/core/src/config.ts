@@ -26,7 +26,18 @@ export type ServerMcpConfig =
       readonly transport: "http";
       readonly url: string;
       readonly headers?: Record<string, string>;
+      readonly auth?: HttpMcpAuthConfig;
     };
+
+export interface HttpMcpAuthConfig {
+  readonly type: "oauth";
+  readonly scope?: string;
+  readonly resourceMetadataUrl?: string;
+  readonly clientId?: string;
+  readonly clientSecret?: string;
+  readonly clientMetadataUrl?: string;
+  readonly redirectUri?: string;
+}
 
 export interface ResolvedPtoolsConfig {
   readonly mcpServers: ResolvedMcpServers;
@@ -49,6 +60,7 @@ export type ResolvedMcpConfig =
       readonly transport: "http";
       readonly url: string;
       readonly headers?: Record<string, string>;
+      readonly auth?: HttpMcpAuthConfig;
     };
 
 export interface LoadPtoolsConfigOptions {
@@ -289,11 +301,83 @@ const resolveHttpConfig = (
             config.headers,
             env,
           );
+    const auth =
+      config.auth === undefined
+        ? undefined
+        : yield* resolveHttpAuthConfig(serverName, config.auth, env);
 
     return {
       transport: "http" as const,
       url,
       ...(Object.keys(headers).length === 0 ? {} : { headers }),
+      ...(auth === undefined ? {} : { auth }),
+    };
+  });
+
+const resolveHttpAuthConfig = (
+  serverName: string,
+  config: HttpMcpAuthConfig,
+  env: ConfigEnv,
+): Effect.Effect<HttpMcpAuthConfig, ServerConfigError> =>
+  Effect.gen(function* () {
+    const scope =
+      config.scope === undefined
+        ? undefined
+        : yield* resolveEnvString(serverName, "auth.scope", config.scope, env);
+    const resourceMetadataUrl =
+      config.resourceMetadataUrl === undefined
+        ? undefined
+        : yield* resolveEnvString(
+            serverName,
+            "auth.resourceMetadataUrl",
+            config.resourceMetadataUrl,
+            env,
+          );
+    const clientId =
+      config.clientId === undefined
+        ? undefined
+        : yield* resolveEnvString(
+            serverName,
+            "auth.clientId",
+            config.clientId,
+            env,
+          );
+    const clientSecret =
+      config.clientSecret === undefined
+        ? undefined
+        : yield* resolveEnvString(
+            serverName,
+            "auth.clientSecret",
+            config.clientSecret,
+            env,
+          );
+    const clientMetadataUrl =
+      config.clientMetadataUrl === undefined
+        ? undefined
+        : yield* resolveEnvString(
+            serverName,
+            "auth.clientMetadataUrl",
+            config.clientMetadataUrl,
+            env,
+          );
+    const redirectUri =
+      config.redirectUri === undefined
+        ? undefined
+        : yield* resolveEnvString(
+            serverName,
+            "auth.redirectUri",
+            config.redirectUri,
+            env,
+          );
+
+    return {
+      type: "oauth",
+      ...(scope === undefined ? {} : { scope }),
+      ...(resourceMetadataUrl === undefined ? {} : { resourceMetadataUrl }),
+      ...(clientId === undefined ? {} : { clientId }),
+      ...(clientSecret === undefined ? {} : { clientSecret }),
+      ...(clientMetadataUrl === undefined ? {} : { clientMetadataUrl }),
+      ...(redirectUri === undefined ? {} : { redirectUri }),
     };
   });
 
@@ -556,11 +640,119 @@ const parseHttpServerConfig = (
             serverName,
             "headers",
           );
+    const auth =
+      config.auth === undefined
+        ? undefined
+        : yield* parseHttpAuthConfig(serverName, config.auth, source);
 
     return {
       transport: "http",
       url,
       ...(headers === undefined ? {} : { headers }),
+      ...(auth === undefined ? {} : { auth }),
+    };
+  });
+
+const parseHttpAuthConfig = (
+  serverName: string,
+  value: unknown,
+  source: string,
+): Effect.Effect<HttpMcpAuthConfig, ServerConfigError> =>
+  Effect.gen(function* () {
+    const auth = yield* expectRecord(
+      value,
+      `Invalid ptools config in ${source}: mcpServers.${serverName}.auth must be an object`,
+    );
+
+    for (const key of Object.keys(auth)) {
+      if (
+        key !== "type" &&
+        key !== "scope" &&
+        key !== "resourceMetadataUrl" &&
+        key !== "clientId" &&
+        key !== "clientSecret" &&
+        key !== "clientMetadataUrl" &&
+        key !== "redirectUri"
+      ) {
+        return yield* invalidServerConfig(
+          source,
+          serverName,
+          `Unsupported auth field ${key}`,
+        );
+      }
+    }
+
+    if (auth.type !== "oauth") {
+      return yield* invalidServerConfig(
+        source,
+        serverName,
+        'auth.type must be "oauth"',
+      );
+    }
+
+    const scope =
+      auth.scope === undefined
+        ? undefined
+        : yield* expectStringField(
+            auth.scope,
+            source,
+            serverName,
+            "auth.scope",
+          );
+    const resourceMetadataUrl =
+      auth.resourceMetadataUrl === undefined
+        ? undefined
+        : yield* expectStringField(
+            auth.resourceMetadataUrl,
+            source,
+            serverName,
+            "auth.resourceMetadataUrl",
+          );
+    const clientId =
+      auth.clientId === undefined
+        ? undefined
+        : yield* expectStringField(
+            auth.clientId,
+            source,
+            serverName,
+            "auth.clientId",
+          );
+    const clientSecret =
+      auth.clientSecret === undefined
+        ? undefined
+        : yield* expectStringField(
+            auth.clientSecret,
+            source,
+            serverName,
+            "auth.clientSecret",
+          );
+    const clientMetadataUrl =
+      auth.clientMetadataUrl === undefined
+        ? undefined
+        : yield* expectStringField(
+            auth.clientMetadataUrl,
+            source,
+            serverName,
+            "auth.clientMetadataUrl",
+          );
+    const redirectUri =
+      auth.redirectUri === undefined
+        ? undefined
+        : yield* expectStringField(
+            auth.redirectUri,
+            source,
+            serverName,
+            "auth.redirectUri",
+          );
+
+    return {
+      type: "oauth",
+      ...(scope === undefined ? {} : { scope }),
+      ...(resourceMetadataUrl === undefined ? {} : { resourceMetadataUrl }),
+      ...(clientId === undefined ? {} : { clientId }),
+      ...(clientSecret === undefined ? {} : { clientSecret }),
+      ...(clientMetadataUrl === undefined ? {} : { clientMetadataUrl }),
+      ...(redirectUri === undefined ? {} : { redirectUri }),
     };
   });
 
@@ -572,6 +764,7 @@ const unsupportedServerFieldMessage = (field: string): string | undefined => {
     case "env":
     case "url":
     case "headers":
+    case "auth":
     case "enabled":
     case "disabled":
       return undefined;
@@ -589,7 +782,6 @@ const unsupportedServerFieldMessage = (field: string): string | undefined => {
     case "disabled_tools":
     case "envFile":
     case "oauth":
-    case "auth":
     case "authorization":
     case "approvalPolicy":
     case "approval_policy":

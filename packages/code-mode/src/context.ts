@@ -709,8 +709,38 @@ const formatProviderFailure = (
     return `MCP tool call failed: ${toolKey}`;
   }
 
+  if (tag === "UpstreamAuthRequired") {
+    return formatUpstreamAuthRequired(server, tool, cause);
+  }
+
   return `MCP provider call failed: ${toolKey}`;
 };
+
+const formatUpstreamAuthRequired = (
+  server: CodeModeServerMetadata,
+  tool: CodeModeToolMetadata,
+  cause: unknown,
+): string => {
+  const authUrl = readStringField(cause, "authUrl");
+  const authorizeUrl = readStringField(cause, "authorizeUrl");
+  const url = authorizeUrl ?? authUrl;
+
+  return [
+    `UPSTREAM_AUTH_REQUIRED: ${server.serverName}.${tool.originalToolName} requires authorization before this tool can run.`,
+    url === undefined
+      ? "Ask the user to open the ptools auth center, authorize the server, then retry."
+      : `Ask the user to open ${url}, authorize ${server.serverName}, then retry.`,
+  ].join(" ");
+};
+
+const readStringField = (value: unknown, field: string): string | undefined =>
+  typeof value === "object" &&
+  value !== null &&
+  field in value &&
+  typeof value[field as keyof typeof value] === "string" &&
+  (value[field as keyof typeof value] as string).trim().length > 0
+    ? (value[field as keyof typeof value] as string)
+    : undefined;
 
 /**
  * Reads an Effect/Data tagged-error name from an unknown failure value.

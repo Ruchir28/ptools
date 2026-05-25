@@ -1,3 +1,4 @@
+export * from "./auth.js";
 export * from "./connect.js";
 export * from "./discovery.js";
 export * from "./dispatch.js";

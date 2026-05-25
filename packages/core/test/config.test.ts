@@ -146,6 +146,45 @@ describe("server config", () => {
     });
   });
 
+  it("resolves env placeholders in HTTP OAuth config", async () => {
+    const config = await parseConfig({
+      mcpServers: {
+        notion: {
+          url: "https://example.com/mcp",
+          auth: {
+            type: "oauth",
+            scope: "read write",
+            resourceMetadataUrl:
+              "https://example.com/.well-known/oauth-protected-resource",
+            clientId: "client-id",
+            clientSecret: "${env:OAUTH_CLIENT_SECRET}",
+            clientMetadataUrl: "https://example.com/client.json",
+            redirectUri: "http://127.0.0.1:9000/oauth/callback/notion",
+          },
+        },
+      },
+    });
+
+    const resolved = await Effect.runPromise(
+      resolvePtoolsConfig(config, { OAUTH_CLIENT_SECRET: "secret" }),
+    );
+
+    expect(resolved.mcpServers.notion).toEqual({
+      transport: "http",
+      url: "https://example.com/mcp",
+      auth: {
+        type: "oauth",
+        scope: "read write",
+        resourceMetadataUrl:
+          "https://example.com/.well-known/oauth-protected-resource",
+        clientId: "client-id",
+        clientSecret: "secret",
+        clientMetadataUrl: "https://example.com/client.json",
+        redirectUri: "http://127.0.0.1:9000/oauth/callback/notion",
+      },
+    });
+  });
+
   it("fails when an env placeholder is missing", async () => {
     const config = await parseConfig({
       mcpServers: {
@@ -353,9 +392,9 @@ describe("server config", () => {
     await writeFile(join(dir, ".ptools", "config.json"), "{}");
     await writeFile(join(dir, "ptools.config.json"), "{}");
 
-    await expect(Effect.runPromise(resolveConfigPath([], {}, dir))).resolves.toBe(
-      join(dir, ".ptools", "config.json"),
-    );
+    await expect(
+      Effect.runPromise(resolveConfigPath([], {}, dir)),
+    ).resolves.toBe(join(dir, ".ptools", "config.json"));
 
     const legacyDir = await mkdtemp(
       join(tmpdir(), "ptools-core-config-legacy-"),

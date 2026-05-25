@@ -5,6 +5,7 @@ import {
   CodeMode,
   type CodeModeSearchProvidersResult,
   type CodeModeSearchResult,
+  type CodeModeAuthStatusResult,
   type CodeModeToolSchemaResult,
 } from "@ptools/code-mode";
 import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
@@ -92,6 +93,15 @@ const ExecuteOutputSchema = {
   logs: z.array(z.unknown()),
 };
 
+const AuthStatusOutputSchema = {
+  authUrl: z.string(),
+  servers: z.array(z.unknown()),
+};
+
+const RefreshOutputSchema = {
+  refreshed: z.boolean(),
+};
+
 /**
  * Starts the combined ptools MCP server over stdio.
  *
@@ -128,7 +138,7 @@ const runMcpServer: Effect.Effect<void, never, CodeMode | Scope.Scope> =
       version: "0.0.0",
     });
 
-    yield* writeStartupDiagnostics(codeMode);
+    yield* writeStartupDiagnostics(codeMode).pipe(Effect.ignore);
 
     registerCodeModeTools(server, codeMode);
 
@@ -151,6 +161,63 @@ export const registerCodeModeTools = (
   server: McpServer,
   codeMode: Context.Tag.Service<typeof CodeMode>,
 ): void => {
+  server.registerTool(
+    "auth_status",
+    {
+      title: "Get Upstream MCP Auth Status",
+      description:
+        "Show the ptools auth center URL and current auth state for every configured upstream MCP server. If a provider requires auth, ask the user to open authUrl and authorize it, then call search again.",
+      inputSchema: {},
+      outputSchema: AuthStatusOutputSchema,
+    },
+    async () => {
+      const result = await Effect.runPromise(
+        codeMode.authStatus.pipe(Effect.either),
+      );
+
+      if (Either.isLeft(result)) {
+        return toToolError(result.left);
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: formatAuthStatusText(result.right),
+          },
+        ],
+        structuredContent: toStructuredContent(result.right),
+      };
+    },
+  );
+
+  server.registerTool(
+    "refresh",
+    {
+      title: "Refresh Upstream MCP Registry",
+      description:
+        "Reconnect and rediscover configured upstream MCP servers after the user authorizes a provider in the ptools auth center.",
+      inputSchema: {},
+      outputSchema: RefreshOutputSchema,
+    },
+    async () => {
+      const result = await Effect.runPromise(
+        codeMode.refresh.pipe(Effect.either),
+      );
+
+      if (Either.isLeft(result)) {
+        return toToolError(result.left);
+      }
+
+      return {
+        content: [
+          { type: "text" as const, text: "Refreshed upstream MCP registry." },
+        ],
+        structuredContent: { refreshed: true },
+      };
+    },
+  );
+
   server.registerTool(
     "search_providers",
     {
@@ -357,9 +424,20 @@ const formatToolSchemaText = (result: CodeModeToolSchemaResult): string =>
     result,
   ).join("\n");
 
+const formatAuthStatusText = (result: CodeModeAuthStatusResult): string =>
+  [
+    "Upstream MCP auth status:",
+    `Auth center: ${result.authUrl}`,
+    "",
+    "If a server status is requires_auth, ask the user to open the auth center and authorize that server. Then call refresh or search again.",
+    "",
+    "Servers:",
+    JSON.stringify(result.servers, null, 2),
+  ].join("\n");
+
 const writeStartupDiagnostics = (
   codeMode: Context.Tag.Service<typeof CodeMode>,
-): Effect.Effect<void> =>
+): Effect.Effect<void, unknown> =>
   codeMode.diagnostics.pipe(
     Effect.flatMap((diagnostics) =>
       diagnostics.length === 0

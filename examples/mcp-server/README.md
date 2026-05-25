@@ -50,9 +50,11 @@ publishable ptools MCP server as one local MCP server named `ptools`:
 }
 ```
 
-OpenCode runs the example package's `start` script, and that script runs
-`ptools-mcp` with no config argument. The config is found through the default
-lookup at `examples/mcp-server/.ptools/config.json`.
+OpenCode runs the example package's `start` script. For local development, that
+script first builds the repo TypeScript project so `ptools-mcp` sees fresh
+workspace package changes, then runs `ptools-mcp` with no config argument. The
+config is found through the default lookup at
+`examples/mcp-server/.ptools/config.json`.
 
 Then start OpenCode from this example directory:
 
@@ -69,12 +71,14 @@ schemas, then create a wholesale quote for cust-001 with 6 Assam tea, 3 Arabica
 coffee, and 8 cardamom biscuits. Adjust quantities if inventory is short.
 ```
 
-The agent should see four public ptools tools:
+The agent should see these public ptools tools:
 
+- `auth_status`
+- `execute`
+- `get_tool_schema`
+- `refresh`
 - `search_providers`
 - `search`
-- `get_tool_schema`
-- `execute`
 
 The expected workflow is to call `search`, then `get_tool_schema`, then
 `execute` generated JavaScript that calls provider APIs like
