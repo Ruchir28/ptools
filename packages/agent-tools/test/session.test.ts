@@ -28,6 +28,11 @@ describe("PtoolsSession", () => {
       ManagedRuntime.make(
         Layer.succeed(CodeMode, {
           diagnostics: Effect.succeed(diagnostics),
+          authStatus: Effect.succeed({
+            authUrl: "http://127.0.0.1:9999/auth",
+            servers: [],
+          }),
+          refresh: Effect.void,
           searchProviders: (request?: CodeModeSearchProvidersRequest) =>
             Effect.sync(() => {
               calls.push({ name: "search_providers", input: request });
@@ -91,6 +96,11 @@ describe("PtoolsSession", () => {
       ManagedRuntime.make(
         Layer.succeed(CodeMode, {
           diagnostics: Effect.succeed([]),
+          authStatus: Effect.succeed({
+            authUrl: "http://127.0.0.1:9999/auth",
+            servers: [],
+          }),
+          refresh: Effect.void,
           searchProviders: () =>
             Effect.succeed({ providers: [], diagnostics: [] }),
           search: () => Effect.succeed({ actions: [], diagnostics: [] }),
@@ -119,6 +129,11 @@ describe("PtoolsSession", () => {
         Effect.acquireRelease(
           Effect.succeed({
             diagnostics: Effect.succeed(diagnostics),
+            authStatus: Effect.succeed({
+              authUrl: "http://127.0.0.1:9999/auth",
+              servers: [],
+            }),
+            refresh: Effect.void,
             searchProviders: () =>
               Effect.succeed({ providers: [], diagnostics }),
             search: () => Effect.succeed({ actions: [], diagnostics }),
@@ -454,6 +469,11 @@ describe("input parsing", () => {
       ManagedRuntime.make(
         Layer.succeed(CodeMode, {
           diagnostics: Effect.succeed([]),
+          authStatus: Effect.succeed({
+            authUrl: "http://127.0.0.1:9999/auth",
+            servers: [],
+          }),
+          refresh: Effect.void,
           searchProviders: () =>
             Effect.succeed({ providers: [], diagnostics: [] }),
           search: () => Effect.succeed({ actions: [], diagnostics: [] }),
