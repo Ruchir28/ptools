@@ -8,3 +8,4 @@ opencode.json
 opencode*.md
 ptools*.config.json
 .env
+.npmrc
