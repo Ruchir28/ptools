@@ -9,8 +9,8 @@ import {
   type CodeModeSearchProvidersRequest,
   type CodeModeSearchRequest,
   type CodeModeToolSchemaRequest,
-} from "@ptools/code-mode";
-import { ServerConfigError } from "@ptools/core";
+} from "@p_tools/code-mode";
+import { ServerConfigError } from "@p_tools/core";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 import {

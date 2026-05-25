@@ -56,9 +56,9 @@ try {
   await writeFile(
     join(projectDir, "smoke.mjs"),
     [
-      'import { createPtoolsSessionFromConfigFile } from "@ptools/agent-tools";',
-      'import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";',
-      'import { runServer } from "@ptools/mcp-server";',
+      'import { createPtoolsSessionFromConfigFile } from "@p_tools/agent-tools";',
+      'import { toAISDKTools } from "@p_tools/agent-tools/ai-sdk";',
+      'import { runServer } from "@p_tools/mcp-server";',
       'import { accessSync, constants as fsConstants, existsSync } from "node:fs";',
       'import { fileURLToPath } from "node:url";',
       "",

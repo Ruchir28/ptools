@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor";
-import { makeMcpRegistryLive } from "@ptools/mcp-registry";
+import { makeLocalSandboxExecutorLive } from "@p_tools/executor";
+import { makeMcpRegistryLive } from "@p_tools/mcp-registry";
 import { Effect, Either, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/index.js";

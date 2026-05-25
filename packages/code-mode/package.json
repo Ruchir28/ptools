@@ -1,5 +1,5 @@
 {
-  "name": "@ptools/code-mode",
+  "name": "@p_tools/code-mode",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
   "type": "module",
@@ -35,9 +35,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@ptools/core": "workspace:*",
-    "@ptools/executor": "workspace:*",
-    "@ptools/mcp-registry": "workspace:*",
+    "@p_tools/core": "workspace:*",
+    "@p_tools/executor": "workspace:*",
+    "@p_tools/mcp-registry": "workspace:*",
     "effect": "3.21.2",
     "json-schema-to-typescript": "15.0.4"
   }

@@ -1,4 +1,4 @@
-# @ptools/mcp-server
+# @p_tools/mcp-server
 
 Combined Code Mode MCP server. It connects to configured upstream MCP servers,
 discovers their tools, and exposes a compact set of Code Mode tools to an MCP
@@ -8,7 +8,7 @@ stdio.
 ## Install
 
 ```bash
-npm install @ptools/mcp-server
+npm install @p_tools/mcp-server
 ```
 
 ## Configure
@@ -107,7 +107,7 @@ ptools-mcp
 With `npx`:
 
 ```bash
-npx @ptools/mcp-server
+npx @p_tools/mcp-server
 ```
 
 Use an explicit path when the config lives elsewhere:
@@ -124,7 +124,7 @@ For concrete Claude Code and OpenCode setup files, see
 
 ```ts
 import { Effect } from "effect";
-import { runServer } from "@ptools/mcp-server";
+import { runServer } from "@p_tools/mcp-server";
 
 await Effect.runPromise(
   runServer(process.argv.slice(2), process.env, process.cwd()),

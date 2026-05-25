@@ -1,5 +1,5 @@
 {
-  "name": "@ptools/mcp-server",
+  "name": "@p_tools/mcp-server",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
   "type": "module",
@@ -40,10 +40,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
-    "@ptools/code-mode": "workspace:*",
-    "@ptools/core": "workspace:*",
-    "@ptools/executor": "workspace:*",
-    "@ptools/mcp-registry": "workspace:*",
+    "@p_tools/code-mode": "workspace:*",
+    "@p_tools/core": "workspace:*",
+    "@p_tools/executor": "workspace:*",
+    "@p_tools/mcp-registry": "workspace:*",
     "effect": "3.21.2",
     "zod": "4.4.3"
   }

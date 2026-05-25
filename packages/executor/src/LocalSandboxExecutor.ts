@@ -63,7 +63,7 @@ export const makeLocalSandboxExecutor = (
 
 export const makeLocalSandboxExecutorLive = (
   options?: LocalSandboxExecutorOptions,
-): Layer.Layer<CodeExecutor, ExecutorStartError> =>
+): Layer.Layer<CodeExecutor, ExecutorStartError, never> =>
   Layer.scoped(
     CodeExecutor,
     makeLocalSandboxExecutor(options).pipe(

@@ -7,7 +7,7 @@ It is intentionally separate from `examples/mcp-server`, which is a repo-local
 smoke fixture. This folder shows the installed-package shape:
 
 ```bash
-npx -y @ptools/mcp-server --config ./.ptools/config.json
+npx -y @p_tools/mcp-server --config ./.ptools/config.json
 ```
 
 ## What This Example Loads
@@ -60,7 +60,7 @@ OpenCode should start ptools with:
       "command": [
         "npx",
         "-y",
-        "@ptools/mcp-server",
+        "@p_tools/mcp-server",
         "--config",
         "./.ptools/config.json"
       ],
@@ -95,7 +95,7 @@ You can also add ptools with the Claude Code CLI instead of using `.mcp.json`:
 
 ```bash
 cd examples/mcp-hosts
-claude mcp add ptools --scope project -- npx -y @ptools/mcp-server --config "$PWD/.ptools/config.json"
+claude mcp add ptools --scope project -- npx -y @p_tools/mcp-server --config "$PWD/.ptools/config.json"
 ```
 
 Use `--scope user` instead of `--scope project` if you want the entry available
@@ -117,12 +117,12 @@ generated JavaScript passed to `execute`.
 
 ## Source Checkout Variant
 
-Before `@ptools/mcp-server` is published, use the repo-local command from this
+Before `@p_tools/mcp-server` is published, use the repo-local command from this
 example directory instead of `npx`:
 
 ```bash
-pnpm --dir ../.. --filter @ptools/mcp-server... build
-pnpm --dir ../.. --filter @ptools/mcp-server dev -- --config "$PWD/.ptools/config.json"
+pnpm --dir ../.. --filter @p_tools/mcp-server... build
+pnpm --dir ../.. --filter @p_tools/mcp-server dev -- --config "$PWD/.ptools/config.json"
 ```
 
 For host config while developing from source, point the host at a shell command:
@@ -132,7 +132,7 @@ For host config while developing from source, point the host at a shell command:
   "command": [
     "sh",
     "-lc",
-    "cd ../.. && pnpm --filter @ptools/mcp-server dev -- --config \"$OLDPWD/.ptools/config.json\""
+    "cd ../.. && pnpm --filter @p_tools/mcp-server dev -- --config \"$OLDPWD/.ptools/config.json\""
   ]
 }
 ```

@@ -1,4 +1,4 @@
-# @ptools/agent-tools
+# @p_tools/agent-tools
 
 Use ptools from an AI SDK model. This package loads your `ptools.config.json`,
 connects the configured MCP servers, creates a Code Mode session, and exposes
@@ -7,7 +7,7 @@ that session as AI SDK tools.
 ## Install
 
 ```bash
-npm install @ptools/agent-tools
+npm install @p_tools/agent-tools
 ```
 
 You also need an AI SDK model provider package for your app, such as
@@ -49,8 +49,8 @@ Environment variables can be referenced explicitly:
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createPtoolsSessionFromConfigFile } from "@ptools/agent-tools";
-import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
+import { createPtoolsSessionFromConfigFile } from "@p_tools/agent-tools";
+import { toAISDKTools } from "@p_tools/agent-tools/ai-sdk";
 
 const ptools = await createPtoolsSessionFromConfigFile();
 

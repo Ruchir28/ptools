@@ -2,8 +2,8 @@ import type {
   ExecuteRequest,
   ExecuteResult,
   ExecutorError,
-} from "@ptools/executor";
-import { CodeExecutor } from "@ptools/executor";
+} from "@p_tools/executor";
+import { CodeExecutor } from "@p_tools/executor";
 import type {
   CallToolRequest,
   DiscoveredMcpTool,
@@ -12,8 +12,8 @@ import type {
   McpRegistryDiagnostic,
   ToolNotFound,
   UpstreamAuthRequired,
-} from "@ptools/mcp-registry";
-import { McpRegistry } from "@ptools/mcp-registry";
+} from "@p_tools/mcp-registry";
+import { McpRegistry } from "@p_tools/mcp-registry";
 import { Effect, Either, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/CodeMode.js";

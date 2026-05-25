@@ -61,7 +61,7 @@ later.
 Before considering registry changes complete, run:
 
 ```bash
-pnpm --filter @ptools/mcp-registry test
+pnpm --filter @p_tools/mcp-registry test
 pnpm typecheck
 pnpm build
 ```

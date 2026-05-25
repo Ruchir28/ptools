@@ -1,5 +1,5 @@
 {
-  "name": "@ptools/mcp-registry",
+  "name": "@p_tools/mcp-registry",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
   "type": "module",
@@ -37,7 +37,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
     "@napi-rs/keyring": "^1.3.0",
-    "@ptools/core": "workspace:*",
+    "@p_tools/core": "workspace:*",
     "effect": "3.21.2",
     "zod": "4.4.3"
   }

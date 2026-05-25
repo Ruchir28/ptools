@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
-    "@ptools/mcp-server": "workspace:*",
+    "@p_tools/mcp-server": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

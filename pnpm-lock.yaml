@@ -33,16 +33,16 @@ importers:
       '@fontsource-variable/geist':
         specifier: ^5.2.8
         version: 5.2.8
-      '@ptools/code-mode':
+      '@p_tools/code-mode':
         specifier: workspace:*
         version: link:../../packages/code-mode
-      '@ptools/core':
+      '@p_tools/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@ptools/executor':
+      '@p_tools/executor':
         specifier: workspace:*
         version: link:../../packages/executor
-      '@ptools/mcp-registry':
+      '@p_tools/mcp-registry':
         specifier: workspace:*
         version: link:../../packages/mcp-registry
       '@radix-ui/react-scroll-area':
@@ -121,7 +121,7 @@ importers:
       '@openrouter/ai-sdk-provider':
         specifier: ^2.9.0
         version: 2.9.0(ai@6.0.190(zod@4.4.3))(zod@4.4.3)
-      '@ptools/agent-tools':
+      '@p_tools/agent-tools':
         specifier: workspace:*
         version: link:../../packages/agent-tools
       ai:
@@ -149,7 +149,7 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
-      '@ptools/mcp-server':
+      '@p_tools/mcp-server':
         specifier: workspace:*
         version: link:../../packages/mcp-server
       zod:
@@ -168,16 +168,16 @@ importers:
 
   packages/agent-tools:
     dependencies:
-      '@ptools/code-mode':
+      '@p_tools/code-mode':
         specifier: workspace:*
         version: link:../code-mode
-      '@ptools/core':
+      '@p_tools/core':
         specifier: workspace:*
         version: link:../core
-      '@ptools/executor':
+      '@p_tools/executor':
         specifier: workspace:*
         version: link:../executor
-      '@ptools/mcp-registry':
+      '@p_tools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
       ai:
@@ -192,13 +192,13 @@ importers:
 
   packages/code-mode:
     dependencies:
-      '@ptools/core':
+      '@p_tools/core':
         specifier: workspace:*
         version: link:../core
-      '@ptools/executor':
+      '@p_tools/executor':
         specifier: workspace:*
         version: link:../executor
-      '@ptools/mcp-registry':
+      '@p_tools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
       effect:
@@ -216,7 +216,7 @@ importers:
 
   packages/executor:
     dependencies:
-      '@ptools/core':
+      '@p_tools/core':
         specifier: workspace:*
         version: link:../core
       effect:
@@ -231,7 +231,7 @@ importers:
       '@napi-rs/keyring':
         specifier: ^1.3.0
         version: 1.3.0
-      '@ptools/core':
+      '@p_tools/core':
         specifier: workspace:*
         version: link:../core
       effect:
@@ -246,16 +246,16 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
-      '@ptools/code-mode':
+      '@p_tools/code-mode':
         specifier: workspace:*
         version: link:../code-mode
-      '@ptools/core':
+      '@p_tools/core':
         specifier: workspace:*
         version: link:../core
-      '@ptools/executor':
+      '@p_tools/executor':
         specifier: workspace:*
         version: link:../executor
-      '@ptools/mcp-registry':
+      '@p_tools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
       effect:

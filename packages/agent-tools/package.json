@@ -1,5 +1,5 @@
 {
-  "name": "@ptools/agent-tools",
+  "name": "@p_tools/agent-tools",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
   "type": "module",
@@ -39,10 +39,10 @@
     "test": "vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
-    "@ptools/code-mode": "workspace:*",
-    "@ptools/core": "workspace:*",
-    "@ptools/executor": "workspace:*",
-    "@ptools/mcp-registry": "workspace:*",
+    "@p_tools/code-mode": "workspace:*",
+    "@p_tools/core": "workspace:*",
+    "@p_tools/executor": "workspace:*",
+    "@p_tools/mcp-registry": "workspace:*",
     "ai": "6.0.184",
     "effect": "3.21.2",
     "zod": "4.4.3"

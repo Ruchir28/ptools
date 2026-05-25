@@ -2,10 +2,10 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeCodeModeLive } from "@ptools/code-mode";
-import { loadPtoolsConfig } from "@ptools/core";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor";
-import { makeMcpRegistryLive } from "@ptools/mcp-registry";
+import { CodeMode, makeCodeModeLive } from "@p_tools/code-mode";
+import { loadPtoolsConfig } from "@p_tools/core";
+import { makeLocalSandboxExecutorLive } from "@p_tools/executor";
+import { makeMcpRegistryLive } from "@p_tools/mcp-registry";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { startPlaygroundServer } from "../src/playground.js";
@@ -22,7 +22,7 @@ describe("Code Mode playground", () => {
     const config = await Effect.runPromise(
       loadPtoolsConfig(configPath, process.env),
     );
-    const live = makeCodeModeLive().pipe(
+    const live: Layer.Layer<CodeMode, unknown, never> = makeCodeModeLive().pipe(
       Layer.provide(
         Layer.merge(
           makeMcpRegistryLive(config.mcpServers),
