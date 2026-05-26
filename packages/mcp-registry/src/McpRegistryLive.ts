@@ -30,8 +30,11 @@ export const makeMcpRegistryLive = (
         diagnostics: [],
       };
       let refreshPromise: () => Promise<void> = () => Promise.resolve();
+      let refreshServerPromise: (serverName: string) => Promise<void> = () =>
+        Promise.resolve();
       const authManager = yield* PtoolsAuthManager.make({
-        onAuthorized: () => refreshPromise(),
+        onAuthorized: (serverName) => refreshServerPromise(serverName),
+        onRefresh: (serverName) => refreshServerPromise(serverName),
         autoOpen:
           process.env.PTOOLS_AUTH_AUTO_OPEN !== "0" &&
           process.env.PTOOLS_AUTH_AUTO_OPEN !== "false" &&
@@ -64,7 +67,47 @@ export const makeMcpRegistryLive = (
           ),
         );
       });
+      const refreshServerState = (serverName: string) =>
+        Effect.gen(function* () {
+          const upstream = upstreams[serverName];
+
+          if (upstream === undefined) {
+            throw new Error(`Unknown MCP server: ${serverName}`);
+          }
+
+          const previousServerClients = state.clients.filter(
+            (client) => client.serverName === serverName,
+          );
+          const connected = yield* connectConfiguredMcpClients(
+            { [serverName]: upstream },
+            authManager,
+          );
+          const discovered = yield* discoverAllToolsDegraded(connected.clients);
+          const otherClients = state.clients.filter(
+            (client) => client.serverName !== serverName,
+          );
+          const otherTools = state.tools.filter(
+            (tool) => tool.serverName !== serverName,
+          );
+          const otherDiagnostics = state.diagnostics.filter(
+            (diagnostic) => diagnostic.serverName !== serverName,
+          );
+
+          state = {
+            clients: [...otherClients, ...discovered.clients],
+            tools: [...otherTools, ...discovered.tools],
+            diagnostics: dedupeDiagnostics([
+              ...otherDiagnostics,
+              ...connected.diagnostics,
+              ...discovered.diagnostics,
+            ]),
+          };
+
+          yield* closeClients(previousServerClients);
+        });
       refreshPromise = () => Effect.runPromise(refreshState);
+      refreshServerPromise = (serverName) =>
+        Effect.runPromise(refreshServerState(serverName));
 
       yield* refreshState;
       yield* Effect.addFinalizer(() => closeClients(state.clients));

@@ -49,6 +49,7 @@ const EXECUTE_CODE_CONTRACT = [
   "Prefer async arrow functions: async () => { ... }.",
   "Do not send a script body, top-level await, top-level return, or a function declaration.",
   "Provider namespaces returned by search, such as github, are injected as globals inside that function.",
+  "Use execute to keep intermediate provider results, filtering, joins, pagination, aggregation, and field extraction inside the code run; return only the compact result needed for the user.",
 ].join(" ");
 
 const ExecuteInputSchema = z.object({
@@ -113,27 +114,27 @@ const makeAISDKTool = (
     case "search_providers":
       return tool({
         description:
-          'Find configured MCP provider namespaces. Call with {} to list all providers, or with { query: "..." } to find providers by name or capability. Use a returned provider value to narrow ptools_search when helpful.',
+          'Find configured upstream MCP provider namespaces behind this single ptools surface. Call with {} to see available providers, or with { query: "..." } when the task mentions a source or capability and you are unsure which provider owns it. Use a returned provider value to narrow ptools_search when helpful.',
         inputSchema: SearchProvidersInputSchema,
         execute,
       });
     case "search":
       return tool({
         description:
-          'Find MCP-backed actions for a task. Call with { query: "..." }, optionally with { provider: "..." } to narrow. Use returned action.toolId values with ptools_get_tool_schema before ptools_execute.',
+          'Find MCP-backed actions for a task. This is action discovery; use ptools_search_providers first when you need to discover which upstream providers are available. Call with { query: "..." }, optionally with { provider: "..." } to narrow. A good next step is ptools_get_tool_schema for selected action.toolId values before ptools_execute.',
         inputSchema: SearchInputSchema,
         execute,
       });
     case "get_tool_schema":
       return tool({
         description:
-          "Fetch full JSON schemas and TypeScript declaration snippets for selected ptools Code Mode actions before writing execute code. Prefer toolIds returned by ptools_search.",
+          "Fetch full JSON schemas and TypeScript declaration snippets for selected ptools Code Mode actions before writing execute code. Prefer a small set of toolIds returned by ptools_search that you actually plan to call, then use ptools_execute to combine tool calls and reduce intermediate results.",
         inputSchema: ToolSchemaInputSchema,
         execute,
       });
     case "execute":
       return tool({
-        description: `Run generated JavaScript against MCP-backed provider APIs discovered through search. ${EXECUTE_CODE_CONTRACT}`,
+        description: `Run generated JavaScript against MCP-backed provider APIs discovered through search. This is the best place for multi-step provider calls, result inspection, filtering, aggregation, joins, and extracting the few fields needed for the final answer. ${EXECUTE_CODE_CONTRACT}`,
         inputSchema: ExecuteInputSchema,
         execute,
       });

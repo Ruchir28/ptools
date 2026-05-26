@@ -65,8 +65,9 @@ const EXECUTE_CODE_CONTRACT = [
   "code must be a JavaScript function expression that the executor can call.",
   'Use async arrow functions for provider calls: async () => { const r = await exa.web_search_exa({ query: "..." }); return r; }',
   "Do not send a script body, top-level await, top-level return, or a function declaration.",
-  "First use search to find candidate actions, then get_tool_schema with returned toolIds, then execute.",
+  "A good pattern is to use search to find candidate actions, get_tool_schema with returned toolIds, then execute.",
   "Provider namespaces returned by search, such as exa, are injected as globals inside that function.",
+  "Use execute to keep intermediate provider results, filtering, joins, pagination, aggregation, and field extraction inside the code run; return only the compact result needed for the user.",
 ].join(" ");
 
 const EXECUTE_CODE_EXAMPLE = `async () => {
@@ -223,7 +224,7 @@ export const registerCodeModeTools = (
     {
       title: "Search Code Mode Providers",
       description:
-        'Find configured MCP provider namespaces. Call with {} to list all providers, or with { query: "..." } to find providers by name or capability. Use a returned provider value to narrow search when helpful.',
+        'Find configured upstream MCP provider namespaces behind this single ptools server. Call with {} to see available providers, or with { query: "..." } when the task mentions a source or capability and you are unsure which provider owns it. Use a returned provider value to narrow search when helpful.',
       inputSchema: SearchProvidersInputSchema,
       outputSchema: SearchProvidersOutputSchema,
     },
@@ -257,7 +258,7 @@ export const registerCodeModeTools = (
     {
       title: "Search Code Mode Actions",
       description:
-        'Find MCP-backed actions for a task. Call with { query: "..." }, optionally with { provider: "..." } to narrow. Use returned action.toolId values with get_tool_schema before execute.',
+        'Find MCP-backed actions for a task. This is action discovery; use search_providers first when you need to discover which upstream providers are available. Call with { query: "..." }, optionally with { provider: "..." } to narrow. A good next step is get_tool_schema for selected action.toolId values before execute.',
       inputSchema: SearchInputSchema,
       outputSchema: SearchOutputSchema,
     },
@@ -289,7 +290,7 @@ export const registerCodeModeTools = (
     {
       title: "Get Code Mode Tool Schemas",
       description:
-        "Fetch full JSON schemas and self-contained TypeScript declarations for one or more tools selected from search. Fails the whole request if any requested tool is unknown.",
+        "Fetch full JSON schemas and self-contained TypeScript declarations for one or more tools selected from search. Prefer a small set of toolIds you actually plan to call, then use execute to combine tool calls and reduce intermediate results. Fails the whole request if any requested tool is unknown.",
       inputSchema: ToolSchemaInputSchema,
       outputSchema: ToolSchemaOutputSchema,
     },
@@ -322,7 +323,7 @@ export const registerCodeModeTools = (
     "execute",
     {
       title: "Execute Code Mode JavaScript",
-      description: `Run generated JavaScript against MCP-backed provider APIs discovered through search. ${EXECUTE_CODE_CONTRACT}`,
+      description: `Run generated JavaScript against MCP-backed provider APIs discovered through search. This is the best place for multi-step provider calls, result inspection, filtering, aggregation, joins, and extracting the few fields needed for the final answer. ${EXECUTE_CODE_CONTRACT}`,
       inputSchema: ExecuteInputSchema,
       outputSchema: ExecuteOutputSchema,
     },
@@ -394,7 +395,7 @@ const formatSearchText = (context: CodeModeSearchResult): string =>
   maybeAppendDiagnostics(
     [
       "Action discovery result:",
-      "These are schema-free action candidates. Call get_tool_schema with one or more returned toolIds before writing execute.code.",
+      "These are schema-free action candidates. A good next step is get_tool_schema for the selected toolIds, then execute.code to call providers and reduce intermediate results before returning a compact answer.",
       "",
       "Execution contract:",
       EXECUTE_CODE_CONTRACT,
@@ -429,7 +430,7 @@ const formatAuthStatusText = (result: CodeModeAuthStatusResult): string =>
     "Upstream MCP auth status:",
     `Auth center: ${result.authUrl}`,
     "",
-    "If a server status is requires_auth, ask the user to open the auth center and authorize that server. Then call refresh or search again.",
+    "If a server status is requires_auth, ask the user to open the auth center and authorize that server. If a server is connected but tool calls still fail auth, ask the user to open reauthorizeUrl for that server. Then call refresh or search again.",
     "",
     "Servers:",
     JSON.stringify(result.servers, null, 2),

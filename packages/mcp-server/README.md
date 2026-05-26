@@ -11,6 +11,13 @@ stdio.
 npm install @ptools/mcp-server
 ```
 
+Most MCP hosts do not need a project install. They can start the published
+package with `npx`:
+
+```bash
+npx -y @ptools/mcp-server --config .ptools/config.json
+```
+
 ## Configure
 
 Create `.ptools/config.json` in the directory where the server starts:
@@ -98,16 +105,16 @@ work while the user fixes that server's config.
 
 ## Run
 
-As an installed binary:
+From the npm registry with `npx`:
 
 ```bash
-ptools-mcp
+npx -y @ptools/mcp-server --config .ptools/config.json
 ```
 
-With `npx`:
+From a project where the package is installed:
 
 ```bash
-npx @ptools/mcp-server
+ptools-mcp --config .ptools/config.json
 ```
 
 Use an explicit path when the config lives elsewhere:
@@ -119,6 +126,51 @@ PTOOLS_CONFIG=./config/ptools.json ptools-mcp
 
 For concrete Claude Code and OpenCode setup files, see
 `examples/mcp-hosts` in the repository.
+
+## MCP Host Config
+
+Claude Code project config:
+
+```json
+{
+  "mcpServers": {
+    "ptools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@ptools/mcp-server",
+        "--config",
+        ".ptools/config.json"
+      ]
+    }
+  }
+}
+```
+
+OpenCode config:
+
+```json
+{
+  "mcp": {
+    "ptools": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@ptools/mcp-server",
+        "--config",
+        ".ptools/config.json"
+      ],
+      "enabled": true,
+      "timeout": 30000
+    }
+  }
+}
+```
+
+In both cases, the MCP host starts one `ptools` server. ptools then connects to
+the upstream MCP servers listed in `.ptools/config.json`.
 
 ## Embed
 
@@ -137,7 +189,11 @@ The server exposes six MCP tools:
 
 - `auth_status` shows the auth center URL and upstream server auth states.
 - `refresh` reconnects and rediscovers upstream servers after auth changes.
-- `search_providers` finds configured MCP provider namespaces.
-- `search` finds callable actions for a task query.
-- `get_tool_schema` fetches full schemas and TypeScript declarations.
-- `execute` runs generated JavaScript against discovered provider APIs.
+- `search_providers` finds upstream MCP provider namespaces behind ptools.
+- `search` finds callable actions for a task query, optionally narrowed by
+  provider.
+- `get_tool_schema` fetches full schemas and TypeScript declarations for
+  selected action `toolId`s.
+- `execute` runs generated JavaScript against discovered provider APIs, which is
+  useful for multi-step calls and reducing intermediate results before returning
+  a compact answer.

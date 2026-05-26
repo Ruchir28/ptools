@@ -1,12 +1,21 @@
-{
-  "mcpServers": {
-    "ptools": {
-      "type": "stdio",
-      "command": "sh",
-      "args": [
-        "-lc",
-        "exec npx -y @ptools/mcp-server --config \"$CLAUDE_PROJECT_DIR/.ptools/config.json\""
-      ]
+  {
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+      "ptools": {
+        "type": "local",
+        "command": [
+          "pnpm",
+          "--dir",
+          "../..",
+          "--filter",
+          "@ptools/mcp-server",
+          "dev",
+          "--",
+          "--config",
+          "$PWD/.ptools/config.json"
+        ],
+        "enabled": true,
+        "timeout": 30000
+      }
     }
   }
-}

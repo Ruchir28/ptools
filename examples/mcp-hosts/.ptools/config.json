@@ -1,14 +1,13 @@
 {
   "mcpServers": {
     "exa": {
-      "command": "npx",
-      "args": ["-y", "exa-mcp-server"],
-      "env": {
-        "EXA_API_KEY": "${env:EXA_API_KEY}"
-      }
+      "url": "https://mcp.exa.ai/mcp"
     },
     "notion": {
       "url": "https://mcp.notion.com/mcp"
+    },
+    "sheets": {
+      "url": "https://mcp.gumloop.com/gsheets/mcp"
     }
   }
 }

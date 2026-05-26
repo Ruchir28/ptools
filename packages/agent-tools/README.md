@@ -98,12 +98,14 @@ try {
 
 The AI SDK adapter exposes four Code Mode tools with a `ptools_` prefix:
 
-- `ptools_search_providers`: find configured MCP provider namespaces.
+- `ptools_search_providers`: find upstream MCP provider namespaces behind
+  ptools.
 - `ptools_search`: find callable actions for a task query.
 - `ptools_get_tool_schema`: fetch full schemas and TypeScript declarations for
   selected action `toolId`s.
 - `ptools_execute`: run generated JavaScript against the discovered provider
-  APIs.
+  APIs, which is useful for multi-step calls and reducing intermediate results
+  before returning a compact answer.
 
 Use provider discovery when the model is unsure what namespace exists, then use
 action search with task words:

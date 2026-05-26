@@ -53,6 +53,7 @@ interface AuthServerRecordUpdate {
 
 interface PtoolsAuthManagerOptions {
   readonly onAuthorized?: (serverName: string) => Promise<void>;
+  readonly onRefresh?: (serverName: string) => Promise<void>;
   readonly autoOpen?: boolean;
 }
 
@@ -63,6 +64,7 @@ export class PtoolsAuthManager {
   readonly #server: Server;
   readonly #port: number;
   readonly #onAuthorized: ((serverName: string) => Promise<void>) | undefined;
+  readonly #onRefresh: ((serverName: string) => Promise<void>) | undefined;
   readonly #autoOpen: boolean;
 
   private constructor(
@@ -73,6 +75,7 @@ export class PtoolsAuthManager {
     this.#server = server;
     this.#port = port;
     this.#onAuthorized = options.onAuthorized;
+    this.#onRefresh = options.onRefresh;
     this.#autoOpen = options.autoOpen ?? false;
   }
 
@@ -242,7 +245,10 @@ export class PtoolsAuthManager {
     };
   }
 
-  async beginAuthorization(serverName: string): Promise<string> {
+  async beginAuthorization(
+    serverName: string,
+    options: { readonly force?: boolean } = {},
+  ): Promise<string> {
     const record = this.#records.get(serverName);
 
     if (record?.url === undefined || record.transport !== "http") {
@@ -256,6 +262,10 @@ export class PtoolsAuthManager {
       url: record.url,
       ...(record.auth === undefined ? {} : { auth: record.auth }),
     });
+
+    if (options.force === true) {
+      await provider.invalidateCredentials?.("all");
+    }
 
     this.#update(serverName, {
       status: "auth_in_progress",
@@ -437,6 +447,13 @@ export class PtoolsAuthManager {
         : {
             authorizeUrl: `${this.#origin}/auth/${encodeURIComponent(record.serverName)}`,
           }),
+      ...(record.transport === "http" &&
+      record.status !== "static_credentials" &&
+      record.status !== "needs_config"
+        ? {
+            reauthorizeUrl: `${this.#origin}/auth/${encodeURIComponent(record.serverName)}?force=1`,
+          }
+        : {}),
       ...(record.message === undefined ? {} : { message: record.message }),
       ...(record.lastError === undefined
         ? {}
@@ -461,6 +478,33 @@ export class PtoolsAuthManager {
         return;
       }
 
+      if (url.pathname.startsWith("/refresh/")) {
+        const serverName = decodeURIComponent(
+          url.pathname.slice("/refresh/".length),
+        );
+
+        if (this.#onRefresh === undefined) {
+          sendHtml(
+            response,
+            this.#renderMessagePage(
+              "Refresh unavailable",
+              "This ptools auth center was not started with a refresh handler.",
+            ),
+          );
+          return;
+        }
+
+        await this.#onRefresh(serverName);
+        sendHtml(
+          response,
+          this.#renderMessagePage(
+            "Refresh complete",
+            `ptools reconnected and rediscovered ${serverName}.`,
+          ),
+        );
+        return;
+      }
+
       if (url.pathname.startsWith("/auth/")) {
         const serverName = decodeURIComponent(
           url.pathname.slice("/auth/".length),
@@ -471,7 +515,11 @@ export class PtoolsAuthManager {
           return;
         }
 
-        const authorizationUrl = await this.beginAuthorization(serverName);
+        const authorizationUrl = await this.beginAuthorization(serverName, {
+          force:
+            url.searchParams.get("force") === "1" ||
+            url.searchParams.get("force") === "true",
+        });
 
         response.statusCode = 302;
         response.setHeader("location", authorizationUrl);
@@ -528,19 +576,24 @@ export class PtoolsAuthManager {
   #renderAuthPage(): string {
     const rows = this.status()
       .servers.map((server) => {
-        const action =
+        const actions = [
+          `<a class="button secondary" href="/refresh/${encodeURIComponent(server.serverName)}">Refresh</a>`,
           server.setupUrl !== undefined
             ? `<a class="button secondary" href="${escapeHtml(server.setupUrl)}">Setup</a>`
-            : server.authorizeUrl === undefined
-              ? `<span class="muted">No OAuth action</span>`
-              : `<a class="button" href="${escapeHtml(server.authorizeUrl)}">Authorize</a>`;
+            : server.authorizeUrl !== undefined
+              ? `<a class="button" href="${escapeHtml(server.authorizeUrl)}">Authorize</a>`
+              : server.transport === "http" &&
+                  server.status !== "static_credentials"
+                ? `<a class="button secondary" href="/auth/${encodeURIComponent(server.serverName)}?force=1">Reauthorize</a>`
+                : `<span class="muted">No OAuth action</span>`,
+        ].join(" ");
 
         return `<tr>
   <td>${escapeHtml(server.serverName)}</td>
   <td>${escapeHtml(server.transport)}</td>
   <td><span class="status">${escapeHtml(server.status)}</span></td>
   <td>${escapeHtml(server.message ?? server.lastError ?? "")}</td>
-  <td>${action}</td>
+  <td>${actions}</td>
 </tr>`;
       })
       .join("\n");

@@ -50,6 +50,7 @@ export interface McpAuthServerStatus {
   readonly status: McpAuthStatusValue;
   readonly authUrl?: string;
   readonly authorizeUrl?: string;
+  readonly reauthorizeUrl?: string;
   readonly setupUrl?: string;
   readonly message?: string;
   readonly lastError?: string;
