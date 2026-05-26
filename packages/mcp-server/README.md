@@ -25,9 +25,14 @@ Create `.ptools/config.json` in the directory where the server starts:
 ```json
 {
   "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp"
+    },
+    "notion": {
+      "url": "https://mcp.notion.com/mcp"
+    },
+    "sheets": {
+      "url": "https://mcp.gumloop.com/gsheets/mcp"
     }
   }
 }
