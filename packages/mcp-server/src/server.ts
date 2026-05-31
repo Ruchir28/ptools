@@ -8,8 +8,9 @@ import {
   type CodeModeAuthStatusResult,
   type CodeModeToolSchemaResult,
 } from "@ptools/code-mode";
-import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
+import { ConfigSource } from "@ptools/config";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { NodeConfigSourceLive } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Context, Effect, Either, Layer, Scope } from "effect";
 import { z } from "zod";
@@ -117,8 +118,8 @@ export const runServer = (
   cwd: string,
 ): Effect.Effect<void, unknown> =>
   Effect.gen(function* () {
-    const configPath = yield* resolveConfigPath(argv, env, cwd);
-    const config = yield* loadPtoolsConfig(configPath, env);
+    const configSource = yield* ConfigSource;
+    const config = yield* configSource.load;
     const live = makeCodeModeLive().pipe(
       Layer.provide(
         Layer.merge(
@@ -129,7 +130,10 @@ export const runServer = (
     );
 
     yield* runMcpServer.pipe(Effect.provide(live));
-  }).pipe(Effect.scoped);
+  }).pipe(
+    Effect.provide(NodeConfigSourceLive({ argv, env, cwd })),
+    Effect.scoped,
+  );
 
 const runMcpServer: Effect.Effect<void, never, CodeMode | Scope.Scope> =
   Effect.gen(function* () {

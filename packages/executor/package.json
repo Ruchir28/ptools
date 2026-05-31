@@ -35,7 +35,6 @@
     "test": "vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
-    "@ptools/core": "workspace:*",
     "effect": "3.21.2"
   }
 }

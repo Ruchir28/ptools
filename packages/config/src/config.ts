@@ -1,6 +1,4 @@
-import { access, readFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
-import { Data, Effect } from "effect";
+import { Context, Data, Effect } from "effect";
 
 export class ServerConfigError extends Data.TaggedError("ServerConfigError")<{
   readonly message: string;
@@ -65,94 +63,30 @@ export type ResolvedMcpConfig =
 
 export interface LoadPtoolsConfigOptions {
   readonly baseDir?: string;
+  readonly resolvePath?: (baseDir: string, path: string) => string;
 }
 
 type ConfigEnv = Readonly<Record<string, string | undefined>>;
+type SecretLookup = (name: string) => Effect.Effect<string, ServerConfigError>;
+
+export class ConfigSource extends Context.Tag("@ptools/ConfigSource")<
+  ConfigSource,
+  {
+    readonly load: Effect.Effect<ResolvedPtoolsConfig, ServerConfigError>;
+  }
+>() {}
+
+export class SecretResolver extends Context.Tag("@ptools/SecretResolver")<
+  SecretResolver,
+  {
+    readonly get: (name: string) => Effect.Effect<string, ServerConfigError>;
+  }
+>() {}
 
 export const DEFAULT_CONFIG_PATHS = [
   ".ptools/config.json",
   "ptools.config.json",
 ] as const;
-
-/**
- * Parses CLI/env config path inputs into an absolute config file path.
- *
- * @param argv Command-line args after the executable and script path.
- * @param env Environment map used for the `PTOOLS_CONFIG` fallback.
- * @param cwd Directory used to resolve relative config paths.
- * @returns An absolute config file path.
- */
-export const resolveConfigPath = (
-  argv: ReadonlyArray<string>,
-  env: NodeJS.ProcessEnv,
-  cwd: string,
-): Effect.Effect<string, ServerConfigError> =>
-  Effect.gen(function* () {
-    const cliPath = yield* parseConfigArg(argv);
-
-    if (cliPath !== undefined) {
-      return resolveConfigFilePath(cliPath, cwd);
-    }
-
-    const envPath = env.PTOOLS_CONFIG;
-
-    if (envPath !== undefined) {
-      if (envPath.trim().length === 0) {
-        return yield* Effect.fail(
-          new ServerConfigError({
-            message: "PTOOLS_CONFIG must not be empty.",
-          }),
-        );
-      }
-
-      return resolveConfigFilePath(envPath, cwd);
-    }
-
-    for (const candidate of DEFAULT_CONFIG_PATHS) {
-      const candidatePath = resolve(cwd, candidate);
-      const exists = yield* fileExists(candidatePath);
-
-      if (exists) {
-        return candidatePath;
-      }
-    }
-
-    return yield* Effect.fail(
-      new ServerConfigError({
-        message:
-          "Missing config file. Pass --config <path>, set PTOOLS_CONFIG, or create .ptools/config.json in the launch directory.",
-      }),
-    );
-  });
-
-/**
- * Loads, parses, validates, and resolves a ptools JSON config file.
- *
- * @param path Absolute or relative config file path.
- * @param env Environment map used to resolve `${env:NAME}` placeholders.
- * @returns Registry-compatible upstream MCP config plus executor options.
- */
-export const loadPtoolsConfig = (
-  path: string,
-  env: ConfigEnv,
-  options: LoadPtoolsConfigOptions = {},
-): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError> =>
-  Effect.gen(function* () {
-    const raw = yield* Effect.tryPromise({
-      try: () => readFile(path, "utf8"),
-      catch: (cause) =>
-        new ServerConfigError({
-          message: `Unable to read config file: ${path}`,
-          cause,
-        }),
-    });
-
-    const parsed = yield* parsePtoolsConfigJson(raw, path);
-
-    return yield* resolvePtoolsConfig(parsed, env, {
-      baseDir: options.baseDir ?? dirname(path),
-    });
-  });
 
 /**
  * Parses and validates a raw JSON config string.
@@ -190,6 +124,37 @@ export const resolvePtoolsConfig = (
   env: ConfigEnv,
   options: LoadPtoolsConfigOptions = {},
 ): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError> =>
+  resolvePtoolsConfigWithLookup(
+    config,
+    (name) => {
+      const value = env[name];
+
+      return value === undefined
+        ? Effect.fail(
+            new ServerConfigError({
+              message: `Missing environment variable ${name}`,
+            }),
+          )
+        : Effect.succeed(value);
+    },
+    options,
+  );
+
+export const resolvePtoolsConfigWithSecrets = (
+  config: PtoolsConfig,
+  options: LoadPtoolsConfigOptions = {},
+): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError, SecretResolver> =>
+  Effect.gen(function* () {
+    const secrets = yield* SecretResolver;
+
+    return yield* resolvePtoolsConfigWithLookup(config, secrets.get, options);
+  });
+
+const resolvePtoolsConfigWithLookup = (
+  config: PtoolsConfig,
+  lookupSecret: SecretLookup,
+  options: LoadPtoolsConfigOptions,
+): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError> =>
   Effect.gen(function* () {
     const mcpServers: Record<string, ResolvedMcpConfig> = {};
 
@@ -198,8 +163,13 @@ export const resolvePtoolsConfig = (
     )) {
       mcpServers[serverName] =
         serverConfig.transport === "stdio"
-          ? yield* resolveStdioConfig(serverName, serverConfig, env, options)
-          : yield* resolveHttpConfig(serverName, serverConfig, env);
+          ? yield* resolveStdioConfig(
+              serverName,
+              serverConfig,
+              lookupSecret,
+              options,
+            )
+          : yield* resolveHttpConfig(serverName, serverConfig, lookupSecret);
     }
 
     return {
@@ -208,42 +178,17 @@ export const resolvePtoolsConfig = (
     };
   });
 
-const parseConfigArg = (
-  argv: ReadonlyArray<string>,
-): Effect.Effect<string | undefined, ServerConfigError> => {
-  const index = argv.indexOf("--config");
+export const hashResolvedMcpConfig = (config: ResolvedMcpConfig): string =>
+  stableStringify(config);
 
-  if (index === -1) {
-    return Effect.succeed(undefined);
-  }
-
-  const value = argv[index + 1];
-
-  if (value === undefined || value.trim().length === 0) {
-    return Effect.fail(
-      new ServerConfigError({
-        message: "Missing value for --config.",
-      }),
-    );
-  }
-
-  return Effect.succeed(value);
-};
-
-const resolveConfigFilePath = (path: string, cwd: string): string =>
-  isAbsolute(path) ? path : resolve(cwd, path);
-
-const fileExists = (path: string): Effect.Effect<boolean, never> =>
-  Effect.promise(() =>
-    access(path)
-      .then(() => true)
-      .catch(() => false),
-  );
+export const hashResolvedPtoolsConfig = (
+  config: ResolvedPtoolsConfig,
+): string => stableStringify(config);
 
 const resolveStdioConfig = (
   serverName: string,
   config: Extract<ServerMcpConfig, { readonly transport: "stdio" }>,
-  env: ConfigEnv,
+  lookupSecret: SecretLookup,
   options: LoadPtoolsConfigOptions,
 ): Effect.Effect<ResolvedMcpConfig, ServerConfigError> =>
   Effect.gen(function* () {
@@ -251,30 +196,48 @@ const resolveStdioConfig = (
       serverName,
       "command",
       config.command,
-      env,
+      lookupSecret,
     );
     const args =
       config.args === undefined
         ? undefined
         : yield* Effect.all(
             config.args.map((arg, index) =>
-              resolveEnvString(serverName, `args[${index}]`, arg, env),
+              resolveEnvString(
+                serverName,
+                `args[${index}]`,
+                arg,
+                lookupSecret,
+              ),
             ),
           );
     const cwd =
       config.cwd === undefined
         ? undefined
-        : yield* resolveEnvString(serverName, "cwd", config.cwd, env).pipe(
+        : yield* resolveEnvString(
+            serverName,
+            "cwd",
+            config.cwd,
+            lookupSecret,
+          ).pipe(
             Effect.map((resolvedCwd) =>
-              options.baseDir !== undefined && !isAbsolute(resolvedCwd)
-                ? resolve(options.baseDir, resolvedCwd)
+              options.baseDir !== undefined && !isAbsolutePath(resolvedCwd)
+                ? (options.resolvePath ?? resolveRelativePath)(
+                    options.baseDir,
+                    resolvedCwd,
+                  )
                 : resolvedCwd,
             ),
           );
     const resolvedEnv =
       config.env === undefined
         ? {}
-        : yield* resolveStringRecord(serverName, "env", config.env, env);
+        : yield* resolveStringRecord(
+            serverName,
+            "env",
+            config.env,
+            lookupSecret,
+          );
 
     return {
       transport: "stdio" as const,
@@ -288,10 +251,15 @@ const resolveStdioConfig = (
 const resolveHttpConfig = (
   serverName: string,
   config: Extract<ServerMcpConfig, { readonly transport: "http" }>,
-  env: ConfigEnv,
+  lookupSecret: SecretLookup,
 ): Effect.Effect<ResolvedMcpConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const url = yield* resolveEnvString(serverName, "url", config.url, env);
+    const url = yield* resolveEnvString(
+      serverName,
+      "url",
+      config.url,
+      lookupSecret,
+    );
     const headers =
       config.headers === undefined
         ? {}
@@ -299,12 +267,12 @@ const resolveHttpConfig = (
             serverName,
             "headers",
             config.headers,
-            env,
+            lookupSecret,
           );
     const auth =
       config.auth === undefined
         ? undefined
-        : yield* resolveHttpAuthConfig(serverName, config.auth, env);
+        : yield* resolveHttpAuthConfig(serverName, config.auth, lookupSecret);
 
     return {
       transport: "http" as const,
@@ -317,13 +285,18 @@ const resolveHttpConfig = (
 const resolveHttpAuthConfig = (
   serverName: string,
   config: HttpMcpAuthConfig,
-  env: ConfigEnv,
+  lookupSecret: SecretLookup,
 ): Effect.Effect<HttpMcpAuthConfig, ServerConfigError> =>
   Effect.gen(function* () {
     const scope =
       config.scope === undefined
         ? undefined
-        : yield* resolveEnvString(serverName, "auth.scope", config.scope, env);
+        : yield* resolveEnvString(
+            serverName,
+            "auth.scope",
+            config.scope,
+            lookupSecret,
+          );
     const resourceMetadataUrl =
       config.resourceMetadataUrl === undefined
         ? undefined
@@ -331,7 +304,7 @@ const resolveHttpAuthConfig = (
             serverName,
             "auth.resourceMetadataUrl",
             config.resourceMetadataUrl,
-            env,
+            lookupSecret,
           );
     const clientId =
       config.clientId === undefined
@@ -340,7 +313,7 @@ const resolveHttpAuthConfig = (
             serverName,
             "auth.clientId",
             config.clientId,
-            env,
+            lookupSecret,
           );
     const clientSecret =
       config.clientSecret === undefined
@@ -349,7 +322,7 @@ const resolveHttpAuthConfig = (
             serverName,
             "auth.clientSecret",
             config.clientSecret,
-            env,
+            lookupSecret,
           );
     const clientMetadataUrl =
       config.clientMetadataUrl === undefined
@@ -358,7 +331,7 @@ const resolveHttpAuthConfig = (
             serverName,
             "auth.clientMetadataUrl",
             config.clientMetadataUrl,
-            env,
+            lookupSecret,
           );
     const redirectUri =
       config.redirectUri === undefined
@@ -367,7 +340,7 @@ const resolveHttpAuthConfig = (
             serverName,
             "auth.redirectUri",
             config.redirectUri,
-            env,
+            lookupSecret,
           );
 
     return {
@@ -385,7 +358,7 @@ const resolveStringRecord = (
   serverName: string,
   fieldName: string,
   record: Readonly<Record<string, string>>,
-  env: ConfigEnv,
+  lookupSecret: SecretLookup,
 ): Effect.Effect<Record<string, string>, ServerConfigError> =>
   Effect.gen(function* () {
     const result: Record<string, string> = {};
@@ -395,7 +368,7 @@ const resolveStringRecord = (
         serverName,
         `${fieldName}.${key}`,
         value,
-        env,
+        lookupSecret,
       );
     }
 
@@ -408,33 +381,35 @@ const resolveEnvString = (
   serverName: string,
   fieldName: string,
   value: string,
-  env: ConfigEnv,
+  lookupSecret: SecretLookup,
 ): Effect.Effect<string, ServerConfigError> =>
   Effect.gen(function* () {
-    const missing: string[] = [];
-    const resolved = value.replace(
-      ENV_PLACEHOLDER_PATTERN,
-      (_, name: string) => {
-        const envValue = env[name];
+    let resolved = "";
+    let lastIndex = 0;
 
-        if (envValue === undefined) {
-          missing.push(name);
-          return "";
-        }
+    for (const match of value.matchAll(ENV_PLACEHOLDER_PATTERN)) {
+      const index = match.index;
+      const placeholder = match[0];
+      const name = match[1];
 
-        return envValue;
-      },
-    );
+      if (index === undefined || name === undefined) {
+        continue;
+      }
 
-    if (missing.length > 0) {
-      return yield* Effect.fail(
-        new ServerConfigError({
-          message: `Missing environment variable ${missing[0]} for ${fieldName} on MCP server ${serverName}`,
-        }),
+      resolved += value.slice(lastIndex, index);
+      resolved += yield* lookupSecret(name).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ServerConfigError({
+              message: `Missing environment variable ${name} for ${fieldName} on MCP server ${serverName}`,
+              cause,
+            }),
+        ),
       );
+      lastIndex = index + placeholder.length;
     }
 
-    return resolved;
+    return resolved + value.slice(lastIndex);
   });
 
 const parsePtoolsConfigValue = (
@@ -881,3 +856,55 @@ const invalidServerConfig = (
   message: string,
 ): Effect.Effect<never, ServerConfigError> =>
   invalidConfig(source, `mcpServers.${serverName} ${message}`);
+
+const stableStringify = (value: unknown): string =>
+  JSON.stringify(canonicalize(value));
+
+const isAbsolutePath = (path: string): boolean =>
+  path.startsWith("/") ||
+  /^[A-Za-z]:[\\/]/.test(path) ||
+  path.startsWith("\\\\");
+
+const resolveRelativePath = (baseDir: string, path: string): string => {
+  const base = baseDir.replace(/[\\/]+$/, "");
+  const segments = `${base}/${path}`.split(/[\\/]+/);
+  const resolved: string[] = [];
+  const root = segments[0] === "" ? "/" : "";
+
+  for (const segment of segments) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      resolved.pop();
+      continue;
+    }
+
+    resolved.push(segment);
+  }
+
+  return `${root}${resolved.join("/")}`;
+};
+
+const canonicalize = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize);
+  }
+
+  if (value !== null && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+
+    for (const key of Object.keys(value).sort()) {
+      const item = (value as Record<string, unknown>)[key];
+
+      if (item !== undefined) {
+        result[key] = canonicalize(item);
+      }
+    }
+
+    return result;
+  }
+
+  return value;
+};

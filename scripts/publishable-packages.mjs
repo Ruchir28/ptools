@@ -1,24 +1,33 @@
 export const publishablePackages = [
   {
+    name: "@ptools/config",
+    dir: "packages/config",
+    internalDeps: [],
+  },
+  {
     name: "@ptools/core",
     dir: "packages/core",
     internalDeps: [],
   },
   {
+    name: "@ptools/host-node",
+    dir: "packages/host-node",
+    internalDeps: ["@ptools/config"],
+  },
+  {
     name: "@ptools/executor",
     dir: "packages/executor",
-    internalDeps: ["@ptools/core"],
+    internalDeps: [],
   },
   {
     name: "@ptools/mcp-registry",
     dir: "packages/mcp-registry",
-    internalDeps: ["@ptools/core"],
+    internalDeps: [],
   },
   {
     name: "@ptools/code-mode",
     dir: "packages/code-mode",
     internalDeps: [
-      "@ptools/core",
       "@ptools/executor",
       "@ptools/mcp-registry",
     ],
@@ -28,8 +37,9 @@ export const publishablePackages = [
     dir: "packages/agent-tools",
     internalDeps: [
       "@ptools/code-mode",
-      "@ptools/core",
+      "@ptools/config",
       "@ptools/executor",
+      "@ptools/host-node",
       "@ptools/mcp-registry",
     ],
   },
@@ -38,8 +48,8 @@ export const publishablePackages = [
     dir: "packages/mcp-server",
     internalDeps: [
       "@ptools/code-mode",
-      "@ptools/core",
       "@ptools/executor",
+      "@ptools/host-node",
       "@ptools/mcp-registry",
     ],
   },

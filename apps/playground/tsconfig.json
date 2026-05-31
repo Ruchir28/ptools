@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "vite.config.ts"],
   "references": [
-    { "path": "../../packages/core" },
+    { "path": "../../packages/config" },
+    { "path": "../../packages/host-node" },
     { "path": "../../packages/mcp-registry" },
     { "path": "../../packages/executor" },
     { "path": "../../packages/code-mode" }

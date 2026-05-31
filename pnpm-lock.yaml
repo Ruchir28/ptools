@@ -36,12 +36,15 @@ importers:
       '@ptools/code-mode':
         specifier: workspace:*
         version: link:../../packages/code-mode
-      '@ptools/core':
+      '@ptools/config':
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../../packages/config
       '@ptools/executor':
         specifier: workspace:*
         version: link:../../packages/executor
+      '@ptools/host-node':
+        specifier: workspace:*
+        version: link:../../packages/host-node
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../../packages/mcp-registry
@@ -171,12 +174,15 @@ importers:
       '@ptools/code-mode':
         specifier: workspace:*
         version: link:../code-mode
-      '@ptools/core':
+      '@ptools/config':
         specifier: workspace:*
-        version: link:../core
+        version: link:../config
       '@ptools/executor':
         specifier: workspace:*
         version: link:../executor
+      '@ptools/host-node':
+        specifier: workspace:*
+        version: link:../host-node
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
@@ -192,9 +198,6 @@ importers:
 
   packages/code-mode:
     dependencies:
-      '@ptools/core':
-        specifier: workspace:*
-        version: link:../core
       '@ptools/executor':
         specifier: workspace:*
         version: link:../executor
@@ -208,17 +211,25 @@ importers:
         specifier: 15.0.4
         version: 15.0.4
 
-  packages/core:
+  packages/config:
     dependencies:
       effect:
         specifier: 3.21.2
         version: 3.21.2
 
+  packages/core: {}
+
   packages/executor:
     dependencies:
-      '@ptools/core':
+      effect:
+        specifier: 3.21.2
+        version: 3.21.2
+
+  packages/host-node:
+    dependencies:
+      '@ptools/config':
         specifier: workspace:*
-        version: link:../core
+        version: link:../config
       effect:
         specifier: 3.21.2
         version: 3.21.2
@@ -231,9 +242,6 @@ importers:
       '@napi-rs/keyring':
         specifier: ^1.3.0
         version: 1.3.0
-      '@ptools/core':
-        specifier: workspace:*
-        version: link:../core
       effect:
         specifier: 3.21.2
         version: 3.21.2
@@ -249,12 +257,15 @@ importers:
       '@ptools/code-mode':
         specifier: workspace:*
         version: link:../code-mode
-      '@ptools/core':
+      '@ptools/config':
         specifier: workspace:*
-        version: link:../core
+        version: link:../config
       '@ptools/executor':
         specifier: workspace:*
         version: link:../executor
+      '@ptools/host-node':
+        specifier: workspace:*
+        version: link:../host-node
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry

@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeCodeModeLive } from "@ptools/code-mode";
-import { loadPtoolsConfig } from "@ptools/core";
+import { ConfigSource } from "@ptools/config";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import {
+  FileConfigSourceLive,
+  ProcessEnvSecretResolverLive,
+} from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
@@ -20,7 +24,17 @@ describe("Code Mode playground", () => {
   it("serves live context and executes through CodeMode", async () => {
     const configPath = await writeFixtureConfig();
     const config = await Effect.runPromise(
-      loadPtoolsConfig(configPath, process.env),
+      Effect.gen(function* () {
+        const source = yield* ConfigSource;
+
+        return yield* source.load;
+      }).pipe(
+        Effect.provide(
+          FileConfigSourceLive({ path: configPath }).pipe(
+            Layer.provide(ProcessEnvSecretResolverLive({ env: process.env })),
+          ),
+        ),
+      ),
     );
     const live = makeCodeModeLive().pipe(
       Layer.provide(

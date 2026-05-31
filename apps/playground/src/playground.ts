@@ -8,8 +8,9 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CodeMode, makeCodeModeLive } from "@ptools/code-mode";
-import { loadPtoolsConfig, resolveConfigPath } from "@ptools/core";
+import { ConfigSource } from "@ptools/config";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { NodeConfigSourceLive } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Data, Effect, Either, Layer, Scope } from "effect";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
@@ -46,9 +47,9 @@ export const runPlayground = (
   cwd: string,
 ): Effect.Effect<void, unknown> =>
   Effect.gen(function* () {
-    const configPath = yield* resolveConfigPath(argv, env, cwd);
     const port = yield* resolvePlaygroundPort(argv, env);
-    const config = yield* loadPtoolsConfig(configPath, env);
+    const configSource = yield* ConfigSource;
+    const config = yield* configSource.load;
     const live = makeCodeModeLive().pipe(
       Layer.provide(
         Layer.merge(
@@ -58,8 +59,13 @@ export const runPlayground = (
       ),
     );
 
-    yield* runPlaygroundHttp({ configPath, port }).pipe(Effect.provide(live));
-  }).pipe(Effect.scoped);
+    yield* runPlaygroundHttp({ configPath: "ptools config", port }).pipe(
+      Effect.provide(live),
+    );
+  }).pipe(
+    Effect.provide(NodeConfigSourceLive({ argv, env, cwd })),
+    Effect.scoped,
+  );
 
 /**
  * Starts the HTTP playground and keeps it running inside the current scope.

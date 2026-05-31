@@ -116,7 +116,8 @@ Package docs:
 
 - `@ptools/mcp-server`: MCP stdio server for MCP hosts
 - `@ptools/agent-tools`: user-facing AI SDK session and adapter package
-- `@ptools/core`: shared config and core types
+- `@ptools/config`: shared config parsing, validation, resolution, and hashing
+- `@ptools/host-node`: Node host layers for config-file discovery/loading
 - `@ptools/mcp-registry`: upstream MCP connection, discovery, and dispatch
 - `@ptools/code-mode`: Code Mode search, schema, and execute orchestration
 - `@ptools/executor`: local JavaScript execution host

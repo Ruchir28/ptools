@@ -35,7 +35,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@ptools/core": "workspace:*",
     "@ptools/executor": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
     "effect": "3.21.2",

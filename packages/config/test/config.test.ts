@@ -1,14 +1,13 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Effect, Either } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  loadPtoolsConfig,
+  hashResolvedPtoolsConfig,
   parsePtoolsConfigJson,
-  resolveConfigPath,
   resolvePtoolsConfig,
+  resolvePtoolsConfigWithSecrets,
   ServerConfigError,
+  SecretResolver,
 } from "../src/config.js";
 
 describe("server config", () => {
@@ -209,6 +208,40 @@ describe("server config", () => {
     }
   });
 
+  it("resolves env placeholders through SecretResolver service", async () => {
+    const config = await parseConfig({
+      mcpServers: {
+        local: {
+          command: "${env:NODE_BIN}",
+          env: {
+            TOKEN: "${env:SOURCE_TOKEN}",
+          },
+        },
+      },
+    });
+
+    const resolved = await Effect.runPromise(
+      resolvePtoolsConfigWithSecrets(config).pipe(
+        Effect.provideService(SecretResolver, {
+          get: (name) =>
+            Effect.succeed(
+              {
+                NODE_BIN: "node",
+                SOURCE_TOKEN: "secret-token",
+              }[name] ?? "",
+            ),
+        }),
+      ),
+    );
+
+    expect(resolved.mcpServers.local).toMatchObject({
+      command: "node",
+      env: {
+        TOKEN: "secret-token",
+      },
+    });
+  });
+
   it("infers stdio and HTTP transport from command and url", async () => {
     const config = await parseConfig({
       mcpServers: {
@@ -335,26 +368,22 @@ describe("server config", () => {
     expect(Object.keys(resolved.mcpServers)).toEqual(["enabled"]);
   });
 
-  it("resolves relative stdio cwd values from the config file directory", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ptools-core-config-"));
-    const configPath = join(dir, "ptools.config.json");
-
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        mcpServers: {
-          fixture: {
-            command: "node",
-            cwd: "servers",
-          },
+  it("resolves relative stdio cwd values from the supplied base directory", async () => {
+    const config = await parseConfig({
+      mcpServers: {
+        fixture: {
+          command: "node",
+          cwd: "servers",
         },
-      }),
+      },
+    });
+
+    const resolved = await Effect.runPromise(
+      resolvePtoolsConfig(config, {}, { baseDir: "/repo" }),
     );
 
-    const resolved = await Effect.runPromise(loadPtoolsConfig(configPath, {}));
-
     expect(resolved.mcpServers.fixture).toMatchObject({
-      cwd: join(dir, "servers"),
+      cwd: join("/repo", "servers"),
     });
   });
 
@@ -374,50 +403,34 @@ describe("server config", () => {
     expect(Either.isLeft(result)).toBe(true);
   });
 
-  it("resolves config path from argv, env, or default project files", async () => {
-    await expect(
-      Effect.runPromise(
-        resolveConfigPath(["--config", "ptools.json"], {}, "/repo"),
-      ),
-    ).resolves.toBe("/repo/ptools.json");
-
-    await expect(
-      Effect.runPromise(
-        resolveConfigPath([], { PTOOLS_CONFIG: "/tmp/x.json" }, "/repo"),
-      ),
-    ).resolves.toBe("/tmp/x.json");
-
-    const dir = await mkdtemp(join(tmpdir(), "ptools-core-config-path-"));
-    await mkdir(join(dir, ".ptools"));
-    await writeFile(join(dir, ".ptools", "config.json"), "{}");
-    await writeFile(join(dir, "ptools.config.json"), "{}");
-
-    await expect(
-      Effect.runPromise(resolveConfigPath([], {}, dir)),
-    ).resolves.toBe(join(dir, ".ptools", "config.json"));
-
-    const legacyDir = await mkdtemp(
-      join(tmpdir(), "ptools-core-config-legacy-"),
+  it("hashes resolved configs deterministically", () => {
+    expect(
+      hashResolvedPtoolsConfig({
+        mcpServers: {
+          remote: {
+            transport: "http",
+            url: "https://example.com/mcp",
+            headers: {
+              b: "2",
+              a: "1",
+            },
+          },
+        },
+      }),
+    ).toBe(
+      hashResolvedPtoolsConfig({
+        mcpServers: {
+          remote: {
+            headers: {
+              a: "1",
+              b: "2",
+            },
+            url: "https://example.com/mcp",
+            transport: "http",
+          },
+        },
+      }),
     );
-    await writeFile(join(legacyDir, "ptools.config.json"), "{}");
-
-    await expect(
-      Effect.runPromise(resolveConfigPath([], {}, legacyDir)),
-    ).resolves.toBe(join(legacyDir, "ptools.config.json"));
-  });
-
-  it("fails clearly when no config path can be resolved", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ptools-core-missing-config-"));
-
-    const result = await Effect.runPromise(
-      resolveConfigPath([], {}, dir).pipe(Effect.either),
-    );
-
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(ServerConfigError);
-      expect(result.left.message).toContain(".ptools/config.json");
-    }
   });
 });
 

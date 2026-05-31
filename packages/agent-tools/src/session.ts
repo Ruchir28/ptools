@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import {
   CodeMode,
   type CodeModeExecuteRequest,
@@ -6,10 +7,13 @@ import {
   type CodeModeToolSchemaRequest,
   makeCodeModeLive,
 } from "@ptools/code-mode";
-import { loadPtoolsConfig } from "@ptools/core";
+import { ConfigSource } from "@ptools/config";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import {
+  FileConfigSourceLive,
+  ProcessEnvSecretResolverLive,
+} from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
-import { dirname, isAbsolute, resolve } from "node:path";
 import { Effect, Either, Layer, ManagedRuntime } from "effect";
 import type {
   CodeModeToolName,
@@ -45,15 +49,24 @@ export const loadPtoolsSessionConfig = async (
   path = "ptools.config.json",
   options: CreatePtoolsSessionFromConfigFileOptions = {},
 ): Promise<CreatePtoolsSessionOptions> => {
-  const resolvedPath = resolveConfigFilePath(
-    path,
-    options.cwd ?? process.cwd(),
-  );
-
+  const resolvedPath = resolve(options.cwd ?? process.cwd(), path);
   const result = await Effect.runPromise(
-    loadPtoolsConfig(resolvedPath, options.env ?? process.env, {
-      baseDir: dirname(resolvedPath),
-    }).pipe(Effect.either),
+    Effect.gen(function* () {
+      const source = yield* ConfigSource;
+
+      return yield* source.load;
+    }).pipe(
+      Effect.provide(
+        FileConfigSourceLive({ path: resolvedPath }).pipe(
+          Layer.provide(
+            ProcessEnvSecretResolverLive({
+              env: options.env ?? process.env,
+            }),
+          ),
+        ),
+      ),
+      Effect.either,
+    ),
   );
 
   if (Either.isLeft(result)) {
@@ -247,6 +260,3 @@ const expectRecord = (
 
 const isPositiveInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value > 0;
-
-const resolveConfigFilePath = (path: string, cwd: string): string =>
-  isAbsolute(path) ? path : resolve(cwd, path);

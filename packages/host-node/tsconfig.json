@@ -2,11 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts"],
   "references": [
-    { "path": "../code-mode" },
-    { "path": "../config" },
-    { "path": "../executor" },
-    { "path": "../host-node" },
-    { "path": "../mcp-registry" }
+    { "path": "../config" }
   ],
   "compilerOptions": {
     "rootDir": "src",

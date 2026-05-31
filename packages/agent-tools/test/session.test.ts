@@ -10,7 +10,7 @@ import {
   type CodeModeSearchRequest,
   type CodeModeToolSchemaRequest,
 } from "@ptools/code-mode";
-import { ServerConfigError } from "@ptools/core";
+import { ServerConfigError } from "@ptools/config";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
 import {

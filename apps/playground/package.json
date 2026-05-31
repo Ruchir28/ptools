@@ -12,7 +12,8 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
     "@ptools/code-mode": "workspace:*",
-    "@ptools/core": "workspace:*",
+    "@ptools/config": "workspace:*",
+    "@ptools/host-node": "workspace:*",
     "@ptools/executor": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
     "@radix-ui/react-scroll-area": "^1.2.10",

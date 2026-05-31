@@ -34,7 +34,5 @@
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run --exclude \"**/dist/**\""
   },
-  "dependencies": {
-    "effect": "3.21.2"
-  }
+  "dependencies": {}
 }
