@@ -2,12 +2,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { Effect } from "effect";
 import {
+  AuthCoordinator,
+  AuthError,
   isAuthRequiredError,
   isDynamicClientRegistrationUnsupported,
-  type PtoolsAuthManager,
-} from "./auth.js";
+} from "@ptools/auth";
+import { Context, Effect } from "effect";
 import { McpConnectionError, NameCollisionError } from "./errors.js";
 import { buildNameMap, getMappedName } from "./names.js";
 import { safeErrorMessage, TolerantOutputSchemaValidator } from "./schema.js";
@@ -18,6 +19,8 @@ import type {
   UpstreamMcpServers,
 } from "./types.js";
 
+type AuthCoordinatorService = Context.Tag.Service<typeof AuthCoordinator>;
+
 export interface ConnectConfiguredMcpClientsResult {
   readonly clients: ReadonlyArray<ConnectedMcpClient>;
   readonly diagnostics: ReadonlyArray<McpRegistryDiagnostic>;
@@ -25,7 +28,7 @@ export interface ConnectConfiguredMcpClientsResult {
 
 export const connectConfiguredMcpClients = (
   upstreams: UpstreamMcpServers,
-  authManager?: PtoolsAuthManager,
+  authCoordinator: AuthCoordinatorService,
 ): Effect.Effect<ConnectConfiguredMcpClientsResult, NameCollisionError> =>
   Effect.gen(function* () {
     const entries = Object.entries(upstreams);
@@ -42,19 +45,24 @@ export const connectConfiguredMcpClients = (
         serverName,
         "mcp server names",
       );
-      authManager?.noteConfigured(serverName, jsServerName, config);
+      yield* authCoordinator.noteConfigured(serverName, jsServerName, config);
       const result = yield* connectMcpClient(
         serverName,
         jsServerName,
         config,
-        authManager,
+        authCoordinator,
       ).pipe(Effect.either);
 
       if (result._tag === "Left") {
-        authManager?.noteConnectionError(serverName, result.left.cause);
-        diagnostics.push(toConnectionDiagnostic(result.left, authManager));
+        yield* authCoordinator.noteConnectionError(
+          serverName,
+          result.left.cause,
+        );
+        diagnostics.push(
+          yield* toConnectionDiagnostic(result.left, authCoordinator),
+        );
       } else {
-        authManager?.noteConnected(serverName);
+        yield* authCoordinator.noteConnected(serverName);
         clients.push(result.right);
       }
     }
@@ -66,90 +74,87 @@ const connectMcpClient = (
   serverName: string,
   jsServerName: string,
   config: UpstreamMcpConfig,
-  authManager?: PtoolsAuthManager,
+  authCoordinator: AuthCoordinatorService,
 ): Effect.Effect<ConnectedMcpClient, McpConnectionError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const client = new Client(
-        {
-          name: `ptools-${serverName}`,
-          version: "0.0.0",
-        },
-        {
-          jsonSchemaValidator: new TolerantOutputSchemaValidator(),
-        },
-      );
+  Effect.gen(function* () {
+    const client = new Client(
+      {
+        name: `ptools-${serverName}`,
+        version: "0.0.0",
+      },
+      {
+        jsonSchemaValidator: new TolerantOutputSchemaValidator(),
+      },
+    );
 
-      const transport =
-        config.transport === "stdio"
-          ? createStdioTransport(config)
-          : await createHttpTransport(serverName, config, authManager);
+    const transport =
+      config.transport === "stdio"
+        ? createStdioTransport(config)
+        : yield* createHttpTransport(serverName, config, authCoordinator).pipe(
+            Effect.mapError(
+              (cause) => new McpConnectionError({ serverName, cause }),
+            ),
+          );
 
-      await client.connect(transport as Transport);
+    yield* Effect.tryPromise({
+      try: () => client.connect(transport as Transport),
+      catch: (cause) => new McpConnectionError({ serverName, cause }),
+    });
 
-      return {
-        serverName,
-        jsServerName,
-        client,
-      };
-    },
-    catch: (cause) => new McpConnectionError({ serverName, cause }),
+    return {
+      serverName,
+      jsServerName,
+      client,
+    };
   });
 
 const toConnectionDiagnostic = (
   error: McpConnectionError,
-  authManager?: PtoolsAuthManager,
-): McpRegistryDiagnostic => {
-  if (isAuthRequiredError(error.cause) && authManager !== undefined) {
-    const status = authManager.status();
+  authCoordinator: AuthCoordinatorService,
+): Effect.Effect<McpRegistryDiagnostic> =>
+  Effect.gen(function* () {
+    const status = yield* authCoordinator.status;
     const serverStatus = status.servers.find(
       (server) => server.serverName === error.serverName,
     );
 
+    if (isAuthRequiredError(error.cause)) {
+      return {
+        code: "UpstreamAuthRequired",
+        severity: "warning",
+        serverName: error.serverName,
+        message:
+          serverStatus?.message ??
+          `${error.serverName} requires authorization before its tools can run. Open ${status.authUrl} and authorize it, then call search again.`,
+        authUrl: status.authUrl,
+        ...(serverStatus?.authorizeUrl === undefined
+          ? {}
+          : { authorizeUrl: serverStatus.authorizeUrl }),
+      };
+    }
+
+    if (isDynamicClientRegistrationUnsupported(error.cause)) {
+      return {
+        code: "UpstreamAuthNeedsConfig",
+        severity: "warning",
+        serverName: error.serverName,
+        message:
+          serverStatus?.message ??
+          `${error.serverName} does not support dynamic OAuth client registration. Add auth.clientId, and auth.clientSecret if required, or use another auth method for this server.`,
+        authUrl: status.authUrl,
+        ...(serverStatus?.setupUrl === undefined
+          ? {}
+          : { setupUrl: serverStatus.setupUrl }),
+      };
+    }
+
     return {
-      code: "UpstreamAuthRequired",
-      severity: "warning",
+      code: "McpConnectionFailed",
+      severity: "error",
       serverName: error.serverName,
-      message:
-        serverStatus?.message ??
-        `${error.serverName} requires authorization before its tools can run. Open ${status.authUrl} and authorize it, then call search again.`,
-      authUrl: status.authUrl,
-      ...(serverStatus?.authorizeUrl === undefined
-        ? {}
-        : { authorizeUrl: serverStatus.authorizeUrl }),
+      message: safeErrorMessage(error.cause),
     };
-  }
-
-  if (
-    isDynamicClientRegistrationUnsupported(error.cause) &&
-    authManager !== undefined
-  ) {
-    const status = authManager.status();
-    const serverStatus = status.servers.find(
-      (server) => server.serverName === error.serverName,
-    );
-
-    return {
-      code: "UpstreamAuthNeedsConfig",
-      severity: "warning",
-      serverName: error.serverName,
-      message:
-        serverStatus?.message ??
-        `${error.serverName} does not support dynamic OAuth client registration. Add auth.clientId, and auth.clientSecret if required, or use another auth method for this server.`,
-      authUrl: status.authUrl,
-      ...(serverStatus?.setupUrl === undefined
-        ? {}
-        : { setupUrl: serverStatus.setupUrl }),
-    };
-  }
-
-  return {
-    code: "McpConnectionFailed",
-    severity: "error",
-    serverName: error.serverName,
-    message: safeErrorMessage(error.cause),
-  };
-};
+  });
 
 const createStdioTransport = (
   config: Extract<UpstreamMcpConfig, { readonly transport: "stdio" }>,
@@ -173,38 +178,60 @@ const createStdioTransport = (
   return new StdioClientTransport(params);
 };
 
-const createHttpTransport = async (
+const createHttpTransport = (
   serverName: string,
   config: Extract<UpstreamMcpConfig, { readonly transport: "http" }>,
-  authManager?: PtoolsAuthManager,
-): Promise<StreamableHTTPClientTransport> => {
-  const shouldAttachAuthProvider =
-    authManager !== undefined &&
-    (config.auth !== undefined ||
-      authManager.shouldAttachAuthProvider(serverName) ||
-      (await authManager.hasStoredCredentials(serverName, config)));
-  const authProvider = shouldAttachAuthProvider
-    ? authManager.providerFor(serverName, config)
-    : undefined;
-  const options: ConstructorParameters<
-    typeof StreamableHTTPClientTransport
-  >[1] = {
-    ...(authProvider === undefined ? {} : { authProvider }),
-    ...(config.headers === undefined
-      ? {}
-      : {
-          requestInit: {
-            headers: config.headers,
-          },
+  authCoordinator: AuthCoordinatorService,
+): Effect.Effect<StreamableHTTPClientTransport, AuthError> =>
+  Effect.gen(function* () {
+    const shouldAttachAuthProvider = yield* shouldUseAuthProvider(
+      serverName,
+      config,
+      authCoordinator,
+    );
+    const authProvider = shouldAttachAuthProvider
+      ? yield* authCoordinator.providerFor(serverName, config)
+      : undefined;
+    const options: ConstructorParameters<
+      typeof StreamableHTTPClientTransport
+    >[1] = {
+      ...(authProvider === undefined ? {} : { authProvider }),
+      ...(config.headers === undefined
+        ? {}
+        : {
+            requestInit: {
+              headers: config.headers,
+            },
+          }),
+    };
+
+    return yield* Effect.try({
+      try: () =>
+        new StreamableHTTPClientTransport(new URL(config.url), options),
+      catch: (cause) =>
+        new AuthError({
+          message: `Failed to create HTTP transport for ${serverName}`,
+          cause,
         }),
-  };
+    });
+  });
 
-  if (config.headers === undefined) {
-    return new StreamableHTTPClientTransport(new URL(config.url), options);
-  }
+const shouldUseAuthProvider = (
+  serverName: string,
+  config: Extract<UpstreamMcpConfig, { readonly transport: "http" }>,
+  authCoordinator: AuthCoordinatorService,
+): Effect.Effect<boolean, never> =>
+  Effect.gen(function* () {
+    if (config.auth !== undefined) {
+      return true;
+    }
 
-  return new StreamableHTTPClientTransport(new URL(config.url), options);
-};
+    if (yield* authCoordinator.shouldAttachAuthProvider(serverName)) {
+      return true;
+    }
+
+    return yield* authCoordinator.hasStoredCredentials(serverName, config);
+  });
 
 export const closeClients = (
   clients: ReadonlyArray<ConnectedMcpClient>,

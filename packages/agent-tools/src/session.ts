@@ -11,6 +11,8 @@ import { ConfigSource } from "@ptools/config";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
 import {
   FileConfigSourceLive,
+  NodeAuthCoordinatorLive,
+  NodeCredentialsStoreLive,
   ProcessEnvSecretResolverLive,
 } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
@@ -28,7 +30,9 @@ export const createPtoolsSession = async (
   const live = makeCodeModeLive().pipe(
     Layer.provide(
       Layer.merge(
-        makeMcpRegistryLive(options.mcpServers),
+        makeMcpRegistryLive(options.mcpServers).pipe(
+          Layer.provide(makeNodeAuthCoordinatorLive()),
+        ),
         makeLocalSandboxExecutorLive(options.executor),
       ),
     ),
@@ -145,6 +149,21 @@ const parseSearchProvidersInput = (
     ...(value.limit === undefined ? {} : { limit: value.limit }),
   };
 };
+
+const makeNodeAuthCoordinatorLive = () =>
+  NodeAuthCoordinatorLive({
+    runtimeId: "local",
+    autoOpen:
+      process.env.PTOOLS_AUTH_AUTO_OPEN !== "0" &&
+      process.env.PTOOLS_AUTH_AUTO_OPEN !== "false" &&
+      process.stderr.isTTY === true,
+  }).pipe(
+    Layer.provide(
+      NodeCredentialsStoreLive({
+        serviceName: "ptools-mcp-oauth",
+      }),
+    ),
+  );
 
 const parseSearchInput = (input: unknown): CodeModeSearchRequest => {
   const value = expectRecord(input, "search input");

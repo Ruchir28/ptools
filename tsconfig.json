@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/auth" },
     { "path": "./packages/config" },
     { "path": "./packages/core" },
     { "path": "./packages/host-node" },

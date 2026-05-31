@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../auth" }, { "path": "../config" }],
+  "references": [{ "path": "../config" }],
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist"

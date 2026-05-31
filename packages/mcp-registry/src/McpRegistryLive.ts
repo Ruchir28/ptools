@@ -1,5 +1,5 @@
+import { AuthCoordinator } from "@ptools/auth";
 import { Effect, Layer } from "effect";
-import { PtoolsAuthManager } from "./auth.js";
 import { closeClients, connectConfiguredMcpClients } from "./connect.js";
 import { discoverAllToolsDegraded } from "./discovery.js";
 import { dispatchToolCall } from "./dispatch.js";
@@ -8,6 +8,7 @@ import { McpRegistry } from "./registry.js";
 import type {
   ConnectedMcpClient,
   DiscoveredMcpTool,
+  McpAuthStatus,
   McpRegistryDiagnostic,
   UpstreamMcpServers,
 } from "./types.js";
@@ -20,31 +21,21 @@ interface McpRegistryState {
 
 export const makeMcpRegistryLive = (
   upstreams: UpstreamMcpServers,
-): Layer.Layer<McpRegistry, NameCollisionError, never> =>
+): Layer.Layer<McpRegistry, NameCollisionError, AuthCoordinator> =>
   Layer.scoped(
     McpRegistry,
     Effect.gen(function* () {
+      const authCoordinator = yield* AuthCoordinator;
       let state: McpRegistryState = {
         clients: [],
         tools: [],
         diagnostics: [],
       };
-      let refreshPromise: () => Promise<void> = () => Promise.resolve();
-      let refreshServerPromise: (serverName: string) => Promise<void> = () =>
-        Promise.resolve();
-      const authManager = yield* PtoolsAuthManager.make({
-        onAuthorized: (serverName) => refreshServerPromise(serverName),
-        onRefresh: (serverName) => refreshServerPromise(serverName),
-        autoOpen:
-          process.env.PTOOLS_AUTH_AUTO_OPEN !== "0" &&
-          process.env.PTOOLS_AUTH_AUTO_OPEN !== "false" &&
-          process.stderr.isTTY === true,
-      });
       const refreshState = Effect.gen(function* () {
         const previousClients = state.clients;
         const connected = yield* connectConfiguredMcpClients(
           upstreams,
-          authManager,
+          authCoordinator,
         );
 
         const discovered = yield* discoverAllToolsDegraded(connected.clients);
@@ -80,7 +71,7 @@ export const makeMcpRegistryLive = (
           );
           const connected = yield* connectConfiguredMcpClients(
             { [serverName]: upstream },
-            authManager,
+            authCoordinator,
           );
           const discovered = yield* discoverAllToolsDegraded(connected.clients);
           const otherClients = state.clients.filter(
@@ -105,80 +96,89 @@ export const makeMcpRegistryLive = (
 
           yield* closeClients(previousServerClients);
         });
-      refreshPromise = () => Effect.runPromise(refreshState);
-      refreshServerPromise = (serverName) =>
-        Effect.runPromise(refreshServerState(serverName));
+
+      if (authCoordinator.setAuthorizedHandler !== undefined) {
+        yield* authCoordinator.setAuthorizedHandler((serverName) =>
+          Effect.runPromise(refreshServerState(serverName)),
+        );
+      }
+
+      if (authCoordinator.setRefreshHandler !== undefined) {
+        yield* authCoordinator.setRefreshHandler((serverName) =>
+          Effect.runPromise(refreshServerState(serverName)),
+        );
+      }
 
       yield* refreshState;
       yield* Effect.addFinalizer(() => closeClients(state.clients));
 
-      yield* Effect.sync(() => {
-        process.stderr.write(`[ptools] Auth center: ${authManager.authUrl}\n`);
-      });
-
       return {
         listTools: Effect.sync(() => state.tools),
-        diagnostics: Effect.sync(() =>
-          dedupeDiagnostics([
+        diagnostics: Effect.gen(function* () {
+          const authStatus = yield* authCoordinator.status;
+
+          return dedupeDiagnostics([
             ...state.diagnostics,
-            ...authDiagnostics(authManager),
-          ]),
-        ),
-        authStatus: Effect.sync(() => authManager.status()),
+            ...authDiagnostics(authStatus),
+          ]);
+        }),
+        authStatus: authCoordinator.status,
         refresh: refreshState,
         callTool: (request) =>
-          dispatchToolCall(
-            state.clients,
-            state.tools,
-            request,
-            authManager.status(),
-          ),
+          Effect.gen(function* () {
+            const authStatus = yield* authCoordinator.status;
+
+            return yield* dispatchToolCall(
+              state.clients,
+              state.tools,
+              request,
+              authStatus,
+            );
+          }),
       };
     }),
   );
 
 const authDiagnostics = (
-  authManager: PtoolsAuthManager,
+  authStatus: McpAuthStatus,
 ): ReadonlyArray<McpRegistryDiagnostic> =>
-  authManager
-    .status()
-    .servers.flatMap((server): ReadonlyArray<McpRegistryDiagnostic> => {
-      if (server.status === "requires_auth") {
-        return [
-          {
-            code: "UpstreamAuthRequired" as const,
-            severity: "warning" as const,
-            serverName: server.serverName,
-            message:
-              server.message ??
-              `${server.serverName} requires authorization before its tools can run. Open ${authManager.authUrl} and authorize it, then call search again.`,
-            authUrl: authManager.authUrl,
-            ...(server.authorizeUrl === undefined
-              ? {}
-              : { authorizeUrl: server.authorizeUrl }),
-          },
-        ];
-      }
+  authStatus.servers.flatMap((server): ReadonlyArray<McpRegistryDiagnostic> => {
+    if (server.status === "requires_auth") {
+      return [
+        {
+          code: "UpstreamAuthRequired" as const,
+          severity: "warning" as const,
+          serverName: server.serverName,
+          message:
+            server.message ??
+            `${server.serverName} requires authorization before its tools can run. Open ${authStatus.authUrl} and authorize it, then call search again.`,
+          authUrl: authStatus.authUrl,
+          ...(server.authorizeUrl === undefined
+            ? {}
+            : { authorizeUrl: server.authorizeUrl }),
+        },
+      ];
+    }
 
-      if (server.status === "needs_config") {
-        return [
-          {
-            code: "UpstreamAuthNeedsConfig" as const,
-            severity: "warning" as const,
-            serverName: server.serverName,
-            message:
-              server.message ??
-              `${server.serverName} needs auth configuration before ptools can authorize it. Open ${authManager.authUrl} for setup options.`,
-            authUrl: authManager.authUrl,
-            ...(server.setupUrl === undefined
-              ? {}
-              : { setupUrl: server.setupUrl }),
-          },
-        ];
-      }
+    if (server.status === "needs_config") {
+      return [
+        {
+          code: "UpstreamAuthNeedsConfig" as const,
+          severity: "warning" as const,
+          serverName: server.serverName,
+          message:
+            server.message ??
+            `${server.serverName} needs auth configuration before ptools can authorize it. Open ${authStatus.authUrl} for setup options.`,
+          authUrl: authStatus.authUrl,
+          ...(server.setupUrl === undefined
+            ? {}
+            : { setupUrl: server.setupUrl }),
+        },
+      ];
+    }
 
-      return [];
-    });
+    return [];
+  });
 
 const dedupeDiagnostics = (
   diagnostics: ReadonlyArray<McpRegistryDiagnostic>,

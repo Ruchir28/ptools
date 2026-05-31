@@ -10,7 +10,11 @@ import {
 } from "@ptools/code-mode";
 import { ConfigSource } from "@ptools/config";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
-import { NodeConfigSourceLive } from "@ptools/host-node";
+import {
+  NodeAuthCoordinatorLive,
+  NodeConfigSourceLive,
+  NodeCredentialsStoreLive,
+} from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Context, Effect, Either, Layer, Scope } from "effect";
 import { z } from "zod";
@@ -123,7 +127,9 @@ export const runServer = (
     const live = makeCodeModeLive().pipe(
       Layer.provide(
         Layer.merge(
-          makeMcpRegistryLive(config.mcpServers),
+          makeMcpRegistryLive(config.mcpServers).pipe(
+            Layer.provide(makeNodeAuthCoordinatorLive(env)),
+          ),
           makeLocalSandboxExecutorLive(config.executor),
         ),
       ),
@@ -154,6 +160,21 @@ const runMcpServer: Effect.Effect<void, never, CodeMode | Scope.Scope> =
 
     yield* waitForProcessClose;
   });
+
+const makeNodeAuthCoordinatorLive = (env: NodeJS.ProcessEnv) =>
+  NodeAuthCoordinatorLive({
+    runtimeId: "local",
+    autoOpen:
+      env.PTOOLS_AUTH_AUTO_OPEN !== "0" &&
+      env.PTOOLS_AUTH_AUTO_OPEN !== "false" &&
+      process.stderr.isTTY === true,
+  }).pipe(
+    Layer.provide(
+      NodeCredentialsStoreLive({
+        serviceName: "ptools-mcp-oauth",
+      }),
+    ),
+  );
 
 /**
  * Registers the public model-facing Code Mode tools on the MCP server.

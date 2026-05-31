@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { Effect } from "effect";
+import { AuthCoordinator, AuthError } from "@ptools/auth";
+import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeMcpRegistryLive } from "../src/McpRegistryLive.js";
 import { McpRegistry } from "../src/registry.js";
@@ -34,7 +35,7 @@ describe("McpRegistry stdio integration", () => {
               command: process.execPath,
               args: ["--import", "tsx", fixturePath],
             },
-          }),
+          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
         ),
       ),
     );
@@ -98,7 +99,7 @@ describe("McpRegistry stdio integration", () => {
               transport: "stdio",
               command: "/path/that/does/not/exist",
             },
-          }),
+          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
         ),
       ),
     );
@@ -130,7 +131,7 @@ describe("McpRegistry stdio integration", () => {
               transport: "stdio",
               command: "/path/that/does/not/exist",
             },
-          }),
+          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
         ),
       ),
     );
@@ -170,7 +171,7 @@ describe("McpRegistry stdio integration", () => {
               command: process.execPath,
               args: ["--import", "tsx", fixturePath],
             },
-          }),
+          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
         ),
       ),
     );
@@ -203,3 +204,27 @@ describe("McpRegistry stdio integration", () => {
     );
   });
 });
+
+const makeTestAuthCoordinatorLive = () =>
+  Layer.succeed(AuthCoordinator, {
+    origin: Effect.succeed("http://127.0.0.1/auth"),
+    callbackUrl: (serverName) =>
+      Effect.succeed(
+        `http://127.0.0.1/oauth/callback/${encodeURIComponent(serverName)}`,
+      ),
+    noteConfigured: () => Effect.void,
+    noteConnected: () => Effect.void,
+    noteConnectionError: () => Effect.void,
+    shouldAttachAuthProvider: () => Effect.succeed(false),
+    hasStoredCredentials: () => Effect.succeed(false),
+    providerFor: (serverName) =>
+      Effect.fail(
+        new AuthError({
+          message: `Unexpected auth provider request for ${serverName}`,
+        }),
+      ),
+    status: Effect.succeed({
+      authUrl: "http://127.0.0.1/auth",
+      servers: [],
+    }),
+  });

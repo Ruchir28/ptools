@@ -7,6 +7,8 @@ import { ConfigSource } from "@ptools/config";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
 import {
   FileConfigSourceLive,
+  NodeAuthCoordinatorLive,
+  NodeCredentialsStoreLive,
   ProcessEnvSecretResolverLive,
 } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
@@ -19,6 +21,18 @@ const fixtureServerPath = join(
   repoRoot,
   "packages/mcp-registry/test/fixtures/stdio-mcp-server.ts",
 );
+
+const makeNodeAuthCoordinatorLive = () =>
+  NodeAuthCoordinatorLive({
+    runtimeId: "test",
+    autoOpen: false,
+  }).pipe(
+    Layer.provide(
+      NodeCredentialsStoreLive({
+        serviceName: "ptools-mcp-oauth-test",
+      }),
+    ),
+  );
 
 describe("Code Mode playground", () => {
   it("serves live context and executes through CodeMode", async () => {
@@ -39,7 +53,9 @@ describe("Code Mode playground", () => {
     const live = makeCodeModeLive().pipe(
       Layer.provide(
         Layer.merge(
-          makeMcpRegistryLive(config.mcpServers),
+          makeMcpRegistryLive(config.mcpServers).pipe(
+            Layer.provide(makeNodeAuthCoordinatorLive()),
+          ),
           makeLocalSandboxExecutorLive(config.executor),
         ),
       ),
