@@ -4,15 +4,14 @@
     "ptools": {
       "type": "local",
       "command": [
-        "pnpm",
-        "--dir",
-        "/Users/ruchir/workplace/ptools-project/ptools",
-        "--filter",
-        "@ptools/mcp-server",
-        "dev",
-        "--",
+        "node",
+        "../../packages/cli/dist/cli.js",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
         "--config",
-        "/Users/ruchir/workplace/ptools-project/ptools/examples/mcp-hosts/.ptools/config.json"
+        ".ptools/config.json"
       ],
       "enabled": true,
       "timeout": 30000

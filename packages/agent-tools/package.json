@@ -40,11 +40,6 @@
   },
   "dependencies": {
     "@ptools/code-mode-api": "workspace:*",
-    "@ptools/code-mode": "workspace:*",
-    "@ptools/config": "workspace:*",
-    "@ptools/executor": "workspace:*",
-    "@ptools/host-node": "workspace:*",
-    "@ptools/mcp-registry": "workspace:*",
     "ai": "6.0.184",
     "effect": "3.21.2",
     "zod": "4.4.3"

@@ -1,86 +1,16 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { generateText, stepCountIs, type ToolSet } from "ai";
+import { generateText, stepCountIs } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { toAISDKTools } from "../src/ai-sdk.js";
-import {
-  createPtoolsSession,
-  createPtoolsSessionFromConfigFile,
-} from "../src/session.js";
+import type { CodeModeOperation, PtoolsSession } from "../src/types.js";
 
 describe("AI SDK adapter integration", () => {
-  it("runs a real Code Mode vertical slice through AI SDK tools", async () => {
-    const fixturePath = fileURLToPath(
-      new URL(
-        "../../mcp-registry/test/fixtures/stdio-mcp-server.ts",
-        import.meta.url,
-      ),
-    );
-    const ptools = await createPtoolsSession({
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-          command: process.execPath,
-          args: ["--import", "tsx", fixturePath],
-        },
-      },
-    });
-
-    try {
-      const tools = toAISDKTools(ptools);
-      const providers = await runAISDKToolExecuteForTest(
-        tools,
-        "ptools_search_providers",
-        {},
-      );
-      const search = await runAISDKToolExecuteForTest(tools, "ptools_search", {
-        query: "echo",
-      });
-      const schema = await runAISDKToolExecuteForTest(
-        tools,
-        "ptools_get_tool_schema",
-        {
-          toolIds: ["fixture.echo"],
-        },
-      );
-      const run = await runAISDKToolExecuteForTest(tools, "ptools_execute", {
-        code: `async () => {
-          return await fixture.echo({ text: "hello from ai sdk adapter" });
-        }`,
-      });
-
-      expect(toProviderNames(providers)).toEqual(["fixture"]);
-      expect(toToolKeys(search)).toEqual(["fixture.echo"]);
-      expect(toSchemaToolKeys(schema)).toEqual(["fixture.echo"]);
-      expect(run).toEqual(
-        expect.objectContaining({
-          value: { text: "hello from ai sdk adapter" },
-        }),
-      );
-    } finally {
-      await ptools.close();
-    }
-  });
-
-  it("runs generateText against Code Mode tools loaded from a real MCP server", async () => {
-    const fixturePath = fileURLToPath(
-      new URL(
-        "../../mcp-registry/test/fixtures/stdio-mcp-server.ts",
-        import.meta.url,
-      ),
-    );
-    const ptools = await createPtoolsSession({
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-          command: process.execPath,
-          args: ["--import", "tsx", fixturePath],
-        },
-      },
-    });
+  it("runs generateText against client-backed Code Mode tools", async () => {
+    const calls: Array<{
+      readonly name: CodeModeOperation;
+      readonly input: unknown;
+    }> = [];
+    const ptools = fakeSession(calls);
     let generateCount = 0;
     const model = new MockLanguageModelV3({
       provider: "ptools-test",
@@ -119,192 +49,98 @@ describe("AI SDK adapter integration", () => {
       },
     });
 
-    try {
-      const result = await generateText({
-        model,
-        tools: toAISDKTools(ptools),
-        stopWhen: stepCountIs(4),
-        prompt:
-          "Discover the fixture MCP tools, inspect echo, then execute echo.",
-      });
+    const result = await generateText({
+      model,
+      tools: toAISDKTools(ptools),
+      stopWhen: stepCountIs(4),
+      prompt:
+        "Discover the fixture MCP tools, inspect echo, then execute echo.",
+    });
 
-      expect(result.text).toBe(
-        "The fixture MCP echo tool returned hello from generateText.",
-      );
-      expect(model.doGenerateCalls).toHaveLength(4);
-      expect(model.doGenerateCalls[0]?.tools?.map((tool) => tool.name)).toEqual(
-        [
-          "ptools_search_providers",
-          "ptools_search",
-          "ptools_get_tool_schema",
-          "ptools_execute",
-        ],
-      );
-      expect(result.steps[0]?.toolResults[0]).toEqual(
-        expect.objectContaining({
-          toolName: "ptools_search",
-          output: expect.objectContaining({
-            actions: [
-              expect.objectContaining({
-                toolId: "fixture.echo",
-              }),
-            ],
-          }),
-        }),
-      );
-      expect(model.doGenerateCalls[1]?.prompt.at(-1)).toEqual({
-        role: "tool",
-        content: [
-          expect.objectContaining({
-            type: "tool-result",
-            toolCallId: "call-search",
-            toolName: "ptools_search",
-            output: expect.objectContaining({
-              type: "json",
-              value: expect.objectContaining({
-                actions: [
-                  expect.objectContaining({
-                    toolId: "fixture.echo",
-                  }),
-                ],
-              }),
-            }),
-          }),
-        ],
-      });
-      expect(model.doGenerateCalls[2]?.prompt.at(-1)).toEqual({
-        role: "tool",
-        content: [
-          expect.objectContaining({
-            type: "tool-result",
-            toolCallId: "call-schema",
-            toolName: "ptools_get_tool_schema",
-            output: expect.objectContaining({
-              type: "json",
-              value: expect.objectContaining({
-                tools: [
-                  expect.objectContaining({
-                    jsServerName: "fixture",
-                    jsToolName: "echo",
-                  }),
-                ],
-              }),
-            }),
-          }),
-        ],
-      });
-      expect(model.doGenerateCalls[3]?.prompt.at(-1)).toEqual({
-        role: "tool",
-        content: [
-          expect.objectContaining({
-            type: "tool-result",
-            toolCallId: "call-execute",
-            toolName: "ptools_execute",
-            output: {
-              type: "json",
-              value: {
-                value: { text: "hello from generateText" },
-                logs: [],
-              },
-            },
-          }),
-        ],
-      });
-    } finally {
-      await ptools.close();
-    }
-  });
-
-  it("adapts a config-file session to AI SDK tools", async () => {
-    const fixturePath = fileURLToPath(
-      new URL(
-        "../../mcp-registry/test/fixtures/stdio-mcp-server.ts",
-        import.meta.url,
-      ),
+    expect(result.text).toBe(
+      "The fixture MCP echo tool returned hello from generateText.",
     );
-    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-ai-sdk-"));
-    const configPath = join(dir, "ptools.config.json");
-
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        mcpServers: {
-          fixture: {
-            command: process.execPath,
-            args: ["--import", "tsx", fixturePath],
-          },
-        },
+    expect(calls.map((call) => call.name)).toEqual([
+      "search",
+      "get_tool_schema",
+      "execute",
+    ]);
+    expect(model.doGenerateCalls).toHaveLength(4);
+    expect(model.doGenerateCalls[0]?.tools?.map((tool) => tool.name)).toEqual([
+      "ptools_search_providers",
+      "ptools_search",
+      "ptools_get_tool_schema",
+      "ptools_execute",
+    ]);
+    expect(result.steps[0]?.toolResults[0]).toEqual(
+      expect.objectContaining({
+        toolName: "ptools_search",
+        output: expect.objectContaining({
+          actions: [
+            expect.objectContaining({
+              toolId: "fixture.echo",
+            }),
+          ],
+        }),
       }),
     );
-
-    const ptools = await createPtoolsSessionFromConfigFile(configPath);
-
-    try {
-      const tools = toAISDKTools(ptools);
-
-      expect(Object.keys(tools)).toEqual([
-        "ptools_search_providers",
-        "ptools_search",
-        "ptools_get_tool_schema",
-        "ptools_execute",
-      ]);
-      await expect(
-        runAISDKToolExecuteForTest(tools, "ptools_execute", {
-          code: `async () => {
-            return await fixture.echo({ text: "hello from config ai sdk" });
-          }`,
+    expect(model.doGenerateCalls[3]?.prompt.at(-1)).toEqual({
+      role: "tool",
+      content: [
+        expect.objectContaining({
+          type: "tool-result",
+          toolCallId: "call-execute",
+          toolName: "ptools_execute",
+          output: {
+            type: "json",
+            value: {
+              value: { text: "hello from generateText" },
+              logs: [],
+            },
+          },
         }),
-      ).resolves.toEqual({
-        value: { text: "hello from config ai sdk" },
-        logs: [],
-      });
-    } finally {
-      await ptools.close();
-    }
-  }, 30_000);
+      ],
+    });
+  });
 });
 
-const runAISDKToolExecuteForTest = async (
-  tools: ToolSet,
-  name: string,
-  input: unknown,
-): Promise<unknown> => {
-  const execute = (tools[name] as { execute?: (input: unknown) => unknown })
-    .execute;
+const fakeSession = (
+  calls: Array<{ readonly name: CodeModeOperation; readonly input: unknown }>,
+): PtoolsSession => ({
+  callCodeModeTool: async (name, input) => {
+    calls.push({ name, input });
 
-  if (execute === undefined) {
-    throw new Error(`Tool ${name} does not have an execute function`);
-  }
-
-  return await execute(input);
-};
-
-const toToolKeys = (value: unknown): ReadonlyArray<string> => {
-  const context = value as {
-    readonly actions: ReadonlyArray<{ readonly toolId: string }>;
-  };
-
-  return context.actions.map((action) => action.toolId);
-};
-
-const toProviderNames = (value: unknown): ReadonlyArray<string> => {
-  const context = value as {
-    readonly providers: ReadonlyArray<{ readonly provider: string }>;
-  };
-
-  return context.providers.map((provider) => provider.provider);
-};
-
-const toSchemaToolKeys = (value: unknown): ReadonlyArray<string> => {
-  const context = value as {
-    readonly tools: ReadonlyArray<{
-      readonly jsServerName: string;
-      readonly jsToolName: string;
-    }>;
-  };
-
-  return context.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`);
-};
+    switch (name) {
+      case "auth_status":
+        return { authUrl: "http://127.0.0.1:9999/auth", servers: [] };
+      case "refresh":
+        return { refreshed: true };
+      case "search_providers":
+        return {
+          providers: [{ provider: "fixture" }],
+          diagnostics: [],
+        };
+      case "search":
+        return {
+          actions: [{ toolId: "fixture.echo" }],
+          diagnostics: [],
+        };
+      case "get_tool_schema":
+        return {
+          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+          declarationsByServer: [],
+          diagnostics: [],
+        };
+      case "execute":
+        return {
+          value: { text: "hello from generateText" },
+          logs: [],
+        };
+    }
+  },
+  diagnostics: async () => [],
+  close: async () => {},
+});
 
 const mockModelToolCall = (
   toolCallId: string,

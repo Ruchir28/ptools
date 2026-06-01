@@ -236,3 +236,8 @@ export type CodeModeResponse =
       readonly output: CodeModeToolSchemaResult;
     }
   | { readonly operation: "execute"; readonly output: CodeModeRunResult };
+
+export interface CodeModeClientHandle {
+  readonly call: (request: CodeModeRequest) => Promise<CodeModeResponse>;
+  readonly close: () => Promise<void>;
+}

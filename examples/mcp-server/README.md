@@ -1,7 +1,7 @@
 # MCP server example
 
-This example shows how to run the publishable `@ptools/mcp-server` package.
-It starts `ptools-mcp` without passing `--config`; ptools discovers
+This example shows how to run the publishable `@ptools/cli` package.
+It starts `ptools mcp serve --host node` without passing `--config`; ptools discovers
 `.ptools/config.json` from the example package directory by default. That config
 connects one local upstream MCP server named `echo`, which exposes simple
 echo/math tools plus a small product inventory and quoting workflow.
@@ -17,7 +17,7 @@ From the repo root:
 pnpm --filter @ptools/example-mcp-server smoke
 ```
 
-The smoke client starts `ptools-mcp` over stdio, lists the public Code Mode
+The smoke client starts `ptools mcp serve --host node` over stdio, lists the public Code Mode
 tools, searches the local `echo` provider, fetches schemas for inventory and
 quote tools, and executes a generated JavaScript workflow through Code Mode:
 
@@ -54,9 +54,9 @@ publishable ptools MCP server as one local MCP server named `ptools`:
 ```
 
 OpenCode runs the example package's `start` script. For local development, that
-script first builds the repo TypeScript project so `ptools-mcp` sees fresh
-workspace package changes, then runs `ptools-mcp` with no config argument. The
-config is found through the default lookup at
+script first builds the repo TypeScript project so `ptools mcp serve --host
+node` sees fresh workspace package changes, then runs `ptools mcp serve --host
+node` with no config argument. The config is found through the default lookup at
 `examples/mcp-server/.ptools/config.json`.
 
 Then start OpenCode from this example directory:
@@ -106,24 +106,28 @@ client that accepts a command-plus-args array, point it at the example package:
 }
 ```
 
-For an installed package, point the MCP host directly at `ptools-mcp`. If the
-host launches the server from the directory that contains `.ptools/config.json`,
-no args are needed:
+For an installed package, point the MCP host directly at `ptools`. If the host
+launches the server from the directory that contains `.ptools/config.json`, no
+config path is needed:
 
 ```json
 {
-  "command": "ptools-mcp",
-  "args": []
+  "command": "ptools",
+  "args": ["mcp", "serve", "--host", "node"]
 }
 ```
 
-Pass `--config` only when the host starts `ptools-mcp` from another working
+Pass `--config` only when the host starts `ptools` from another working
 directory or the config lives somewhere else:
 
 ```json
 {
-  "command": "ptools-mcp",
+  "command": "ptools",
   "args": [
+    "mcp",
+    "serve",
+    "--host",
+    "node",
     "--config",
     "/absolute/path/to/ptools/examples/mcp-server/.ptools/config.json"
   ]
@@ -149,7 +153,7 @@ or client, so a plain terminal run will wait for MCP messages on stdin.
 The command above is equivalent to running this from `examples/mcp-server`:
 
 ```bash
-ptools-mcp
+ptools mcp serve --host node
 ```
 
 ## Config

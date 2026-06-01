@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "pnpm --dir ../.. build && ptools-mcp",
+    "start": "pnpm --dir ../.. build && node ../../packages/cli/dist/cli.js mcp serve --host node",
     "smoke": "pnpm --dir ../.. build && tsx src/smoke-client.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@ptools/cli": "workspace:*",
     "@ptools/mcp-server": "workspace:*",
     "zod": "4.4.3"
   },

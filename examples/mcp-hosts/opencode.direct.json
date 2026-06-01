@@ -4,17 +4,17 @@
     "exa": {
       "type": "remote",
       "url": "https://mcp.exa.ai/mcp",
-      "enabled": true,
+      "enabled": true
     },
     "notion": {
       "type": "remote",
       "url": "https://mcp.notion.com/mcp",
-      "enabled": true,
+      "enabled": true
     },
     "sheets": {
       "type": "remote",
       "url": "https://mcp.gumloop.com/gsheets/mcp",
-      "enabled": true,
+      "enabled": true
     }
   }
 }

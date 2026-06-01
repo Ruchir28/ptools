@@ -1,62 +1,65 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type {
+  CodeModeClientHandle,
   CodeModeDiagnostic,
-  CodeModeExecuteRequest,
-  CodeModeSearchProvidersRequest,
-  CodeModeSearchRequest,
-  CodeModeToolSchemaRequest,
+  CodeModeRequest,
+  CodeModeResponse,
+  CodeModeToolName,
 } from "@ptools/code-mode-api";
-import { CodeMode } from "@ptools/code-mode";
-import { ServerConfigError } from "@ptools/config";
-import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-  createPtoolsSessionFromConfigFile,
-  loadPtoolsSessionConfig,
-  makePtoolsSession,
-} from "../src/session.js";
-import type { CodeModeToolName } from "../src/types.js";
+import { makePtoolsSession } from "../src/session.js";
 
 describe("PtoolsSession", () => {
-  it("routes Code Mode tool calls to the matching service methods", async () => {
-    const calls: Array<{ readonly name: string; readonly input: unknown }> = [];
+  it("routes all Code Mode operations through the provided client", async () => {
+    const calls: CodeModeRequest[] = [];
     const diagnostics = [diagnostic("McpDiscoveryFailed")];
     const session = makePtoolsSession(
-      ManagedRuntime.make(
-        Layer.succeed(CodeMode, {
-          diagnostics: Effect.succeed(diagnostics),
-          authStatus: Effect.succeed({
-            authUrl: "http://127.0.0.1:9999/auth",
-            servers: [],
-          }),
-          refresh: Effect.void,
-          searchProviders: (request?: CodeModeSearchProvidersRequest) =>
-            Effect.sync(() => {
-              calls.push({ name: "search_providers", input: request });
-              return { providers: [], diagnostics };
-            }),
-          search: (request: CodeModeSearchRequest) =>
-            Effect.sync(() => {
-              calls.push({ name: "search", input: request });
-              return { actions: [], diagnostics };
-            }),
-          toolSchema: (request: CodeModeToolSchemaRequest) =>
-            Effect.sync(() => {
-              calls.push({ name: "get_tool_schema", input: request });
-              return { tools: [], declarationsByServer: [], diagnostics };
-            }),
-          execute: (request: CodeModeExecuteRequest) =>
-            Effect.sync(() => {
-              calls.push({ name: "execute", input: request });
-              return { value: request.code, logs: [] };
-            }),
-        }),
-      ),
+      fakeClient((request) => {
+        calls.push(request);
+
+        switch (request.operation) {
+          case "auth_status":
+            return {
+              operation: "auth_status",
+              output: {
+                authUrl: "http://127.0.0.1:9999/auth",
+                servers: [],
+              },
+            };
+          case "refresh":
+            return { operation: "refresh", output: { refreshed: true } };
+          case "search_providers":
+            return {
+              operation: "search_providers",
+              output: { providers: [], diagnostics },
+            };
+          case "search":
+            return {
+              operation: "search",
+              output: { actions: [], diagnostics },
+            };
+          case "get_tool_schema":
+            return {
+              operation: "get_tool_schema",
+              output: { tools: [], declarationsByServer: [], diagnostics },
+            };
+          case "execute":
+            return {
+              operation: "execute",
+              output: { value: request.input.code, logs: [] },
+            };
+        }
+      }),
     );
 
+    await expect(
+      session.callCodeModeTool("auth_status", undefined),
+    ).resolves.toEqual({
+      authUrl: "http://127.0.0.1:9999/auth",
+      servers: [],
+    });
+    await expect(
+      session.callCodeModeTool("refresh", undefined),
+    ).resolves.toEqual({ refreshed: true });
     await expect(
       session.callCodeModeTool("search_providers", {}),
     ).resolves.toEqual({ providers: [], diagnostics });
@@ -76,14 +79,16 @@ describe("PtoolsSession", () => {
     ).resolves.toEqual({ value: "async () => 1", logs: [] });
 
     expect(calls).toEqual([
-      { name: "search_providers", input: {} },
-      { name: "search", input: { query: "issues" } },
+      { operation: "auth_status" },
+      { operation: "refresh" },
+      { operation: "search_providers", input: {} },
+      { operation: "search", input: { query: "issues" } },
       {
-        name: "get_tool_schema",
+        operation: "get_tool_schema",
         input: { toolIds: ["github.create_issue"] },
       },
       {
-        name: "execute",
+        operation: "execute",
         input: { code: "async () => 1", timeoutMs: 1000 },
       },
     ]);
@@ -91,26 +96,9 @@ describe("PtoolsSession", () => {
 
   it("fails clearly for unknown Code Mode tool names", async () => {
     const session = makePtoolsSession(
-      ManagedRuntime.make(
-        Layer.succeed(CodeMode, {
-          diagnostics: Effect.succeed([]),
-          authStatus: Effect.succeed({
-            authUrl: "http://127.0.0.1:9999/auth",
-            servers: [],
-          }),
-          refresh: Effect.void,
-          searchProviders: () =>
-            Effect.succeed({ providers: [], diagnostics: [] }),
-          search: () => Effect.succeed({ actions: [], diagnostics: [] }),
-          toolSchema: () =>
-            Effect.succeed({
-              tools: [],
-              declarationsByServer: [],
-              diagnostics: [],
-            }),
-          execute: () => Effect.succeed({ value: undefined, logs: [] }),
-        }),
-      ),
+      fakeClient(() => {
+        throw new Error("should not be called");
+      }),
     );
 
     await expect(
@@ -118,373 +106,95 @@ describe("PtoolsSession", () => {
     ).rejects.toThrow("Unknown Code Mode operation: missing");
   });
 
-  it("returns diagnostics and releases the managed runtime scope on close", async () => {
+  it("returns diagnostics through provider discovery and closes the client", async () => {
     let closed = false;
     const diagnostics = [diagnostic("McpConnectionFailed")];
-    const runtime = ManagedRuntime.make(
-      Layer.scoped(
-        CodeMode,
-        Effect.acquireRelease(
-          Effect.succeed({
-            diagnostics: Effect.succeed(diagnostics),
-            authStatus: Effect.succeed({
-              authUrl: "http://127.0.0.1:9999/auth",
-              servers: [],
-            }),
-            refresh: Effect.void,
-            searchProviders: () =>
-              Effect.succeed({ providers: [], diagnostics }),
-            search: () => Effect.succeed({ actions: [], diagnostics }),
-            toolSchema: () =>
-              Effect.succeed({
-                tools: [],
-                declarationsByServer: [],
-                diagnostics,
-              }),
-            execute: () => Effect.succeed({ value: undefined, logs: [] }),
-          }),
-          () =>
-            Effect.sync(() => {
-              closed = true;
-            }),
-        ),
-      ),
-    );
-    const session = makePtoolsSession(runtime);
+    const session = makePtoolsSession({
+      call: async () => ({
+        operation: "search_providers",
+        output: { providers: [], diagnostics },
+      }),
+      close: async () => {
+        closed = true;
+      },
+    });
 
     await expect(session.diagnostics()).resolves.toEqual(diagnostics);
     await session.close();
 
     expect(closed).toBe(true);
   });
-});
 
-describe("config-file session loading", () => {
-  it("loads a valid config file into session options", async () => {
-    const configPath = await writeConfig("valid", {
-      mcpServers: {
-        fixture: {
-          command: "node",
-          args: ["server.js"],
-        },
-      },
-      executor: {
-        defaultTimeoutMs: 1234,
-      },
-    });
-
-    await expect(loadPtoolsSessionConfig(configPath)).resolves.toEqual({
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-          command: "node",
-          args: ["server.js"],
-        },
-      },
-      executor: {
-        defaultTimeoutMs: 1234,
-      },
-    });
-  });
-
-  it("defaults to ptools.config.json in the provided cwd", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-default-"));
-    const configPath = join(dir, "ptools.config.json");
-
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        mcpServers: {
-          fixture: {
-            command: "node",
-          },
-        },
+  it("fails when the client returns a mismatched operation envelope", async () => {
+    const session = makePtoolsSession({
+      call: async () => ({
+        operation: "refresh",
+        output: { refreshed: true },
       }),
-    );
-
-    await expect(
-      loadPtoolsSessionConfig(undefined, { cwd: dir }),
-    ).resolves.toMatchObject({
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-          command: "node",
-        },
-      },
-    });
-  });
-
-  it("resolves explicit relative config paths from the provided cwd", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-relative-"));
-    const configPath = join(dir, "nested.config.json");
-
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        mcpServers: {
-          docs: {
-            url: "https://example.com/mcp",
-          },
-        },
-      }),
-    );
-
-    await expect(
-      loadPtoolsSessionConfig("nested.config.json", { cwd: dir }),
-    ).resolves.toMatchObject({
-      mcpServers: {
-        docs: {
-          transport: "http",
-          url: "https://example.com/mcp",
-        },
-      },
-    });
-  });
-
-  it("resolves stdio cwd values from the config file directory", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-cwd-"));
-    const configPath = join(dir, "nested.config.json");
-
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        mcpServers: {
-          fixture: {
-            command: "node",
-            cwd: "fixtures",
-          },
-        },
-      }),
-    );
-
-    await expect(loadPtoolsSessionConfig(configPath)).resolves.toMatchObject({
-      mcpServers: {
-        fixture: {
-          cwd: join(dir, "fixtures"),
-        },
-      },
-    });
-  });
-
-  it("resolves env placeholders from the provided env map", async () => {
-    const configPath = await writeConfig("env", {
-      mcpServers: {
-        fixture: {
-          command: "${env:NODE_BIN}",
-          env: {
-            TOKEN: "${env:FIXTURE_TOKEN}",
-          },
-        },
-        remote: {
-          url: "https://example.com/mcp",
-          headers: {
-            authorization: "Bearer ${env:REMOTE_TOKEN}",
-          },
-        },
-      },
+      close: async () => {},
     });
 
     await expect(
-      loadPtoolsSessionConfig(configPath, {
-        env: {
-          NODE_BIN: "node",
-          FIXTURE_TOKEN: "secret",
-          REMOTE_TOKEN: "remote-secret",
-        },
-      }),
-    ).resolves.toMatchObject({
-      mcpServers: {
-        fixture: {
-          command: "node",
-          env: {
-            TOKEN: "secret",
-          },
-        },
-        remote: {
-          headers: {
-            authorization: "Bearer remote-secret",
-          },
-        },
-      },
-    });
+      session.callCodeModeTool("search", { query: "echo" }),
+    ).rejects.toThrow("Code Mode client returned refresh for search");
   });
-
-  it("rejects missing env placeholders with ServerConfigError", async () => {
-    const configPath = await writeConfig("missing-env", {
-      mcpServers: {
-        fixture: {
-          command: "${env:MISSING_NODE_BIN}",
-        },
-      },
-    });
-
-    await expect(
-      loadPtoolsSessionConfig(configPath, { env: {} }),
-    ).rejects.toThrow(ServerConfigError);
-    await expect(
-      loadPtoolsSessionConfig(configPath, { env: {} }),
-    ).rejects.toThrow("MISSING_NODE_BIN");
-  });
-
-  it("rejects invalid JSON and invalid config shape clearly", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ptools-agent-tools-invalid-"));
-    const invalidJsonPath = join(dir, "invalid-json.config.json");
-    const invalidShapePath = join(dir, "invalid-shape.config.json");
-
-    await writeFile(invalidJsonPath, "{");
-    await writeFile(
-      invalidShapePath,
-      JSON.stringify({
-        mcpServers: {
-          fixture: {
-            command: 42,
-          },
-        },
-      }),
-    );
-
-    await expect(loadPtoolsSessionConfig(invalidJsonPath)).rejects.toThrow(
-      "Invalid JSON",
-    );
-    await expect(loadPtoolsSessionConfig(invalidShapePath)).rejects.toThrow(
-      "command must be a string",
-    );
-  });
-
-  it("rejects ambiguous and old transport/type configs clearly", async () => {
-    const ambiguous = await writeConfig("ambiguous", {
-      mcpServers: {
-        fixture: {
-          command: "node",
-          url: "https://example.com/mcp",
-        },
-      },
-    });
-    const withTransport = await writeConfig("transport", {
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-          command: "node",
-        },
-      },
-    });
-    const withType = await writeConfig("type", {
-      mcpServers: {
-        fixture: {
-          type: "stdio",
-          command: "node",
-        },
-      },
-    });
-
-    await expect(loadPtoolsSessionConfig(ambiguous)).rejects.toThrow(
-      "not both",
-    );
-    await expect(loadPtoolsSessionConfig(withTransport)).rejects.toThrow(
-      "use command",
-    );
-    await expect(loadPtoolsSessionConfig(withType)).rejects.toThrow(
-      "use command",
-    );
-  });
-
-  it("excludes disabled servers", async () => {
-    const configPath = await writeConfig("disabled", {
-      mcpServers: {
-        fixture: {
-          command: "node",
-          disabled: false,
-        },
-        off: {
-          command: "node",
-          disabled: true,
-        },
-        alsoOff: {
-          url: "https://example.com/mcp",
-          enabled: false,
-        },
-      },
-    });
-
-    await expect(loadPtoolsSessionConfig(configPath)).resolves.toMatchObject({
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-        },
-      },
-    });
-
-    const loaded = await loadPtoolsSessionConfig(configPath);
-
-    expect(Object.keys(loaded.mcpServers)).toEqual(["fixture"]);
-  });
-
-  it("runs a real Code Mode vertical slice from a config file", async () => {
-    const fixturePath = fileURLToPath(
-      new URL(
-        "../../mcp-registry/test/fixtures/stdio-mcp-server.ts",
-        import.meta.url,
-      ),
-    );
-    const configPath = await writeConfig("vertical", {
-      mcpServers: {
-        fixture: {
-          command: process.execPath,
-          args: ["--import", "tsx", fixturePath],
-        },
-      },
-    });
-    const ptools = await createPtoolsSessionFromConfigFile(configPath);
-
-    try {
-      const providers = await ptools.callCodeModeTool("search_providers", {});
-      const search = await ptools.callCodeModeTool("search", { query: "echo" });
-      const schema = await ptools.callCodeModeTool("get_tool_schema", {
-        toolIds: ["fixture.echo"],
-      });
-      const execution = await ptools.callCodeModeTool("execute", {
-        code: `async () => {
-          return await fixture.echo({ text: "hello from config file" });
-        }`,
-      });
-
-      expect(toProviderNames(providers)).toEqual(["fixture"]);
-      expect(toToolKeys(search)).toEqual(["fixture.echo"]);
-      expect(toSchemaToolKeys(schema)).toEqual(["fixture.echo"]);
-      expect(execution).toEqual({
-        value: { text: "hello from config file" },
-        logs: [],
-      });
-    } finally {
-      await ptools.close();
-    }
-  }, 30_000);
 });
 
 describe("input parsing", () => {
   const session = () =>
     makePtoolsSession(
-      ManagedRuntime.make(
-        Layer.succeed(CodeMode, {
-          diagnostics: Effect.succeed([]),
-          authStatus: Effect.succeed({
-            authUrl: "http://127.0.0.1:9999/auth",
-            servers: [],
-          }),
-          refresh: Effect.void,
-          searchProviders: () =>
-            Effect.succeed({ providers: [], diagnostics: [] }),
-          search: () => Effect.succeed({ actions: [], diagnostics: [] }),
-          toolSchema: () =>
-            Effect.succeed({
-              tools: [],
-              declarationsByServer: [],
-              diagnostics: [],
-            }),
-          execute: () => Effect.succeed({ value: undefined, logs: [] }),
-        }),
-      ),
+      fakeClient((request) => {
+        switch (request.operation) {
+          case "auth_status":
+            return {
+              operation: "auth_status",
+              output: { authUrl: "http://127.0.0.1:9999/auth", servers: [] },
+            };
+          case "refresh":
+            return { operation: "refresh", output: { refreshed: true } };
+          case "search_providers":
+            return {
+              operation: "search_providers",
+              output: { providers: [], diagnostics: [] },
+            };
+          case "search":
+            return {
+              operation: "search",
+              output: { actions: [], diagnostics: [] },
+            };
+          case "get_tool_schema":
+            return {
+              operation: "get_tool_schema",
+              output: { tools: [], declarationsByServer: [], diagnostics: [] },
+            };
+          case "execute":
+            return {
+              operation: "execute",
+              output: { value: undefined, logs: [] },
+            };
+        }
+      }),
     );
+
+  describe("auth_status and refresh input", () => {
+    it("accepts absent input", async () => {
+      await expect(
+        session().callCodeModeTool("auth_status", undefined),
+      ).resolves.toEqual({
+        authUrl: "http://127.0.0.1:9999/auth",
+        servers: [],
+      });
+      await expect(
+        session().callCodeModeTool("refresh", undefined),
+      ).resolves.toEqual({ refreshed: true });
+    });
+
+    it("rejects provided input", async () => {
+      await expect(session().callCodeModeTool("refresh", {})).rejects.toThrow(
+        "refresh input must be absent",
+      );
+    });
+  });
 
   describe("search_providers input", () => {
     it("accepts undefined as provider inventory search", async () => {
@@ -636,38 +346,9 @@ const diagnostic = (
   message: "fixture diagnostic",
 });
 
-const writeConfig = async (name: string, value: unknown): Promise<string> => {
-  const dir = await mkdtemp(join(tmpdir(), `ptools-agent-tools-${name}-`));
-  const configPath = join(dir, "ptools.config.json");
-
-  await writeFile(configPath, JSON.stringify(value, null, 2));
-
-  return configPath;
-};
-
-const toToolKeys = (value: unknown): ReadonlyArray<string> => {
-  const context = value as {
-    readonly actions: ReadonlyArray<{ readonly toolId: string }>;
-  };
-
-  return context.actions.map((action) => action.toolId);
-};
-
-const toProviderNames = (value: unknown): ReadonlyArray<string> => {
-  const context = value as {
-    readonly providers: ReadonlyArray<{ readonly provider: string }>;
-  };
-
-  return context.providers.map((provider) => provider.provider);
-};
-
-const toSchemaToolKeys = (value: unknown): ReadonlyArray<string> => {
-  const context = value as {
-    readonly tools: ReadonlyArray<{
-      readonly jsServerName: string;
-      readonly jsToolName: string;
-    }>;
-  };
-
-  return context.tools.map((tool) => `${tool.jsServerName}.${tool.jsToolName}`);
-};
+const fakeClient = (
+  handle: (request: CodeModeRequest) => CodeModeResponse,
+): CodeModeClientHandle => ({
+  call: async (request) => handle(request),
+  close: async () => {},
+});

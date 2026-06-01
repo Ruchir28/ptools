@@ -1,13 +1,13 @@
 # @ptools/agent-tools
 
-Use ptools from an AI SDK model. This package loads your `ptools.config.json`,
-connects the configured MCP servers, creates a Code Mode session, and exposes
-that session as AI SDK tools.
+Use ptools from an AI SDK model. This package adapts a provided Code Mode
+client into AI SDK tools. Host-specific packages such as `@ptools/host-node`
+load config, connect MCP servers, and create that client.
 
 ## Install
 
 ```bash
-npm install @ptools/agent-tools
+npm install @ptools/agent-tools @ptools/host-node
 ```
 
 You also need an AI SDK model provider package for your app, such as
@@ -15,7 +15,8 @@ You also need an AI SDK model provider package for your app, such as
 
 ## Configure MCP Servers
 
-Create `ptools.config.json` in the directory where your app starts:
+When using the Node host, create `ptools.config.json` in the directory where
+your app starts:
 
 ```json
 {
@@ -49,10 +50,13 @@ Environment variables can be referenced explicitly:
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createPtoolsSessionFromConfigFile } from "@ptools/agent-tools";
+import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
-const ptools = await createPtoolsSessionFromConfigFile();
+const ptools = makePtoolsSession(
+  await createNodeCodeModeClientFromConfigFile(),
+);
 
 try {
   const result = await generateText({
@@ -71,8 +75,8 @@ try {
 Pass an explicit config path when the file is not named `ptools.config.json`:
 
 ```ts
-const ptools = await createPtoolsSessionFromConfigFile(
-  "./config/ptools.config.json",
+const ptools = makePtoolsSession(
+  await createNodeCodeModeClientFromConfigFile("./config/ptools.config.json"),
 );
 ```
 
@@ -82,7 +86,9 @@ Create one session for the part of your app that needs MCP-backed tools, reuse
 it for model calls, and always close it when that work is finished:
 
 ```ts
-const ptools = await createPtoolsSessionFromConfigFile();
+const ptools = makePtoolsSession(
+  await createNodeCodeModeClientFromConfigFile(),
+);
 
 try {
   const tools = toAISDKTools(ptools);
@@ -92,7 +98,8 @@ try {
 }
 ```
 
-`close()` shuts down the Effect runtime and releases MCP server connections.
+`close()` delegates to the provided Code Mode client handle. For the Node host,
+it shuts down the Effect runtime and releases MCP server connections.
 
 ## What Tools The Model Sees
 
@@ -129,7 +136,7 @@ those calls back to the original MCP servers.
 ## Troubleshooting
 
 `ptools.config.json` not found: create the file in your app working directory,
-or pass an explicit path to `createPtoolsSessionFromConfigFile()`.
+or pass an explicit path to `createNodeCodeModeClientFromConfigFile()`.
 
 `${env:NAME}` missing: export the environment variable before starting your app.
 ptools fails fast when an explicit env reference cannot be resolved.

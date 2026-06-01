@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
-import { createPtoolsSessionFromConfigFile } from "@ptools/agent-tools";
 import { generateText, stepCountIs } from "ai";
 
 const SYSTEM_PROMPT = `\
@@ -34,7 +35,9 @@ const main = async (): Promise<void> => {
   const prompt = readFlag("--prompt-file")
     ? readFileSync(readFlag("--prompt-file")!, "utf8")
     : "What drove the most revenue this period — which product and which seller led it, and how did performance vary across regions?";
-  const ptools = await createPtoolsSessionFromConfigFile(configPath);
+  const ptools = makePtoolsSession(
+    await createNodeCodeModeClientFromConfigFile(configPath),
+  );
 
   try {
     const diagnostics = await ptools.diagnostics();

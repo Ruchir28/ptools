@@ -1,21 +1,22 @@
-  {
-    "$schema": "https://opencode.ai/config.json",
-    "mcp": {
-      "ptools": {
-        "type": "local",
-        "command": [
-          "pnpm",
-          "--dir",
-          "../..",
-          "--filter",
-          "@ptools/mcp-server",
-          "dev",
-          "--",
-          "--config",
-          "$PWD/.ptools/config.json"
-        ],
-        "enabled": true,
-        "timeout": 30000
-      }
+{
+  "mcpServers": {
+    "ptools": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": [
+        "--dir",
+        "../..",
+        "--filter",
+        "@ptools/cli",
+        "dev",
+        "--",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
+        "--config",
+        ".ptools/config.json"
+      ]
     }
   }
+}

@@ -1,7 +1,7 @@
 import type { ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
 import { toAISDKTools } from "../src/ai-sdk.js";
-import type { CodeModeToolName, PtoolsSession } from "../src/types.js";
+import type { CodeModeOperation, PtoolsSession } from "../src/types.js";
 
 describe("toAISDKTools", () => {
   it("returns exactly four default-prefixed tools", () => {
@@ -39,7 +39,7 @@ describe("toAISDKTools", () => {
 
   it("executes visible tools through their canonical Code Mode names", async () => {
     const calls: Array<{
-      readonly name: CodeModeToolName;
+      readonly name: CodeModeOperation;
       readonly input: unknown;
     }> = [];
     const tools = toAISDKTools(fakeSession(calls), { toolNamePrefix: "mcp_" });
@@ -124,7 +124,7 @@ describe("toAISDKTools", () => {
 
 const fakeSession = (
   calls: Array<{
-    readonly name: CodeModeToolName;
+    readonly name: CodeModeOperation;
     readonly input: unknown;
   }> = [],
 ): PtoolsSession => ({

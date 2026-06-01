@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "pnpm --filter @ptools/agent-tools build && tsx src/run.ts",
+    "start": "pnpm --filter @ptools/host-node build && pnpm --filter @ptools/agent-tools build && tsx src/run.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -12,6 +12,7 @@
     "@modelcontextprotocol/sdk": "latest",
     "@openrouter/ai-sdk-provider": "^2.9.0",
     "@ptools/agent-tools": "workspace:*",
+    "@ptools/host-node": "workspace:*",
     "ai": "latest",
     "effect": "latest",
     "zod": "latest"

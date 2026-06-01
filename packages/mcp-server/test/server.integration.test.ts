@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const serverMainPath = join(repoRoot, "packages/mcp-server/src/cli.ts");
+const serverMainPath = join(repoRoot, "packages/cli/src/cli.ts");
 const fixtureServerPath = join(
   repoRoot,
   "packages/mcp-registry/test/fixtures/stdio-mcp-server.ts",
@@ -35,7 +35,17 @@ describe("combined Code Mode MCP server", () => {
 
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: ["--import", "tsx", serverMainPath, "--config", configPath],
+      args: [
+        "--import",
+        "tsx",
+        serverMainPath,
+        "mcp",
+        "serve",
+        "--host",
+        "node",
+        "--config",
+        configPath,
+      ],
       cwd: repoRoot,
       stderr: "pipe",
     });
@@ -142,7 +152,17 @@ describe("combined Code Mode MCP server", () => {
 
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: ["--import", "tsx", serverMainPath, "--config", configPath],
+      args: [
+        "--import",
+        "tsx",
+        serverMainPath,
+        "mcp",
+        "serve",
+        "--host",
+        "node",
+        "--config",
+        configPath,
+      ],
       cwd: repoRoot,
       stderr: "pipe",
     });
@@ -192,7 +212,17 @@ describe("combined Code Mode MCP server", () => {
 
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: ["--import", "tsx", serverMainPath, "--config", configPath],
+      args: [
+        "--import",
+        "tsx",
+        serverMainPath,
+        "mcp",
+        "serve",
+        "--host",
+        "node",
+        "--config",
+        configPath,
+      ],
       cwd: repoRoot,
       stderr: "pipe",
     });

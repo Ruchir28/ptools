@@ -1,21 +1,20 @@
 # @ptools/mcp-server
 
-Combined Code Mode MCP server. It connects to configured upstream MCP servers,
-discovers their tools, and exposes a compact set of Code Mode tools to an MCP
-host such as Claude Desktop, Codex, Cursor, or any client that speaks MCP over
-stdio.
+Host-neutral Code Mode MCP adapter. It exposes a compact set of Code Mode tools
+to an MCP host over stdio, using a Code Mode client supplied by a host package.
+For the local Node binary, use `@ptools/cli`.
 
 ## Install
 
 ```bash
-npm install @ptools/mcp-server
+npm install @ptools/cli
 ```
 
 Most MCP hosts do not need a project install. They can start the published
 package with `npx`:
 
 ```bash
-npx -y @ptools/mcp-server --config .ptools/config.json
+npx -y @ptools/cli mcp serve --host node --config .ptools/config.json
 ```
 
 ## Configure
@@ -113,20 +112,20 @@ work while the user fixes that server's config.
 From the npm registry with `npx`:
 
 ```bash
-npx -y @ptools/mcp-server --config .ptools/config.json
+npx -y @ptools/cli mcp serve --host node --config .ptools/config.json
 ```
 
 From a project where the package is installed:
 
 ```bash
-ptools-mcp --config .ptools/config.json
+ptools mcp serve --host node --config .ptools/config.json
 ```
 
 Use an explicit path when the config lives elsewhere:
 
 ```bash
-ptools-mcp --config ./config/ptools.json
-PTOOLS_CONFIG=./config/ptools.json ptools-mcp
+ptools mcp serve --host node --config ./config/ptools.json
+PTOOLS_CONFIG=./config/ptools.json ptools mcp serve --host node
 ```
 
 For concrete Claude Code and OpenCode setup files, see
@@ -144,7 +143,11 @@ Claude Code project config:
       "command": "npx",
       "args": [
         "-y",
-        "@ptools/mcp-server",
+        "@ptools/cli",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
         "--config",
         ".ptools/config.json"
       ]
@@ -163,7 +166,11 @@ OpenCode config:
       "command": [
         "npx",
         "-y",
-        "@ptools/mcp-server",
+        "@ptools/cli",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
         "--config",
         ".ptools/config.json"
       ],
@@ -181,11 +188,16 @@ the upstream MCP servers listed in `.ptools/config.json`.
 
 ```ts
 import { Effect } from "effect";
-import { runServer } from "@ptools/mcp-server";
+import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { serveMcpWithCodeModeClient } from "@ptools/mcp-server";
 
-await Effect.runPromise(
-  runServer(process.argv.slice(2), process.env, process.cwd()),
-);
+const client = await createNodeCodeModeClientFromConfigFile(undefined, {
+  argv: process.argv.slice(2),
+  cwd: process.cwd(),
+  env: process.env,
+});
+
+await Effect.runPromise(serveMcpWithCodeModeClient(client));
 ```
 
 ## Tools

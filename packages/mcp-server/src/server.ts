@@ -1,22 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
-  makeCodeModeLive,
-  CodeMode,
+  CodeModeClient,
   type CodeModeSearchProvidersResult,
   type CodeModeSearchResult,
   type CodeModeAuthStatusResult,
   type CodeModeToolSchemaResult,
-} from "@ptools/code-mode";
-import { ConfigSource } from "@ptools/config";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor";
-import {
-  NodeAuthCoordinatorLive,
-  NodeConfigSourceLive,
-  NodeCredentialsStoreLive,
-} from "@ptools/host-node";
-import { makeMcpRegistryLive } from "@ptools/mcp-registry";
-import { Context, Effect, Either, Layer, Scope } from "effect";
+  type CodeModeClientHandle,
+  type CodeModeRequest,
+  type CodeModeResponse,
+} from "@ptools/code-mode-api";
+import { Effect, Scope } from "effect";
 import { z } from "zod";
 
 const SearchProvidersInputSchema = {
@@ -96,50 +90,50 @@ const RefreshOutputSchema = {
   refreshed: z.boolean(),
 };
 
-/**
- * Starts the combined ptools MCP server over stdio.
- *
- * @param argv Command-line args after the executable and script path.
- * @param env Environment map used for config path and explicit secret refs.
- * @param cwd Directory used to resolve relative config paths.
- * @returns An Effect that stays alive until stdio closes or the process exits.
- */
-export const runServer = (
-  argv: ReadonlyArray<string>,
-  env: NodeJS.ProcessEnv,
-  cwd: string,
-): Effect.Effect<void, unknown> =>
-  Effect.gen(function* () {
-    const configSource = yield* ConfigSource;
-    const config = yield* configSource.load;
-    const live = makeCodeModeLive().pipe(
-      Layer.provide(
-        Layer.merge(
-          makeMcpRegistryLive(config.mcpServers).pipe(
-            Layer.provide(makeNodeAuthCoordinatorLive(env)),
-          ),
-          makeLocalSandboxExecutorLive(config.executor),
-        ),
-      ),
-    );
+type CodeModeClientCaller = Pick<CodeModeClientHandle, "call">;
 
-    yield* runMcpServer.pipe(Effect.provide(live));
-  }).pipe(
-    Effect.provide(NodeConfigSourceLive({ argv, env, cwd })),
+type ClientCallResult<Operation extends CodeModeResponse["operation"]> =
+  | {
+      readonly ok: true;
+      readonly output: Extract<
+        CodeModeResponse,
+        { readonly operation: Operation }
+      >["output"];
+    }
+  | { readonly ok: false; readonly cause: unknown };
+
+export const serveMcpWithCodeModeClient = (
+  client: CodeModeClientHandle,
+): Effect.Effect<void, never> =>
+  runMcpServer(client).pipe(
+    Effect.ensuring(Effect.promise(() => client.close()).pipe(Effect.ignore)),
     Effect.scoped,
   );
 
-const runMcpServer: Effect.Effect<void, never, CodeMode | Scope.Scope> =
+export const serveMcpWithCodeModeClientService: Effect.Effect<
+  void,
+  never,
+  CodeModeClient | Scope.Scope
+> = Effect.gen(function* () {
+  const client = yield* CodeModeClient;
+
+  yield* runMcpServer({
+    call: (request) => Effect.runPromise(client.call(request)),
+  });
+});
+
+const runMcpServer = (
+  client: CodeModeClientCaller,
+): Effect.Effect<void, never, Scope.Scope> =>
   Effect.gen(function* () {
-    const codeMode = yield* CodeMode;
     const server = new McpServer({
       name: "ptools-code-mode",
       version: "0.0.0",
     });
 
-    yield* writeStartupDiagnostics(codeMode).pipe(Effect.ignore);
+    yield* writeStartupDiagnostics(client).pipe(Effect.ignore);
 
-    registerCodeModeTools(server, codeMode);
+    registerCodeModeTools(server, client);
 
     yield* Effect.acquireRelease(
       Effect.promise(() => server.connect(new StdioServerTransport())),
@@ -148,21 +142,6 @@ const runMcpServer: Effect.Effect<void, never, CodeMode | Scope.Scope> =
 
     yield* waitForProcessClose;
   });
-
-const makeNodeAuthCoordinatorLive = (env: NodeJS.ProcessEnv) =>
-  NodeAuthCoordinatorLive({
-    runtimeId: "local",
-    autoOpen:
-      env.PTOOLS_AUTH_AUTO_OPEN !== "0" &&
-      env.PTOOLS_AUTH_AUTO_OPEN !== "false" &&
-      process.stderr.isTTY === true,
-  }).pipe(
-    Layer.provide(
-      NodeCredentialsStoreLive({
-        serviceName: "ptools-mcp-oauth",
-      }),
-    ),
-  );
 
 /**
  * Registers the public model-facing Code Mode tools on the MCP server.
@@ -173,7 +152,7 @@ const makeNodeAuthCoordinatorLive = (env: NodeJS.ProcessEnv) =>
  */
 export const registerCodeModeTools = (
   server: McpServer,
-  codeMode: Context.Tag.Service<typeof CodeMode>,
+  client: CodeModeClientCaller,
 ): void => {
   server.registerTool(
     "auth_status",
@@ -185,23 +164,19 @@ export const registerCodeModeTools = (
       outputSchema: AuthStatusOutputSchema,
     },
     async () => {
-      const result = await Effect.runPromise(
-        codeMode.authStatus.pipe(Effect.either),
-      );
+      const result = await callClient(client, { operation: "auth_status" });
 
-      if (Either.isLeft(result)) {
-        return toToolError(result.left);
-      }
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: formatAuthStatusText(result.right),
-          },
-        ],
-        structuredContent: toStructuredContent(result.right),
-      };
+      return result.ok
+        ? {
+            content: [
+              {
+                type: "text" as const,
+                text: formatAuthStatusText(result.output),
+              },
+            ],
+            structuredContent: toStructuredContent(result.output),
+          }
+        : toToolError(result.cause);
     },
   );
 
@@ -215,20 +190,19 @@ export const registerCodeModeTools = (
       outputSchema: RefreshOutputSchema,
     },
     async () => {
-      const result = await Effect.runPromise(
-        codeMode.refresh.pipe(Effect.either),
-      );
+      const result = await callClient(client, { operation: "refresh" });
 
-      if (Either.isLeft(result)) {
-        return toToolError(result.left);
-      }
-
-      return {
-        content: [
-          { type: "text" as const, text: "Refreshed upstream MCP registry." },
-        ],
-        structuredContent: { refreshed: true },
-      };
+      return result.ok
+        ? {
+            content: [
+              {
+                type: "text" as const,
+                text: "Refreshed upstream MCP registry.",
+              },
+            ],
+            structuredContent: toStructuredContent(result.output),
+          }
+        : toToolError(result.cause);
     },
   );
 
@@ -246,23 +220,22 @@ export const registerCodeModeTools = (
         ...(query === undefined ? {} : { query }),
         ...(limit === undefined ? {} : { limit }),
       };
-      const result = await Effect.runPromise(
-        codeMode.searchProviders(request).pipe(Effect.either),
-      );
+      const result = await callClient(client, {
+        operation: "search_providers",
+        input: request,
+      });
 
-      if (Either.isLeft(result)) {
-        return toToolError(result.left);
-      }
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: formatSearchProvidersText(result.right),
-          },
-        ],
-        structuredContent: toStructuredContent(result.right),
-      };
+      return result.ok
+        ? {
+            content: [
+              {
+                type: "text" as const,
+                text: formatSearchProvidersText(result.output),
+              },
+            ],
+            structuredContent: toStructuredContent(result.output),
+          }
+        : toToolError(result.cause);
     },
   );
 
@@ -281,20 +254,19 @@ export const registerCodeModeTools = (
         ...(provider === undefined ? {} : { provider }),
         ...(limit === undefined ? {} : { limit }),
       };
-      const result = await Effect.runPromise(
-        codeMode.search(request).pipe(Effect.either),
-      );
+      const result = await callClient(client, {
+        operation: "search",
+        input: request,
+      });
 
-      if (Either.isLeft(result)) {
-        return toToolError(result.left);
-      }
-
-      return {
-        content: [
-          { type: "text" as const, text: formatSearchText(result.right) },
-        ],
-        structuredContent: toStructuredContent(result.right),
-      };
+      return result.ok
+        ? {
+            content: [
+              { type: "text" as const, text: formatSearchText(result.output) },
+            ],
+            structuredContent: toStructuredContent(result.output),
+          }
+        : toToolError(result.cause);
     },
   );
 
@@ -309,23 +281,22 @@ export const registerCodeModeTools = (
     },
     async ({ toolIds }) => {
       const request = { toolIds };
-      const result = await Effect.runPromise(
-        codeMode.toolSchema(request).pipe(Effect.either),
-      );
+      const result = await callClient(client, {
+        operation: "get_tool_schema",
+        input: request,
+      });
 
-      if (Either.isLeft(result)) {
-        return toToolError(result.left);
-      }
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: formatToolSchemaText(result.right),
-          },
-        ],
-        structuredContent: toStructuredContent(result.right),
-      };
+      return result.ok
+        ? {
+            content: [
+              {
+                type: "text" as const,
+                text: formatToolSchemaText(result.output),
+              },
+            ],
+            structuredContent: toStructuredContent(result.output),
+          }
+        : toToolError(result.cause);
     },
   );
 
@@ -339,29 +310,52 @@ export const registerCodeModeTools = (
     },
     async ({ code, timeoutMs }) => {
       const request = timeoutMs === undefined ? { code } : { code, timeoutMs };
-      const result = await Effect.runPromise(
-        codeMode.execute(request).pipe(Effect.either),
-      );
+      const result = await callClient(client, {
+        operation: "execute",
+        input: request,
+      });
 
-      if (Either.isLeft(result)) {
-        return toToolError(result.left);
-      }
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(result.right, null, 2),
-          },
-        ],
-        structuredContent: toStructuredContent(result.right),
-      };
+      return result.ok
+        ? {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(result.output, null, 2),
+              },
+            ],
+            structuredContent: toStructuredContent(result.output),
+          }
+        : toToolError(result.cause);
     },
   );
 };
 
 const toStructuredContent = (value: object): Record<string, unknown> =>
   value as Record<string, unknown>;
+
+const callClient = async <Operation extends CodeModeRequest["operation"]>(
+  client: CodeModeClientCaller,
+  request: Extract<CodeModeRequest, { readonly operation: Operation }>,
+): Promise<ClientCallResult<Operation>> => {
+  try {
+    const response = await client.call(request);
+
+    if (response.operation !== request.operation) {
+      throw new Error(
+        `Code Mode client returned ${response.operation} for ${request.operation}`,
+      );
+    }
+
+    return {
+      ok: true,
+      output: (
+        response as Extract<CodeModeResponse, { readonly operation: Operation }>
+      ).output,
+    } as ClientCallResult<Operation>;
+  } catch (cause) {
+    return { ok: false, cause };
+  }
+};
 
 const waitForProcessClose: Effect.Effect<void> = Effect.async<void>(
   (resume) => {
@@ -447,21 +441,23 @@ const formatAuthStatusText = (result: CodeModeAuthStatusResult): string =>
   ].join("\n");
 
 const writeStartupDiagnostics = (
-  codeMode: Context.Tag.Service<typeof CodeMode>,
-): Effect.Effect<void, unknown> =>
-  codeMode.diagnostics.pipe(
-    Effect.flatMap((diagnostics) =>
-      diagnostics.length === 0
-        ? Effect.void
-        : Effect.sync(() => {
+  client: CodeModeClientCaller,
+): Effect.Effect<void, never> =>
+  Effect.promise(() =>
+    callClient(client, { operation: "search_providers" }),
+  ).pipe(
+    Effect.flatMap((result) =>
+      result.ok && result.output.diagnostics.length > 0
+        ? Effect.sync(() => {
             process.stderr.write(
               `[ptools] MCP registry diagnostics:\n${JSON.stringify(
-                diagnostics,
+                result.output.diagnostics,
                 null,
                 2,
               )}\n`,
             );
-          }),
+          })
+        : Effect.void,
     ),
   );
 

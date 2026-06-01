@@ -1,136 +1,50 @@
-import { resolve } from "node:path";
 import {
-  CodeMode,
-  makeCodeModeLive,
-} from "@ptools/code-mode";
-import { parseCodeModeToolCall } from "@ptools/code-mode-api";
-import { ConfigSource } from "@ptools/config";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor";
-import {
-  FileConfigSourceLive,
-  NodeAuthCoordinatorLive,
-  NodeCredentialsStoreLive,
-  ProcessEnvSecretResolverLive,
-} from "@ptools/host-node";
-import { makeMcpRegistryLive } from "@ptools/mcp-registry";
-import { Effect, Either, Layer, ManagedRuntime } from "effect";
-import type {
-  CodeModeToolName,
-  CreatePtoolsSessionFromConfigFileOptions,
-  CreatePtoolsSessionOptions,
-  PtoolsSession,
-} from "./types.js";
+  parseCodeModeToolCall,
+  type CodeModeClientHandle,
+  type CodeModeOperation,
+  type CodeModeRequest,
+  type CodeModeResponse,
+} from "@ptools/code-mode-api";
+import { Effect } from "effect";
+import type { PtoolsSession } from "./types.js";
 
-export const createPtoolsSession = async (
-  options: CreatePtoolsSessionOptions,
-): Promise<PtoolsSession> => {
-  const live = makeCodeModeLive().pipe(
-    Layer.provide(
-      Layer.merge(
-        makeMcpRegistryLive(options.mcpServers).pipe(
-          Layer.provide(makeNodeAuthCoordinatorLive()),
-        ),
-        makeLocalSandboxExecutorLive(options.executor),
-      ),
-    ),
-  );
-  const runtime = ManagedRuntime.make(live);
-
-  try {
-    await runtime.runtime();
-  } catch (cause) {
-    await runtime.dispose();
-    throw cause;
-  }
-
-  return makePtoolsSession(runtime);
-};
-
-export const loadPtoolsSessionConfig = async (
-  path = "ptools.config.json",
-  options: CreatePtoolsSessionFromConfigFileOptions = {},
-): Promise<CreatePtoolsSessionOptions> => {
-  const resolvedPath = resolve(options.cwd ?? process.cwd(), path);
-  const result = await Effect.runPromise(
-    Effect.gen(function* () {
-      const source = yield* ConfigSource;
-
-      return yield* source.load;
-    }).pipe(
-      Effect.provide(
-        FileConfigSourceLive({ path: resolvedPath }).pipe(
-          Layer.provide(
-            ProcessEnvSecretResolverLive({
-              env: options.env ?? process.env,
-            }),
-          ),
-        ),
-      ),
-      Effect.either,
-    ),
-  );
-
-  if (Either.isLeft(result)) {
-    throw result.left;
-  }
-
-  return result.right;
-};
-
-export const createPtoolsSessionFromConfigFile = async (
-  path?: string,
-  options?: CreatePtoolsSessionFromConfigFileOptions,
-): Promise<PtoolsSession> =>
-  createPtoolsSession(await loadPtoolsSessionConfig(path, options));
+type ClientCallResult<Operation extends CodeModeResponse["operation"]> =
+  Extract<CodeModeResponse, { readonly operation: Operation }>["output"];
 
 export const makePtoolsSession = (
-  runtime: ManagedRuntime.ManagedRuntime<CodeMode, unknown>,
+  client: CodeModeClientHandle,
 ): PtoolsSession => ({
-  callCodeModeTool: (name, input) =>
-    runtime.runPromise(
-      Effect.gen(function* () {
-        const codeMode = yield* CodeMode;
+  callCodeModeTool: async (name, input) => {
+    const request = await parseToolCall(name, input);
+    return await callClient(client, request);
+  },
+  diagnostics: async () => {
+    const output = await callClient(client, { operation: "search_providers" });
 
-        const request = yield* parseCodeModeToolCall(name, input);
-
-        switch (request.operation) {
-          case "search_providers":
-            return yield* codeMode.searchProviders(request.input);
-          case "search":
-            return yield* codeMode.search(request.input);
-          case "get_tool_schema":
-            return yield* codeMode.toolSchema(request.input);
-          case "execute":
-            return yield* codeMode.execute(request.input);
-          default:
-            return yield* Effect.fail(
-              new Error(`Unsupported Code Mode session operation: ${request}`),
-            );
-        }
-      }),
-    ),
-  diagnostics: () =>
-    runtime.runPromise(
-      Effect.gen(function* () {
-        const codeMode = yield* CodeMode;
-
-        return yield* codeMode.diagnostics;
-      }),
-    ),
-  close: () => runtime.dispose(),
+    return output.diagnostics;
+  },
+  close: () => client.close(),
 });
 
-const makeNodeAuthCoordinatorLive = () =>
-  NodeAuthCoordinatorLive({
-    runtimeId: "local",
-    autoOpen:
-      process.env.PTOOLS_AUTH_AUTO_OPEN !== "0" &&
-      process.env.PTOOLS_AUTH_AUTO_OPEN !== "false" &&
-      process.stderr.isTTY === true,
-  }).pipe(
-    Layer.provide(
-      NodeCredentialsStoreLive({
-        serviceName: "ptools-mcp-oauth",
-      }),
-    ),
-  );
+const parseToolCall = (
+  name: CodeModeOperation,
+  input: unknown,
+): Promise<CodeModeRequest> =>
+  Effect.runPromise(parseCodeModeToolCall(name, input));
+
+const callClient = async <Operation extends CodeModeRequest["operation"]>(
+  client: CodeModeClientHandle,
+  request: Extract<CodeModeRequest, { readonly operation: Operation }>,
+): Promise<ClientCallResult<Operation>> => {
+  const response = await client.call(request);
+
+  if (response.operation !== request.operation) {
+    throw new Error(
+      `Code Mode client returned ${response.operation} for ${request.operation}`,
+    );
+  }
+
+  return (
+    response as Extract<CodeModeResponse, { readonly operation: Operation }>
+  ).output as ClientCallResult<Operation>;
+};

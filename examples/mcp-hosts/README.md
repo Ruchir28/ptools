@@ -7,7 +7,7 @@ It is intentionally separate from `examples/mcp-server`, which is a repo-local
 smoke fixture. This folder shows the installed-package shape:
 
 ```bash
-npx -y @ptools/mcp-server --config .ptools/config.json
+npx -y @ptools/cli mcp serve --host node --config .ptools/config.json
 ```
 
 ## What This Example Loads
@@ -76,7 +76,11 @@ The ptools config starts only one MCP server from OpenCode's point of view:
       "command": [
         "npx",
         "-y",
-        "@ptools/mcp-server",
+        "@ptools/cli",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
         "--config",
         "./.ptools/config.json"
       ],
@@ -121,7 +125,11 @@ same shape users should add to their own project:
       "command": "npx",
       "args": [
         "-y",
-        "@ptools/mcp-server",
+        "@ptools/cli",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
         "--config",
         ".ptools/config.json"
       ]
@@ -149,7 +157,7 @@ You can also add ptools with the Claude Code CLI instead of using `.mcp.json`:
 
 ```bash
 cd examples/mcp-hosts
-claude mcp add ptools --scope project -- npx -y @ptools/mcp-server --config "$PWD/.ptools/config.json"
+claude mcp add ptools --scope project -- npx -y @ptools/cli mcp serve --host node --config "$PWD/.ptools/config.json"
 ```
 
 Use `--scope user` instead of `--scope project` if you want the entry available
@@ -178,26 +186,31 @@ When developing from this repository instead of using the npm package, use the
 repo-local command from this example directory:
 
 ```bash
-pnpm --dir ../.. --filter @ptools/mcp-server... build
-pnpm --dir ../.. --filter @ptools/mcp-server dev -- --config "$PWD/.ptools/config.json"
+pnpm --dir ../.. --filter @ptools/cli... build
+pnpm --dir ../.. --filter @ptools/cli dev -- mcp serve --host node --config "$PWD/.ptools/config.json"
 ```
 
-For host config while developing from source, point the host at `pnpm` directly:
+For host config while developing from source, build once from the repo root (`pnpm build`),
+then point OpenCode at the built CLI so the host keeps this example directory as cwd:
 
 ```json
 {
   "command": [
-    "pnpm",
-    "--dir",
-    "/absolute/path/to/ptools",
-    "--filter",
-    "@ptools/mcp-server",
-    "dev",
-    "--",
+    "node",
+    "../../packages/cli/dist/cli.js",
+    "mcp",
+    "serve",
+    "--host",
+    "node",
     "--config",
-    "/absolute/path/to/project/.ptools/config.json"
+    ".ptools/config.json"
   ]
 }
 ```
+
+`opencode.ptools.json` in this folder already uses that shape. Avoid
+`pnpm --filter @ptools/cli dev -- mcp serve ...` as the MCP command: pnpm runs the
+script from `packages/cli`, so a relative `--config .ptools/config.json` resolves
+in the wrong directory.
 
 For public docs and users, prefer the installed-package `npx` command.

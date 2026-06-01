@@ -1,16 +1,19 @@
 {
-  "name": "@ptools/host-node",
+  "name": "@ptools/cli",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ruchir28/ptools.git",
-    "directory": "packages/host-node"
+    "directory": "packages/cli"
   },
   "homepage": "https://github.com/Ruchir28/ptools#readme",
   "bugs": {
     "url": "https://github.com/Ruchir28/ptools/issues"
+  },
+  "bin": {
+    "ptools": "./dist/cli.js"
   },
   "files": [
     "dist/*.js",
@@ -30,19 +33,15 @@
     }
   },
   "scripts": {
+    "dev": "tsx src/cli.ts",
+    "mcp:serve": "tsx src/cli.ts mcp serve",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "@napi-rs/keyring": "^1.3.0",
-    "@ptools/auth": "workspace:*",
-    "@ptools/code-mode": "workspace:*",
-    "@ptools/code-mode-api": "workspace:*",
-    "@ptools/config": "workspace:*",
-    "@ptools/executor": "workspace:*",
-    "@ptools/mcp-registry": "workspace:*",
+    "@ptools/host-node": "workspace:*",
+    "@ptools/mcp-server": "workspace:*",
     "effect": "3.21.2"
   }
 }

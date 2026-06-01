@@ -7,8 +7,8 @@ authoritative.
 
 There are two installable alpha paths:
 
-- `@ptools/mcp-server` for MCP hosts such as Claude Code and OpenCode
-- `@ptools/agent-tools` for app code using the AI SDK
+- `@ptools/cli` for MCP hosts such as Claude Code and OpenCode
+- `@ptools/host-node` plus `@ptools/agent-tools` for app code using the AI SDK
 
 ## MCP Server
 
@@ -16,7 +16,7 @@ Use the MCP server when you want a host to load one `ptools` server that proxies
 multiple upstream MCP providers.
 
 ```bash
-npx -y @ptools/mcp-server --config .ptools/config.json
+npx -y @ptools/cli mcp serve --host node --config .ptools/config.json
 ```
 
 Example `.ptools/config.json`:
@@ -47,7 +47,11 @@ Claude Code project config:
       "command": "npx",
       "args": [
         "-y",
-        "@ptools/mcp-server",
+        "@ptools/cli",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
         "--config",
         ".ptools/config.json"
       ]
@@ -66,7 +70,11 @@ OpenCode config:
       "command": [
         "npx",
         "-y",
-        "@ptools/mcp-server",
+        "@ptools/cli",
+        "mcp",
+        "serve",
+        "--host",
+        "node",
         "--config",
         ".ptools/config.json"
       ],
@@ -87,16 +95,19 @@ discovered through `search` and called from generated JavaScript passed to
 Use the AI SDK package when you want to embed ptools in your own app:
 
 ```bash
-npm install @ptools/agent-tools
+npm install @ptools/agent-tools @ptools/host-node
 ```
 
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createPtoolsSessionFromConfigFile } from "@ptools/agent-tools";
+import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
-const ptools = await createPtoolsSessionFromConfigFile();
+const ptools = makePtoolsSession(
+  await createNodeCodeModeClientFromConfigFile(),
+);
 
 try {
   const result = await generateText({
@@ -114,10 +125,11 @@ try {
 
 Package docs:
 
-- `@ptools/mcp-server`: MCP stdio server for MCP hosts
+- `@ptools/cli`: command-line composition surface for MCP hosts
+- `@ptools/mcp-server`: host-neutral MCP stdio adapter
 - `@ptools/agent-tools`: user-facing AI SDK session and adapter package
 - `@ptools/config`: shared config parsing, validation, resolution, and hashing
-- `@ptools/host-node`: Node host layers for config-file discovery/loading
+- `@ptools/host-node`: Node host layers and Code Mode client factories
 - `@ptools/mcp-registry`: upstream MCP connection, discovery, and dispatch
 - `@ptools/code-mode`: Code Mode search, schema, and execute orchestration
 - `@ptools/executor`: local JavaScript execution host

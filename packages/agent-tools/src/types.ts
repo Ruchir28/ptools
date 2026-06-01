@@ -1,25 +1,15 @@
 import type {
+  CodeModeClientHandle,
   CodeModeDiagnostic,
+  CodeModeOperation,
   CodeModeToolName,
 } from "@ptools/code-mode-api";
-import type { LocalSandboxExecutorOptions } from "@ptools/executor";
-import type { UpstreamMcpServers } from "@ptools/mcp-registry";
 
-export type { CodeModeToolName };
-
-export interface CreatePtoolsSessionOptions {
-  readonly mcpServers: UpstreamMcpServers;
-  readonly executor?: LocalSandboxExecutorOptions;
-}
-
-export interface CreatePtoolsSessionFromConfigFileOptions {
-  readonly cwd?: string;
-  readonly env?: Record<string, string | undefined>;
-}
+export type { CodeModeClientHandle, CodeModeOperation, CodeModeToolName };
 
 export interface PtoolsSession {
   readonly callCodeModeTool: (
-    name: CodeModeToolName,
+    name: CodeModeOperation,
     input: unknown,
   ) => Promise<unknown>;
   readonly diagnostics: () => Promise<ReadonlyArray<CodeModeDiagnostic>>;

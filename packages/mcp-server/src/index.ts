@@ -1,1 +1,5 @@
-export { runServer, registerCodeModeTools } from "./server.js";
+export {
+  registerCodeModeTools,
+  serveMcpWithCodeModeClient,
+  serveMcpWithCodeModeClientService,
+} from "./server.js";

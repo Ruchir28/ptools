@@ -11,6 +11,7 @@
     { "path": "./packages/code-mode" },
     { "path": "./packages/agent-tools" },
     { "path": "./packages/mcp-server" },
+    { "path": "./packages/cli" },
     { "path": "./apps/playground" }
   ]
 }

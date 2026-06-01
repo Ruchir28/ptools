@@ -3,7 +3,8 @@
   "include": ["src/**/*.ts"],
   "references": [
     { "path": "../../packages/agent-tools" },
-    { "path": "../../packages/core" }
+    { "path": "../../packages/core" },
+    { "path": "../../packages/host-node" }
   ],
   "compilerOptions": {
     "rootDir": "src",

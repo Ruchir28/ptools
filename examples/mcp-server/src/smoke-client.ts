@@ -10,9 +10,11 @@ const client = new Client({
   version: "0.0.0",
 });
 
+const cliPath = resolve(exampleRoot, "../../packages/cli/dist/cli.js");
+
 const transport = new StdioClientTransport({
-  command: "ptools-mcp",
-  args: [],
+  command: process.execPath,
+  args: [cliPath, "mcp", "serve", "--host", "node"],
   cwd: exampleRoot,
   stderr: "pipe",
 });
@@ -21,10 +23,7 @@ try {
   await client.connect(transport);
 
   const tools = await client.listTools();
-  console.log(
-    "public tools:",
-    tools.tools.map((tool) => tool.name).sort(),
-  );
+  console.log("public tools:", tools.tools.map((tool) => tool.name).sort());
 
   const providers = await client.callTool({
     name: "search_providers",
