@@ -97,7 +97,7 @@ describe("Code Mode playground", () => {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              tools: [{ jsServerName: "fixture", jsToolName: "add" }],
+              toolIds: ["fixture.add"],
             }),
           });
           const execution = yield* fetchJson<{

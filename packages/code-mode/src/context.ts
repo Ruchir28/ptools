@@ -28,7 +28,7 @@ import type {
   CodeModeToolSchema,
   CodeModeToolMetadata,
   CodeModeSearchRequest,
-} from "./types.js";
+} from "@ptools/code-mode-api";
 import { unwrapMcpToolResult } from "./unwrap.js";
 
 interface McpCallToolService {
@@ -389,27 +389,30 @@ const normalizeToolSchemaSelectors = (
   readonly jsServerName: string;
   readonly jsToolName: string;
 }> => {
-  const fromToolIds =
-    request.toolIds?.map((toolId) => {
-      const separator = toolId.indexOf(".");
+  if (!Array.isArray(request.toolIds)) {
+    throw new CodeModeInvariantError({
+      message: "get_tool_schema.toolIds must be an array",
+    });
+  }
 
-      if (separator <= 0 || separator === toolId.length - 1) {
-        throw new CodeModeInvariantError({
-          message: `Invalid Code Mode toolId: ${toolId}`,
-        });
-      }
+  const selected = request.toolIds.map((toolId) => {
+    const separator = toolId.indexOf(".");
 
-      return {
-        jsServerName: toolId.slice(0, separator),
-        jsToolName: toolId.slice(separator + 1),
-      };
-    }) ?? [];
-  const fromTools = request.tools ?? [];
-  const selected = [...fromToolIds, ...fromTools];
+    if (separator <= 0 || separator === toolId.length - 1) {
+      throw new CodeModeInvariantError({
+        message: `Invalid Code Mode toolId: ${toolId}`,
+      });
+    }
+
+    return {
+      jsServerName: toolId.slice(0, separator),
+      jsToolName: toolId.slice(separator + 1),
+    };
+  });
 
   if (selected.length === 0) {
     throw new CodeModeInvariantError({
-      message: "get_tool_schema requires at least one toolId or tool selector",
+      message: "get_tool_schema requires at least one toolId",
     });
   }
 

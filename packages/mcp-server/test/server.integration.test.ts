@@ -216,7 +216,7 @@ describe("combined Code Mode MCP server", () => {
     const schema = await client.callTool({
       name: "get_tool_schema",
       arguments: {
-        tools: [{ jsServerName: "broken", jsToolName: "upload_design_md" }],
+        toolIds: ["broken.upload_design_md"],
       },
     });
     const schemaResult = schema.structuredContent as {

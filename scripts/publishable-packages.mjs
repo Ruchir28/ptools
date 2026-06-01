@@ -25,9 +25,15 @@ export const publishablePackages = [
     internalDeps: [],
   },
   {
+    name: "@ptools/code-mode-api",
+    dir: "packages/code-mode-api",
+    internalDeps: [],
+  },
+  {
     name: "@ptools/code-mode",
     dir: "packages/code-mode",
     internalDeps: [
+      "@ptools/code-mode-api",
       "@ptools/executor",
       "@ptools/mcp-registry",
     ],
@@ -36,6 +42,7 @@ export const publishablePackages = [
     name: "@ptools/agent-tools",
     dir: "packages/agent-tools",
     internalDeps: [
+      "@ptools/code-mode-api",
       "@ptools/code-mode",
       "@ptools/config",
       "@ptools/executor",

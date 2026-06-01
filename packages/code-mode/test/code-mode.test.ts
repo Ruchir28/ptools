@@ -241,10 +241,7 @@ describe("Code Mode context and search", () => {
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
         return yield* codeMode.toolSchema({
-          tools: [
-            { jsServerName: "fixture", jsToolName: "add" },
-            { jsServerName: "fixture", jsToolName: "echo" },
-          ],
+          toolIds: ["fixture.add", "fixture.echo"],
         });
       }),
       [fixtureAddTool(), fixtureEchoTool()],
@@ -310,11 +307,7 @@ describe("Code Mode context and search", () => {
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
         return yield* codeMode.toolSchema({
-          tools: [
-            { jsServerName: "fixture", jsToolName: "add" },
-            { jsServerName: "fixture", jsToolName: "echo" },
-            { jsServerName: "slack", jsToolName: "send_message" },
-          ],
+          toolIds: ["fixture.add", "fixture.echo", "slack.send_message"],
         });
       }),
       [
@@ -420,10 +413,7 @@ describe("Code Mode context and search", () => {
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
             return yield* codeMode.toolSchema({
-              tools: [
-                { jsServerName: "fixture", jsToolName: "add" },
-                { jsServerName: "fixture", jsToolName: "missing" },
-              ],
+              toolIds: ["fixture.add", "fixture.missing"],
             });
           }),
           [fixtureAddTool()],
@@ -691,10 +681,10 @@ describe("Code Mode context and search", () => {
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
         const first = yield* codeMode.toolSchema({
-          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+          toolIds: ["fixture.echo"],
         });
         const second = yield* codeMode.toolSchema({
-          tools: [{ jsServerName: "fixture", jsToolName: "echo" }],
+          toolIds: ["fixture.echo"],
         });
 
         return { first, second };

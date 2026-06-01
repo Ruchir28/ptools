@@ -1,12 +1,12 @@
 {
-  "name": "@ptools/code-mode",
+  "name": "@ptools/code-mode-api",
   "version": "0.1.0-alpha.0",
   "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ruchir28/ptools.git",
-    "directory": "packages/code-mode"
+    "directory": "packages/code-mode-api"
   },
   "homepage": "https://github.com/Ruchir28/ptools#readme",
   "bugs": {
@@ -30,16 +30,11 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run --dir test",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run --dir test"
   },
   "dependencies": {
-    "@ptools/code-mode-api": "workspace:*",
-    "@ptools/auth": "workspace:*",
-    "@ptools/executor": "workspace:*",
-    "@ptools/mcp-registry": "workspace:*",
-    "effect": "3.21.2",
-    "json-schema-to-typescript": "15.0.4"
+    "effect": "3.21.2"
   }
 }

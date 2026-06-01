@@ -43,20 +43,8 @@ const SearchOutputSchema = {
 const ToolSchemaInputSchema = {
   toolIds: z
     .array(z.string().trim().min(1))
-    .optional()
     .describe(
       "Preferred copy-safe tool IDs returned by search, such as github.create_issue.",
-    ),
-  tools: z
-    .array(
-      z.object({
-        jsServerName: z.string().trim().min(1),
-        jsToolName: z.string().trim().min(1),
-      }),
-    )
-    .optional()
-    .describe(
-      "Compatibility selector for selected tools when toolIds are not used.",
     ),
 };
 
@@ -319,11 +307,8 @@ export const registerCodeModeTools = (
       inputSchema: ToolSchemaInputSchema,
       outputSchema: ToolSchemaOutputSchema,
     },
-    async ({ toolIds, tools }) => {
-      const request = {
-        ...(toolIds === undefined ? {} : { toolIds }),
-        ...(tools === undefined ? {} : { tools }),
-      };
+    async ({ toolIds }) => {
+      const request = { toolIds };
       const result = await Effect.runPromise(
         codeMode.toolSchema(request).pipe(Effect.either),
       );

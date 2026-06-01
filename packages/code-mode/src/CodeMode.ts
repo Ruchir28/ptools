@@ -28,7 +28,7 @@ import type {
   CodeModeSearchResult,
   CodeModeToolSchemaRequest,
   CodeModeToolSchemaResult,
-} from "./types.js";
+} from "@ptools/code-mode-api";
 
 export interface MakeCodeModeLiveOptions {
   readonly schemaCompiler?: SchemaCompiler;

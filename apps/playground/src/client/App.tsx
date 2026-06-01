@@ -504,12 +504,9 @@ function SchemaRequestScreen() {
     }
 
     const request = {
-      tools: tools
+      toolIds: tools
         .filter((entry) => selectedToolKeys.includes(entry.key))
-        .map((entry) => ({
-          jsServerName: entry.server.jsServerName,
-          jsToolName: entry.tool.jsToolName,
-        })),
+        .map((entry) => `${entry.server.jsServerName}.${entry.tool.jsToolName}`),
     };
 
     await runRequest("get_tool_schema", request, async () => {

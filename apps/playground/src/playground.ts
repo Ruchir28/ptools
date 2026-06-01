@@ -426,62 +426,43 @@ const readToolSchemaRequest = (
   request: IncomingMessage,
 ): Effect.Effect<
   {
-    readonly tools: ReadonlyArray<{
-      readonly jsServerName: string;
-      readonly jsToolName: string;
-    }>;
+    readonly toolIds: ReadonlyArray<string>;
   },
   PlaygroundServerError
 > =>
   readJson(request).pipe(
     Effect.flatMap((body) => {
       const candidate = body as {
-        readonly tools?: unknown;
+        readonly toolIds?: unknown;
       };
 
       if (
         typeof body !== "object" ||
         body === null ||
-        !Array.isArray(candidate.tools)
+        !Array.isArray(candidate.toolIds)
       ) {
         return Effect.fail(
           new PlaygroundServerError({
-            message: "Tool schema request requires a tools array.",
+            message: "Tool schema request requires a toolIds array.",
           }),
         );
       }
 
-      const tools: Array<{
-        readonly jsServerName: string;
-        readonly jsToolName: string;
-      }> = [];
+      const toolIds: Array<string> = [];
 
-      for (const tool of candidate.tools) {
-        if (
-          typeof tool !== "object" ||
-          tool === null ||
-          !("jsServerName" in tool) ||
-          typeof tool.jsServerName !== "string" ||
-          tool.jsServerName.trim().length === 0 ||
-          !("jsToolName" in tool) ||
-          typeof tool.jsToolName !== "string" ||
-          tool.jsToolName.trim().length === 0
-        ) {
+      for (const toolId of candidate.toolIds) {
+        if (typeof toolId !== "string" || toolId.trim().length === 0) {
           return Effect.fail(
             new PlaygroundServerError({
-              message:
-                "Each requested tool requires non-empty jsServerName and jsToolName strings.",
+              message: "Each requested toolId must be a non-empty string.",
             }),
           );
         }
 
-        tools.push({
-          jsServerName: tool.jsServerName.trim(),
-          jsToolName: tool.jsToolName.trim(),
-        });
+        toolIds.push(toolId.trim());
       }
 
-      return Effect.succeed({ tools });
+      return Effect.succeed({ toolIds });
     }),
   );
 

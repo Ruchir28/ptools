@@ -52,13 +52,11 @@ describe("toAISDKTools", () => {
     ).resolves.toEqual({ name: "search", input: { query: "auth" } });
     await expect(
       runAISDKToolExecuteForTest(tools, "mcp_get_tool_schema", {
-        tools: [{ jsServerName: "github", jsToolName: "create_issue" }],
+        toolIds: ["github.create_issue"],
       }),
     ).resolves.toEqual({
       name: "get_tool_schema",
-      input: {
-        tools: [{ jsServerName: "github", jsToolName: "create_issue" }],
-      },
+      input: { toolIds: ["github.create_issue"] },
     });
     await expect(
       runAISDKToolExecuteForTest(tools, "mcp_execute", {

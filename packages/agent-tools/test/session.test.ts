@@ -2,14 +2,14 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  CodeMode,
-  type CodeModeDiagnostic,
-  type CodeModeExecuteRequest,
-  type CodeModeSearchProvidersRequest,
-  type CodeModeSearchRequest,
-  type CodeModeToolSchemaRequest,
-} from "@ptools/code-mode";
+import type {
+  CodeModeDiagnostic,
+  CodeModeExecuteRequest,
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchRequest,
+  CodeModeToolSchemaRequest,
+} from "@ptools/code-mode-api";
+import { CodeMode } from "@ptools/code-mode";
 import { ServerConfigError } from "@ptools/config";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
@@ -65,7 +65,7 @@ describe("PtoolsSession", () => {
     ).resolves.toEqual({ actions: [], diagnostics });
     await expect(
       session.callCodeModeTool("get_tool_schema", {
-        tools: [{ jsServerName: "github", jsToolName: "create_issue" }],
+        toolIds: ["github.create_issue"],
       }),
     ).resolves.toEqual({ tools: [], declarationsByServer: [], diagnostics });
     await expect(
@@ -80,9 +80,7 @@ describe("PtoolsSession", () => {
       { name: "search", input: { query: "issues" } },
       {
         name: "get_tool_schema",
-        input: {
-          tools: [{ jsServerName: "github", jsToolName: "create_issue" }],
-        },
+        input: { toolIds: ["github.create_issue"] },
       },
       {
         name: "execute",
@@ -117,7 +115,7 @@ describe("PtoolsSession", () => {
 
     await expect(
       session.callCodeModeTool("missing" as CodeModeToolName, {}),
-    ).rejects.toThrow("Unknown Code Mode tool: missing");
+    ).rejects.toThrow("Unknown Code Mode operation: missing");
   });
 
   it("returns diagnostics and releases the managed runtime scope on close", async () => {
@@ -555,7 +553,7 @@ describe("input parsing", () => {
     it("rejects missing selector fields", async () => {
       await expect(
         session().callCodeModeTool("get_tool_schema", {}),
-      ).rejects.toThrow("get_tool_schema requires toolIds or tools");
+      ).rejects.toThrow("get_tool_schema.toolIds must be an array");
     });
 
     it("accepts toolIds", async () => {
@@ -570,34 +568,26 @@ describe("input parsing", () => {
       });
     });
 
-    it("rejects non-array tools field", async () => {
+    it("rejects empty toolIds", async () => {
       await expect(
-        session().callCodeModeTool("get_tool_schema", { tools: "echo" }),
-      ).rejects.toThrow("get_tool_schema.tools must be an array");
+        session().callCodeModeTool("get_tool_schema", { toolIds: [] }),
+      ).rejects.toThrow("get_tool_schema requires at least one toolId");
     });
 
-    it("rejects tool item that is not an object", async () => {
+    it("rejects non-array toolIds field", async () => {
       await expect(
-        session().callCodeModeTool("get_tool_schema", { tools: [null] }),
-      ).rejects.toThrow("get_tool_schema.tools[0] must be an object");
+        session().callCodeModeTool("get_tool_schema", { toolIds: "echo" }),
+      ).rejects.toThrow("get_tool_schema.toolIds must be an array");
     });
 
-    it("rejects tool item with missing jsServerName", async () => {
+    it("rejects a blank toolId", async () => {
       await expect(
         session().callCodeModeTool("get_tool_schema", {
-          tools: [{ jsToolName: "echo" }],
+          toolIds: [""],
         }),
       ).rejects.toThrow(
-        "get_tool_schema.tools[0].jsServerName must be a string",
+        "get_tool_schema.toolIds[0] must be a non-blank string",
       );
-    });
-
-    it("rejects tool item with missing jsToolName", async () => {
-      await expect(
-        session().callCodeModeTool("get_tool_schema", {
-          tools: [{ jsServerName: "fixture" }],
-        }),
-      ).rejects.toThrow("get_tool_schema.tools[0].jsToolName must be a string");
     });
   });
 

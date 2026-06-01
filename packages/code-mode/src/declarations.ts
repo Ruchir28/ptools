@@ -1,7 +1,10 @@
 import { Effect } from "effect";
 import { compile, type Options } from "json-schema-to-typescript";
 import { CodeModeInvariantError } from "./errors.js";
-import type { CodeModeServerMetadata, CodeModeToolMetadata } from "./types.js";
+import type {
+  CodeModeServerMetadata,
+  CodeModeToolMetadata,
+} from "@ptools/code-mode-api";
 
 const COMPILE_OPTIONS = {
   bannerComment: "",

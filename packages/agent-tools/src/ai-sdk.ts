@@ -27,20 +27,8 @@ const SearchInputSchema = z.object({
 const ToolSchemaInputSchema = z.object({
   toolIds: z
     .array(z.string().trim().min(1))
-    .optional()
     .describe(
       "Preferred copy-safe tool IDs returned by search, such as github.create_issue.",
-    ),
-  tools: z
-    .array(
-      z.object({
-        jsServerName: z.string().trim().min(1),
-        jsToolName: z.string().trim().min(1),
-      }),
-    )
-    .optional()
-    .describe(
-      "Compatibility selector for tools selected from search when toolIds are not used.",
     ),
 });
 

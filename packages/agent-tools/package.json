@@ -39,6 +39,7 @@
     "test": "vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
+    "@ptools/code-mode-api": "workspace:*",
     "@ptools/code-mode": "workspace:*",
     "@ptools/config": "workspace:*",
     "@ptools/executor": "workspace:*",
