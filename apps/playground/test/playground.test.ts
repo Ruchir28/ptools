@@ -9,6 +9,7 @@ import {
   FileConfigSourceLive,
   NodeAuthCoordinatorLive,
   NodeCredentialsStoreLive,
+  NodeMcpConnectorLive,
   ProcessEnvSecretResolverLive,
 } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
@@ -54,6 +55,7 @@ describe("Code Mode playground", () => {
       Layer.provide(
         Layer.merge(
           makeMcpRegistryLive(config.mcpServers).pipe(
+            Layer.provide(NodeMcpConnectorLive),
             Layer.provide(makeNodeAuthCoordinatorLive()),
           ),
           makeLocalSandboxExecutorLive(config.executor),

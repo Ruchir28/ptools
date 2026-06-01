@@ -14,6 +14,7 @@ import {
   NodeAuthCoordinatorLive,
   NodeConfigSourceLive,
   NodeCredentialsStoreLive,
+  NodeMcpConnectorLive,
 } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
 import { Data, Effect, Either, Layer, Scope } from "effect";
@@ -58,6 +59,7 @@ export const runPlayground = (
       Layer.provide(
         Layer.merge(
           makeMcpRegistryLive(config.mcpServers).pipe(
+            Layer.provide(NodeMcpConnectorLive),
             Layer.provide(makeNodeAuthCoordinatorLive(env)),
           ),
           makeLocalSandboxExecutorLive(config.executor),

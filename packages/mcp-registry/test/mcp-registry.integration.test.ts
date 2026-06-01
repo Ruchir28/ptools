@@ -1,16 +1,14 @@
-import { fileURLToPath } from "node:url";
 import { AuthCoordinator, AuthError } from "@ptools/auth";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
+import { McpConnector } from "../src/connector.js";
+import { McpConnectionError } from "../src/errors.js";
 import { makeMcpRegistryLive } from "../src/McpRegistryLive.js";
 import { McpRegistry } from "../src/registry.js";
+import type { ConnectedMcpClient } from "../src/types.js";
 
-describe("McpRegistry stdio integration", () => {
-  it("discovers and calls tools from a real stdio MCP server", async () => {
-    const fixturePath = fileURLToPath(
-      new URL("./fixtures/stdio-mcp-server.ts", import.meta.url),
-    );
-
+describe("McpRegistry connector integration", () => {
+  it("discovers and calls tools from the injected MCP connector", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const registry = yield* McpRegistry;
@@ -18,7 +16,7 @@ describe("McpRegistry stdio integration", () => {
         const echoResult = yield* registry.callTool({
           jsServerName: "fixture",
           jsToolName: "echo",
-          arguments: { text: "hello from stdio" },
+          arguments: { text: "hello from connector" },
         });
         const addResult = yield* registry.callTool({
           jsServerName: "fixture",
@@ -32,10 +30,12 @@ describe("McpRegistry stdio integration", () => {
           makeMcpRegistryLive({
             fixture: {
               transport: "stdio",
-              command: process.execPath,
-              args: ["--import", "tsx", fixturePath],
+              command: "ignored-by-fake-connector",
             },
-          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
+          }).pipe(
+            Layer.provide(makeFakeMcpConnectorLive()),
+            Layer.provide(makeTestAuthCoordinatorLive()),
+          ),
         ),
       ),
     );
@@ -63,8 +63,8 @@ describe("McpRegistry stdio integration", () => {
 
     expect(result.echoResult).toEqual(
       expect.objectContaining({
-        content: [{ type: "text", text: "hello from stdio" }],
-        structuredContent: { text: "hello from stdio" },
+        content: [{ type: "text", text: "hello from connector" }],
+        structuredContent: { text: "hello from connector" },
       }),
     );
     expect(result.addResult).toEqual(
@@ -76,10 +76,6 @@ describe("McpRegistry stdio integration", () => {
   });
 
   it("starts with healthy tools when another upstream fails to connect", async () => {
-    const fixturePath = fileURLToPath(
-      new URL("./fixtures/stdio-mcp-server.ts", import.meta.url),
-    );
-
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const registry = yield* McpRegistry;
@@ -92,14 +88,16 @@ describe("McpRegistry stdio integration", () => {
           makeMcpRegistryLive({
             fixture: {
               transport: "stdio",
-              command: process.execPath,
-              args: ["--import", "tsx", fixturePath],
+              command: "ignored-by-fake-connector",
             },
             unavailable: {
               transport: "stdio",
-              command: "/path/that/does/not/exist",
+              command: "ignored-by-fake-connector",
             },
-          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
+          }).pipe(
+            Layer.provide(makeFakeMcpConnectorLive()),
+            Layer.provide(makeTestAuthCoordinatorLive()),
+          ),
         ),
       ),
     );
@@ -129,9 +127,12 @@ describe("McpRegistry stdio integration", () => {
           makeMcpRegistryLive({
             unavailable: {
               transport: "stdio",
-              command: "/path/that/does/not/exist",
+              command: "ignored-by-fake-connector",
             },
-          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
+          }).pipe(
+            Layer.provide(makeFakeMcpConnectorLive()),
+            Layer.provide(makeTestAuthCoordinatorLive()),
+          ),
         ),
       ),
     );
@@ -147,10 +148,6 @@ describe("McpRegistry stdio integration", () => {
   });
 
   it("warns for a broken optional output schema while keeping the tool callable", async () => {
-    const fixturePath = fileURLToPath(
-      new URL("./fixtures/broken-output-schema-mcp-server.ts", import.meta.url),
-    );
-
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const registry = yield* McpRegistry;
@@ -168,10 +165,12 @@ describe("McpRegistry stdio integration", () => {
           makeMcpRegistryLive({
             broken: {
               transport: "stdio",
-              command: process.execPath,
-              args: ["--import", "tsx", fixturePath],
+              command: "ignored-by-fake-connector",
             },
-          }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
+          }).pipe(
+            Layer.provide(makeFakeMcpConnectorLive()),
+            Layer.provide(makeTestAuthCoordinatorLive()),
+          ),
         ),
       ),
     );
@@ -204,6 +203,115 @@ describe("McpRegistry stdio integration", () => {
     );
   });
 });
+
+const makeFakeMcpConnectorLive = () =>
+  Layer.succeed(McpConnector, {
+    connect: ({ serverName, jsServerName }) => {
+      if (serverName === "unavailable") {
+        return Effect.fail(
+          new McpConnectionError({
+            serverName,
+            cause: new Error("Fixture failed to connect"),
+          }),
+        );
+      }
+
+      return Effect.succeed({
+        serverName,
+        jsServerName,
+        client: makeFakeClient(serverName),
+      } as unknown as ConnectedMcpClient);
+    },
+  });
+
+const makeFakeClient = (serverName: string) => {
+  const tools =
+    serverName === "broken"
+      ? [
+          {
+            name: "upload_design_md",
+            description: "Return a screen while advertising a broken schema",
+            inputSchema: textInputSchema,
+            outputSchema: {
+              type: "object",
+              properties: {
+                screen: { $ref: "#/$defs/ScreenInstance" },
+              },
+              required: ["screen"],
+            },
+          },
+        ]
+      : [
+          {
+            name: "echo",
+            title: "Echo",
+            description: "Echo text back to the caller",
+            inputSchema: textInputSchema,
+          },
+          {
+            name: "add",
+            title: "Add",
+            description: "Add two numbers",
+            inputSchema: {
+              type: "object",
+              properties: {
+                a: { type: "number" },
+                b: { type: "number" },
+              },
+              required: ["a", "b"],
+            },
+          },
+        ];
+
+  return {
+    listTools: async () => ({ tools }),
+    callTool: async (request: {
+      readonly name: string;
+      readonly arguments?: Record<string, unknown>;
+    }) => {
+      if (request.name === "echo") {
+        const text = request.arguments?.text;
+
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: { text },
+        };
+      }
+
+      if (request.name === "add") {
+        const a = Number(request.arguments?.a);
+        const b = Number(request.arguments?.b);
+        const sum = a + b;
+
+        return {
+          content: [{ type: "text", text: String(sum) }],
+          structuredContent: { sum },
+        };
+      }
+
+      const text = request.arguments?.text;
+
+      return {
+        content: [{ type: "text", text }],
+        structuredContent: {
+          screen: {
+            id: "screen-1",
+            text,
+          },
+        },
+      };
+    },
+    close: async () => undefined,
+  };
+};
+
+const textInputSchema = {
+  type: "object",
+  properties: {
+    text: { type: "string" },
+  },
+  required: ["text"],
+};
 
 const makeTestAuthCoordinatorLive = () =>
   Layer.succeed(AuthCoordinator, {

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 describe("mcp-registry auth import boundary", () => {
-  it("does not import Node auth internals", async () => {
+  it("does not import Node auth or transport internals", async () => {
     const sources = await Promise.all(
       (await sourceFiles(join(packageRoot, "src"))).map((path) =>
         readFile(path, "utf8"),
@@ -19,6 +19,12 @@ describe("mcp-registry auth import boundary", () => {
     expect(combined).not.toContain("@napi-rs/keyring");
     expect(combined).not.toContain("PtoolsAuthManager");
     expect(combined).not.toContain("@ptools/host-node");
+    expect(combined).not.toContain("@modelcontextprotocol/sdk/client/stdio.js");
+    expect(combined).not.toContain(
+      "@modelcontextprotocol/sdk/client/streamableHttp.js",
+    );
+    expect(combined).not.toContain("StdioClientTransport");
+    expect(combined).not.toContain("StreamableHTTPClientTransport");
   });
 });
 

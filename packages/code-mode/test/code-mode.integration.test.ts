@@ -1,7 +1,10 @@
-import { fileURLToPath } from "node:url";
 import { AuthCoordinator, AuthError } from "@ptools/auth";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
-import { makeMcpRegistryLive } from "@ptools/mcp-registry";
+import {
+  makeMcpRegistryLive,
+  McpConnector,
+  type ConnectedMcpClient,
+} from "@ptools/mcp-registry";
 import { Effect, Either, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/index.js";
@@ -9,13 +12,6 @@ import { CodeModeExecuteError } from "../src/errors.js";
 
 describe("CodeMode stdio MCP integration", () => {
   it("discovers and executes MCP-backed provider calls through the local executor", async () => {
-    const fixturePath = fileURLToPath(
-      new URL(
-        "../../mcp-registry/test/fixtures/stdio-mcp-server.ts",
-        import.meta.url,
-      ),
-    );
-
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
@@ -64,7 +60,7 @@ describe("CodeMode stdio MCP integration", () => {
           caughtProviderError,
           uncaughtProviderError,
         };
-      }).pipe(Effect.provide(makeIntegrationLive(fixturePath))),
+      }).pipe(Effect.provide(makeIntegrationLive())),
     );
 
     expect(
@@ -94,21 +90,93 @@ describe("CodeMode stdio MCP integration", () => {
   });
 });
 
-const makeIntegrationLive = (fixturePath: string) =>
+const makeIntegrationLive = () =>
   makeCodeModeLive().pipe(
     Layer.provide(
       Layer.merge(
         makeMcpRegistryLive({
           fixture: {
             transport: "stdio",
-            command: process.execPath,
-            args: ["--import", "tsx", fixturePath],
+            command: "ignored-by-fake-connector",
           },
-        }).pipe(Layer.provide(makeTestAuthCoordinatorLive())),
+        }).pipe(
+          Layer.provide(makeFakeMcpConnectorLive()),
+          Layer.provide(makeTestAuthCoordinatorLive()),
+        ),
         makeLocalSandboxExecutorLive(),
       ),
     ),
   );
+
+const makeFakeMcpConnectorLive = () =>
+  Layer.succeed(McpConnector, {
+    connect: ({ serverName, jsServerName }) =>
+      Effect.succeed({
+        serverName,
+        jsServerName,
+        client: {
+          listTools: async () => ({
+            tools: [
+              {
+                name: "echo",
+                title: "Echo",
+                description: "Echo text back to the caller",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    text: { type: "string" },
+                  },
+                  required: ["text"],
+                },
+              },
+              {
+                name: "add",
+                title: "Add",
+                description: "Add two numbers",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    a: { type: "number" },
+                    b: { type: "number" },
+                  },
+                  required: ["a", "b"],
+                },
+              },
+            ],
+          }),
+          callTool: async (request: {
+            readonly name: string;
+            readonly arguments?: Record<string, unknown>;
+          }) => {
+            if (request.name === "echo") {
+              return {
+                content: [
+                  { type: "text", text: String(request.arguments?.text) },
+                ],
+                structuredContent: { text: request.arguments?.text },
+              };
+            }
+
+            if (
+              typeof request.arguments?.a !== "number" ||
+              typeof request.arguments?.b !== "number"
+            ) {
+              throw new Error("Invalid add arguments");
+            }
+
+            const a = request.arguments.a;
+            const b = request.arguments.b;
+            const sum = a + b;
+
+            return {
+              content: [{ type: "text", text: String(sum) }],
+              structuredContent: { sum },
+            };
+          },
+          close: async () => undefined,
+        },
+      } as unknown as ConnectedMcpClient),
+  });
 
 const makeTestAuthCoordinatorLive = () =>
   Layer.succeed(AuthCoordinator, {

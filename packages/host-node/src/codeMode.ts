@@ -38,6 +38,7 @@ import {
   ProcessEnvSecretResolverLive,
 } from "./config.js";
 import { NodeAuthCoordinatorLive, NodeCredentialsStoreLive } from "./auth.js";
+import { NodeMcpConnectorLive } from "./mcpConnector.js";
 
 const DEFAULT_HOST_ID = "node-local";
 const DEFAULT_AUTH_SERVICE_NAME = "ptools-mcp-oauth";
@@ -147,6 +148,7 @@ const NodeCodeModeLiveFromResolvedConfig = (options: {
     Layer.provide(
       Layer.merge(
         makeMcpRegistryLive(options.config.mcpServers).pipe(
+          Layer.provide(NodeMcpConnectorLive),
           Layer.provide(makeNodeAuthCoordinatorLive(options)),
         ),
         makeLocalSandboxExecutorLive(options.config.executor),

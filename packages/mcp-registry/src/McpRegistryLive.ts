@@ -1,6 +1,7 @@
 import { AuthCoordinator } from "@ptools/auth";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Scope } from "effect";
 import { closeClients, connectConfiguredMcpClients } from "./connect.js";
+import { McpConnector } from "./connector.js";
 import { discoverAllToolsDegraded } from "./discovery.js";
 import { dispatchToolCall } from "./dispatch.js";
 import type { NameCollisionError } from "./errors.js";
@@ -21,22 +22,29 @@ interface McpRegistryState {
 
 export const makeMcpRegistryLive = (
   upstreams: UpstreamMcpServers,
-): Layer.Layer<McpRegistry, NameCollisionError, AuthCoordinator> =>
+): Layer.Layer<
+  McpRegistry,
+  NameCollisionError,
+  AuthCoordinator | McpConnector
+> =>
   Layer.scoped(
     McpRegistry,
     Effect.gen(function* () {
       const authCoordinator = yield* AuthCoordinator;
+      const connector = yield* McpConnector;
+      const layerScope = yield* Effect.scope;
       let state: McpRegistryState = {
         clients: [],
         tools: [],
         diagnostics: [],
       };
+      const connectUpstreams = (selected: UpstreamMcpServers) =>
+        connectConfiguredMcpClients(selected, authCoordinator, connector).pipe(
+          Scope.extend(layerScope),
+        );
       const refreshState = Effect.gen(function* () {
         const previousClients = state.clients;
-        const connected = yield* connectConfiguredMcpClients(
-          upstreams,
-          authCoordinator,
-        );
+        const connected = yield* connectUpstreams(upstreams);
 
         const discovered = yield* discoverAllToolsDegraded(connected.clients);
 
@@ -69,10 +77,7 @@ export const makeMcpRegistryLive = (
           const previousServerClients = state.clients.filter(
             (client) => client.serverName === serverName,
           );
-          const connected = yield* connectConfiguredMcpClients(
-            { [serverName]: upstream },
-            authCoordinator,
-          );
+          const connected = yield* connectUpstreams({ [serverName]: upstream });
           const discovered = yield* discoverAllToolsDegraded(connected.clients);
           const otherClients = state.clients.filter(
             (client) => client.serverName !== serverName,

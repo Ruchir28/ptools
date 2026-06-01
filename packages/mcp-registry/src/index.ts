@@ -1,5 +1,6 @@
 export * from "./auth.js";
 export * from "./connect.js";
+export * from "./connector.js";
 export * from "./discovery.js";
 export * from "./dispatch.js";
 export * from "./errors.js";
