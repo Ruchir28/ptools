@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../code-mode-api" }],
+  "references": [{ "path": "../code-mode-api" }, { "path": "../config" }],
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",

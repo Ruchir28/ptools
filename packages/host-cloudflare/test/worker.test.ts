@@ -1,4 +1,5 @@
 import type { CodeModeResponse } from "@ptools/code-mode-api";
+import { env } from "cloudflare:workers";
 import { exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -63,7 +64,9 @@ describe("Cloudflare Worker ingress", () => {
   it("rejects a wrong bearer token with the expected byte length", async () => {
     const response = await handleRequest("/hosts/demo/code-mode", {
       method: "POST",
-      headers: { Authorization: `Bearer ${"x".repeat(publicAccessToken.length)}` },
+      headers: {
+        Authorization: `Bearer ${"x".repeat(publicAccessToken.length)}`,
+      },
       body: validBody(),
     });
 
@@ -167,6 +170,281 @@ describe("Cloudflare Worker ingress", () => {
     });
   });
 
+  it("configures a named host with one unresolved config blob", async () => {
+    const hostId = uniqueHostId();
+    const rawConfigJson = configBody({
+      headers: { Authorization: "Bearer ${env:TEST_MCP_TOKEN}" },
+    });
+
+    const response = await handleRequest(`/hosts/${hostId}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: rawConfigJson,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      hostId,
+      serverCount: 1,
+    });
+
+    const stub = configTestStub(hostId);
+    const blob = await stub.readConfigBlobForTest();
+
+    expect(blob).toMatchObject({
+      rawJson: rawConfigJson,
+      serverCount: 1,
+    });
+    expect(blob?.rawJson).toContain("${env:TEST_MCP_TOKEN}");
+    expect(blob?.rawJson).not.toContain("resolved-test-token");
+  });
+
+  it("configures per-host secrets as separate Durable Object keys", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/secrets`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: secretsBody({
+        TEST_MCP_TOKEN: "resolved-test-token",
+        "path/like name": "another-secret",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      hostId,
+      secretCount: 2,
+    });
+
+    const secrets = await configTestStub(hostId).readSecretsForTest();
+
+    expect(secrets).toEqual({
+      TEST_MCP_TOKEN: "resolved-test-token",
+      "path/like name": "another-secret",
+    });
+  });
+
+  it("requires bearer auth for config bootstrap", async () => {
+    const response = await handleRequest(`/hosts/${uniqueHostId()}/config`, {
+      method: "PUT",
+      body: configBody(),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toBe("Bearer");
+  });
+
+  it("requires bearer auth for secret bootstrap", async () => {
+    const response = await handleRequest(`/hosts/${uniqueHostId()}/secrets`, {
+      method: "PUT",
+      body: secretsBody({ TEST_MCP_TOKEN: "resolved-test-token" }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toBe("Bearer");
+  });
+
+  it("rejects malformed config and secrets JSON", async () => {
+    const config = await handleRequest(`/hosts/${uniqueHostId()}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: "not json",
+    });
+    const secrets = await handleRequest(`/hosts/${uniqueHostId()}/secrets`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: "not json",
+    });
+
+    expect(config.status).toBe(400);
+    await expect(config.json()).resolves.toMatchObject({
+      error: { code: "invalid_config" },
+    });
+    expect(secrets.status).toBe(400);
+    await expect(secrets.json()).resolves.toMatchObject({
+      error: { code: "invalid_secrets" },
+    });
+  });
+
+  it("resolves stored config secrets only when ConfigSource loads", async () => {
+    const hostId = uniqueHostId();
+    const rawConfigJson = configBody({
+      headers: { Authorization: "Bearer ${env:TEST_MCP_TOKEN}" },
+    });
+
+    await configureSecrets(hostId, {
+      TEST_MCP_TOKEN: "resolved-test-token",
+    });
+
+    const response = await handleRequest(`/hosts/${hostId}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: rawConfigJson,
+    });
+
+    expect(response.status).toBe(200);
+
+    const resolved =
+      await configTestStub(hostId).loadResolvedConfigResultForTest();
+
+    expect(resolved).toEqual({
+      ok: true,
+      config: {
+        mcpServers: {
+          example: {
+            transport: "http",
+            url: "https://mcp.example",
+            headers: { Authorization: "Bearer resolved-test-token" },
+          },
+        },
+      },
+    });
+  });
+
+  it("uses rotated secrets on the next ConfigSource load without re-uploading config", async () => {
+    const hostId = uniqueHostId();
+
+    await configureSecrets(hostId, {
+      TEST_MCP_TOKEN: "first-token",
+    });
+    await configureHost(
+      hostId,
+      configBody({
+        headers: { Authorization: "Bearer ${env:TEST_MCP_TOKEN}" },
+      }),
+    );
+
+    await expect(
+      configTestStub(hostId).loadResolvedConfigResultForTest(),
+    ).resolves.toMatchObject({
+      ok: true,
+      config: {
+        mcpServers: {
+          example: {
+            headers: { Authorization: "Bearer first-token" },
+          },
+        },
+      },
+    });
+
+    await configureSecrets(hostId, {
+      TEST_MCP_TOKEN: "rotated-token",
+    });
+
+    await expect(
+      configTestStub(hostId).loadResolvedConfigResultForTest(),
+    ).resolves.toMatchObject({
+      ok: true,
+      config: {
+        mcpServers: {
+          example: {
+            headers: { Authorization: "Bearer rotated-token" },
+          },
+        },
+      },
+    });
+  });
+
+  it("fails ConfigSource.load when a stored secret is missing", async () => {
+    const hostId = uniqueHostId();
+
+    await configureHost(
+      hostId,
+      configBody({
+        headers: { Authorization: "Bearer ${env:MISSING_MCP_TOKEN}" },
+      }),
+    );
+
+    await expect(
+      configTestStub(hostId).loadResolvedConfigResultForTest(),
+    ).resolves.toMatchObject({
+      ok: false,
+      message:
+        "Missing environment variable MISSING_MCP_TOKEN for headers.Authorization on MCP server example",
+    });
+
+    const blob = await configTestStub(hostId).readConfigBlobForTest();
+    expect(blob?.rawJson).toContain("${env:MISSING_MCP_TOKEN}");
+  });
+
+  it("replaces the per-host secret key set on secret bootstrap", async () => {
+    const hostId = uniqueHostId();
+
+    await configureSecrets(hostId, {
+      OLD_TOKEN: "old-secret",
+      TEST_MCP_TOKEN: "first-secret",
+    });
+    await configureSecrets(hostId, {
+      TEST_MCP_TOKEN: "replacement-secret",
+    });
+
+    await expect(configTestStub(hostId).readSecretsForTest()).resolves.toEqual({
+      TEST_MCP_TOKEN: "replacement-secret",
+    });
+  });
+
+  it("rejects invalid secrets", async () => {
+    const response = await handleRequest(`/hosts/${uniqueHostId()}/secrets`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({ TEST_MCP_TOKEN: 123 }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "invalid_secrets" },
+    });
+  });
+
+  it("rejects invalid and unsupported Cloudflare host configs", async () => {
+    const invalid = await handleRequest(`/hosts/${uniqueHostId()}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({ mcpServers: [] }),
+    });
+    const stdio = await handleRequest(`/hosts/${uniqueHostId()}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        mcpServers: {
+          local: { command: "node" },
+        },
+      }),
+    });
+
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error: { code: "invalid_config" },
+    });
+    expect(stdio.status).toBe(400);
+    await expect(stdio.json()).resolves.toMatchObject({
+      error: { code: "unsupported_config" },
+    });
+  });
+
+  it("keeps host config isolated and overwrites the blob on replacement", async () => {
+    const firstHostId = uniqueHostId();
+    const secondHostId = uniqueHostId();
+
+    await configureHost(firstHostId, configBody());
+    await configureHost(
+      secondHostId,
+      configBody({ url: "https://second.example" }),
+    );
+    await configureHost(
+      firstHostId,
+      configBody({ url: "https://replacement.example" }),
+    );
+
+    const firstBlob = await configTestStub(firstHostId).readConfigBlobForTest();
+    const secondBlob =
+      await configTestStub(secondHostId).readConfigBlobForTest();
+
+    expect(firstBlob?.rawJson).toContain("https://replacement.example");
+    expect(firstBlob?.rawJson).not.toContain("https://mcp.example");
+    expect(secondBlob?.rawJson).toContain("https://second.example");
+  });
+
   it("returns 404 for unknown routes", async () => {
     const response = await handleRequest("/missing");
 
@@ -181,11 +459,21 @@ describe("Cloudflare Worker ingress", () => {
     const codeMode = await handleRequest("/hosts/demo/code-mode", {
       method: "GET",
     });
+    const config = await handleRequest("/hosts/demo/config", {
+      method: "POST",
+    });
+    const secrets = await handleRequest("/hosts/demo/secrets", {
+      method: "POST",
+    });
 
     expect(health.status).toBe(405);
     expect(health.headers.get("Allow")).toBe("GET");
     expect(codeMode.status).toBe(405);
     expect(codeMode.headers.get("Allow")).toBe("POST");
+    expect(config.status).toBe(405);
+    expect(config.headers.get("Allow")).toBe("PUT");
+    expect(secrets.status).toBe(405);
+    expect(secrets.headers.get("Allow")).toBe("PUT");
   });
 });
 
@@ -223,5 +511,49 @@ const authHeaders = (): HeadersInit => ({
 
 const validBody = (): string =>
   JSON.stringify({ operation: "search_providers" });
+
+const configBody = (
+  server: {
+    readonly url?: string;
+    readonly headers?: Record<string, string>;
+  } = {},
+): string =>
+  JSON.stringify({
+    mcpServers: {
+      example: {
+        url: server.url ?? "https://mcp.example",
+        ...(server.headers === undefined ? {} : { headers: server.headers }),
+      },
+    },
+  });
+
+const configureHost = async (hostId: string, body: string): Promise<void> => {
+  const response = await handleRequest(`/hosts/${hostId}/config`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body,
+  });
+
+  expect(response.status).toBe(200);
+};
+
+const secretsBody = (secrets: Record<string, string>): string =>
+  JSON.stringify(secrets);
+
+const configureSecrets = async (
+  hostId: string,
+  secrets: Record<string, string>,
+): Promise<void> => {
+  const response = await handleRequest(`/hosts/${hostId}/secrets`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: secretsBody(secrets),
+  });
+
+  expect(response.status).toBe(200);
+};
+
+const configTestStub = (hostId: string) =>
+  env.PTOOLS_CODE_MODE.getByName(hostId);
 
 const uniqueHostId = (): string => `test-${crypto.randomUUID()}`;

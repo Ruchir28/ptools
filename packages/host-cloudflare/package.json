@@ -43,6 +43,7 @@
   "dependencies": {
     "@cloudflare/workers-types": "4.20260607.1",
     "@ptools/code-mode-api": "workspace:*",
+    "@ptools/config": "workspace:*",
     "effect": "3.21.2",
     "hono": "^4.12.23"
   },

@@ -263,6 +263,9 @@ importers:
       '@ptools/code-mode-api':
         specifier: workspace:*
         version: link:../code-mode-api
+      '@ptools/config':
+        specifier: workspace:*
+        version: link:../config
       effect:
         specifier: 3.21.2
         version: 3.21.2

@@ -1,4 +1,5 @@
 import type { CodeModeInvalidRequestError } from "@ptools/code-mode-api";
+import type { ServerConfigError } from "@ptools/config";
 import * as Data from "effect/Data";
 
 export type HostCloudflareErrorCode =
@@ -7,6 +8,9 @@ export type HostCloudflareErrorCode =
   | "unauthorized"
   | "invalid_json"
   | "invalid_code_mode_request"
+  | "invalid_config"
+  | "invalid_secrets"
+  | "unsupported_config"
   | "code_mode_unavailable"
   | "misconfigured_worker";
 
@@ -61,6 +65,21 @@ export const invalidCodeModeRequest = (
     status: 400,
     message: "Invalid Code Mode request",
     cause,
+  });
+
+export const invalidConfig = (cause: ServerConfigError): HostCloudflareError =>
+  new HostCloudflareError({
+    code: "invalid_config",
+    status: 400,
+    message: "Invalid host config",
+    cause,
+  });
+
+export const unsupportedConfig = (message: string): HostCloudflareError =>
+  new HostCloudflareError({
+    code: "unsupported_config",
+    status: 400,
+    message,
   });
 
 export const codeModeUnavailable = (cause: unknown): HostCloudflareError =>
