@@ -49,6 +49,15 @@ later.
   - preserve original MCP tool names internally
   - expose sanitized JS names only at the generated-code boundary
 - This repo uses Effect-TS for host/runtime code. Use Effect for services, async orchestration, resource lifetimes, and typed errors.
+- Prefer Effect-native composition patterns for host/runtime code: model
+  capabilities with `Context.Tag`, provide implementations with `Layer`, and
+  read dependencies from the Effect environment instead of threading broad
+  parameter bags through multiple functions.
+- Name Effect services by the boundary they actually represent. Worker ingress
+  services should use Worker-specific names and must not be confused with
+  Durable Object runtime or Code Mode domain services.
+- If Effect is not viable for a host/runtime change, stop and confirm the
+  non-Effect implementation direction with the user before proceeding.
 - Executor provider handlers are Effect-returning host capabilities. Wrap promise/value work with `Effect.promise` or `Effect.succeed` instead of widening executor APIs to raw promises.
 - Keep generated/sandboxed code plain JavaScript. Do not require generated code to know Effect.
 - Prefer fail-fast behavior for schema, name mapping, and dispatch invariants.
@@ -78,6 +87,11 @@ When adding Code Mode or executor behavior, add tests that prove the actual vert
 - Prefer local repo inspection before theorizing.
 - For MCP SDK usage, check installed SDK types/examples first.
 - If web research is needed, use configured search tools before built-in browsing.
+- For research-heavy comparisons or open-ended architecture questions, spawn
+  focused subagents for independent research tracks and read their summarized
+  findings instead of doing all research in the main thread. Keep the main
+  thread for synthesis, decisions, and implementation. Use smaller/cheaper
+  agents when the task only needs bounded documentation or codebase research.
 
 ## Style
 

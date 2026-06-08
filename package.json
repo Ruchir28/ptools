@@ -9,7 +9,7 @@
     "playground": "tsx apps/playground/src/playground.ts",
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty && pnpm --recursive --if-present typecheck",
-    "test": "vitest run --exclude \"**/dist/**\"",
+    "test": "vitest run --exclude \"**/dist/**\" --exclude \"packages/host-cloudflare/test/worker.test.ts\" && pnpm --filter @ptools/host-cloudflare test:worker",
     "check:publishable": "node scripts/check-publishable-packages.mjs && node scripts/check-packed-artifacts.mjs",
     "pack:dry-run": "node scripts/check-packed-artifacts.mjs",
     "smoke:packed-install": "node scripts/smoke-packed-install.mjs"
