@@ -13,7 +13,7 @@ import {
   ProcessEnvSecretResolverLive,
 } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { startPlaygroundServer } from "../src/playground.js";
 
@@ -58,7 +58,16 @@ describe("Code Mode playground", () => {
             Layer.provide(NodeMcpConnectorLive),
             Layer.provide(makeNodeAuthCoordinatorLive()),
           ),
-          makeLocalSandboxExecutorLive(config.executor),
+          makeLocalSandboxExecutorLive(
+            Option.match(config.executor, {
+              onNone: () => undefined,
+              onSome: (executor) =>
+                Option.match(executor.defaultTimeoutMs, {
+                  onNone: () => ({}),
+                  onSome: (defaultTimeoutMs) => ({ defaultTimeoutMs }),
+                }),
+            }),
+          ),
         ),
       ),
     );

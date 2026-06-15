@@ -3,12 +3,17 @@ import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { AuthCoordinator } from "@ptools/auth";
+import {
+  ResolvedHttpMcpAuthConfig,
+  ResolvedHttpMcpConfig,
+  ResolvedStdioMcpConfig,
+} from "@ptools/config";
 import { HttpMcpConnector, StdioMcpConnector } from "@ptools/mcp-registry";
 import {
   NodeHttpMcpConnectorLive,
   NodeStdioMcpConnectorLive,
 } from "../src/index.js";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 const fixturePath = fileURLToPath(
@@ -27,11 +32,12 @@ describe("Node MCP connector layers", () => {
           const connected = yield* connector.connect({
             serverName: "fixture",
             jsServerName: "fixture",
-            config: {
-              transport: "stdio",
+            config: ResolvedStdioMcpConfig.make({
               command: process.execPath,
-              args: ["--import", "tsx", fixturePath],
-            },
+              args: Option.some(["--import", "tsx", fixturePath]),
+              env: Option.none(),
+              cwd: Option.none(),
+            }),
           });
 
           return yield* Effect.promise(() => connected.client.listTools()).pipe(
@@ -61,11 +67,11 @@ describe("Node MCP connector layers", () => {
             .connect({
               serverName: "remote",
               jsServerName: "remote",
-              config: {
-                transport: "http",
+              config: ResolvedHttpMcpConfig.make({
                 url: "http://127.0.0.1:1/mcp",
-                auth: { type: "oauth" },
-              },
+                headers: Option.none(),
+                auth: Option.some(emptyAuthConfig()),
+              }),
             })
             .pipe(Effect.either);
         }).pipe(
@@ -93,13 +99,13 @@ describe("Node MCP connector layers", () => {
               .connect({
                 serverName: "remote",
                 jsServerName: "remote",
-                config: {
-                  transport: "http",
+                config: ResolvedHttpMcpConfig.make({
                   url,
-                  headers: {
+                  headers: Option.some({
                     authorization: "Bearer static-token",
-                  },
-                },
+                  }),
+                  auth: Option.none(),
+                }),
               })
               .pipe(Effect.either);
           }).pipe(
@@ -117,6 +123,17 @@ describe("Node MCP connector layers", () => {
     expect(captured.authorization).toBe("Bearer static-token");
   });
 });
+
+const emptyAuthConfig = (): ResolvedHttpMcpAuthConfig =>
+  ResolvedHttpMcpAuthConfig.make({
+    type: "oauth",
+    scope: Option.none(),
+    resourceMetadataUrl: Option.none(),
+    clientId: Option.none(),
+    clientSecret: Option.none(),
+    clientMetadataUrl: Option.none(),
+    redirectUri: Option.none(),
+  });
 
 const makeTestAuthCoordinatorLive = (calls: { providerFor: number }) =>
   Layer.succeed(AuthCoordinator, {

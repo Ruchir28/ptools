@@ -6,7 +6,7 @@ import {
   ServerConfigError,
   type ResolvedPtoolsConfig,
 } from "@ptools/config";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   FileConfigSourceLive,
@@ -36,9 +36,13 @@ describe("node config loading", () => {
       ),
     );
 
-    expect(resolved.mcpServers.fixture).toMatchObject({
-      cwd: join(dir, "servers"),
-    });
+    const fixture = resolved.mcpServers.fixture;
+
+    if (fixture?.transport !== "stdio") {
+      throw new Error("Expected fixture to resolve as stdio");
+    }
+
+    expect(fixture.cwd).toEqual(Option.some(join(dir, "servers")));
   });
 
   it("resolves config path from argv, env, or default project files through NodeConfigSourceLive", async () => {
@@ -106,9 +110,7 @@ describe("node config loading", () => {
       mcpServers: { preferred: { command: "node" } },
     });
 
-    const legacyDir = await mkdtemp(
-      join(tmpdir(), "ptools-host-node-legacy-"),
-    );
+    const legacyDir = await mkdtemp(join(tmpdir(), "ptools-host-node-legacy-"));
     await writeConfig(join(legacyDir, "ptools.config.json"), {
       mcpServers: { legacy: { command: "node" } },
     });

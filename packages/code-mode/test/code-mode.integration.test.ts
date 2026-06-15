@@ -1,11 +1,12 @@
 import { AuthCoordinator, AuthError } from "@ptools/auth";
 import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { ResolvedStdioMcpConfig } from "@ptools/config";
 import {
   makeMcpRegistryLive,
   McpConnector,
   type ConnectedMcpClient,
 } from "@ptools/mcp-registry";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/index.js";
 import { CodeModeExecuteError } from "../src/errors.js";
@@ -95,10 +96,12 @@ const makeIntegrationLive = () =>
     Layer.provide(
       Layer.merge(
         makeMcpRegistryLive({
-          fixture: {
-            transport: "stdio",
+          fixture: ResolvedStdioMcpConfig.make({
             command: "ignored-by-fake-connector",
-          },
+            args: Option.none(),
+            env: Option.none(),
+            cwd: Option.none(),
+          }),
         }).pipe(
           Layer.provide(makeFakeMcpConnectorLive()),
           Layer.provide(makeTestAuthCoordinatorLive()),

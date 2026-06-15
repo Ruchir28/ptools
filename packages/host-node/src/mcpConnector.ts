@@ -14,7 +14,7 @@ import {
   type ConnectMcpInput,
   type UpstreamMcpConfig,
 } from "@ptools/mcp-registry";
-import { Context, Effect, Layer, Scope } from "effect";
+import { Context, Effect, Layer, Option, Scope } from "effect";
 
 type AuthCoordinatorService = Context.Tag.Service<typeof AuthCoordinator>;
 
@@ -137,17 +137,15 @@ const createStdioTransport = (
     command: config.command,
   };
 
-  if (config.args !== undefined) {
-    params.args = [...config.args];
-  }
-
-  if (config.env !== undefined) {
-    params.env = config.env;
-  }
-
-  if (config.cwd !== undefined) {
-    params.cwd = config.cwd;
-  }
+  Option.map(config.args, (args) => {
+    params.args = [...args];
+  });
+  Option.map(config.env, (env) => {
+    params.env = { ...env };
+  });
+  Option.map(config.cwd, (cwd) => {
+    params.cwd = cwd;
+  });
 
   return new StdioClientTransport(params);
 };
@@ -170,13 +168,14 @@ const createHttpTransport = (
       typeof StreamableHTTPClientTransport
     >[1] = {
       ...(authProvider === undefined ? {} : { authProvider }),
-      ...(config.headers === undefined
-        ? {}
-        : {
-            requestInit: {
-              headers: config.headers,
-            },
-          }),
+      ...Option.match(config.headers, {
+        onNone: () => ({}),
+        onSome: (headers) => ({
+          requestInit: {
+            headers,
+          },
+        }),
+      }),
     };
 
     return yield* Effect.try({
@@ -196,7 +195,7 @@ const shouldUseAuthProvider = (
   authCoordinator: AuthCoordinatorService,
 ): Effect.Effect<boolean, never> =>
   Effect.gen(function* () {
-    if (config.auth !== undefined) {
+    if (Option.isSome(config.auth)) {
       return true;
     }
 

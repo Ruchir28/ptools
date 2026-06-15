@@ -41,5 +41,8 @@
     "@ptools/mcp-registry": "workspace:*",
     "effect": "3.21.2",
     "json-schema-to-typescript": "15.0.4"
+  },
+  "devDependencies": {
+    "@ptools/config": "workspace:*"
   }
 }

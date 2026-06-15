@@ -1,4 +1,4 @@
-import { AuthCoordinator } from "@ptools/auth";
+import { AuthCoordinator, type AuthError } from "@ptools/auth";
 import { Effect, Layer, Scope } from "effect";
 import { closeClients, connectConfiguredMcpClients } from "./connect.js";
 import { McpConnector } from "./connector.js";
@@ -24,7 +24,7 @@ export const makeMcpRegistryLive = (
   upstreams: UpstreamMcpServers,
 ): Layer.Layer<
   McpRegistry,
-  NameCollisionError,
+  AuthError | NameCollisionError,
   AuthCoordinator | McpConnector
 > =>
   Layer.scoped(

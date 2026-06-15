@@ -32,13 +32,18 @@ The preferred local layout is:
 
 ```txt
 ptools-project/
-  ptools/   # this git repo
-  planner/  # private planning notes for agents, outside git
+  ptools/      # this git repo
+  planner/     # private planning notes for agents, outside git
+  references/  # local reference checkouts for agents, outside git
 ```
 
 When a task references planner tickets or specs, check `../planner` first. The
 planner folder is intentionally private so the repo can become public-safe
 later.
+
+For Effect source reference, follow the workspace-level instructions in
+`../AGENTS.md`; the local checkout lives at `../references/effect/` when
+present.
 
 ## Implementation Rules
 
@@ -53,6 +58,23 @@ later.
   capabilities with `Context.Tag`, provide implementations with `Layer`, and
   read dependencies from the Effect environment instead of threading broad
   parameter bags through multiple functions.
+- Prefer functional domain modeling throughout Effect-based code, not only at
+  service/layer boundaries:
+  - keep domain values immutable and publish complete replacement values rather
+    than mutating or partially patching records
+  - use `Data.TaggedEnum` for genuine closed state/result variants and use its
+    exhaustive `$match` API when projecting or interpreting those variants
+  - use `Option` for meaningful internal absence instead of repeatedly passing
+    `undefined`; unwrap it explicitly when crossing public JSON, HTTP, RPC, or
+    other serialization boundaries
+  - keep state-specific data and behavior with the state that owns it instead
+    of reconstructing invariants through status checks, conditional spreads,
+    and manual field deletion
+  - use `SynchronizedRef`/`Ref` to atomically publish newly calculated immutable
+    state, not as a container for imperative in-place mutation
+- Before introducing custom patch protocols, mutable state machines, manual
+  tagged-union switches, or broad uses of `undefined`, inspect
+  `../references/effect/` and follow the closest Effect v3 pattern.
 - Name Effect services by the boundary they actually represent. Worker ingress
   services should use Worker-specific names and must not be confused with
   Durable Object runtime or Code Mode domain services.

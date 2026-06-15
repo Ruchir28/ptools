@@ -18,8 +18,12 @@ import {
 } from "@ptools/code-mode-api";
 import {
   ConfigSource,
+  ResolvedExecutorConfig,
+  ResolvedHttpMcpAuthConfig,
+  ResolvedHttpMcpConfig,
+  ResolvedPtoolsConfig,
+  ResolvedStdioMcpConfig,
   ServerConfigError,
-  type ResolvedPtoolsConfig,
 } from "@ptools/config";
 import {
   makeLocalSandboxExecutorLive,
@@ -31,7 +35,7 @@ import {
   type NameCollisionError,
   type UpstreamMcpServers,
 } from "@ptools/mcp-registry";
-import { Context, Data, Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Data, Effect, Layer, ManagedRuntime, Option } from "effect";
 import {
   FileConfigSourceLive,
   NodeConfigSourceLive,
@@ -57,12 +61,35 @@ export interface NodeAuthOptions {
 
 export interface CreateNodeCodeModeOptions {
   readonly hostId?: string;
-  readonly mcpServers: UpstreamMcpServers;
+  readonly mcpServers: Readonly<Record<string, NodeUpstreamMcpConfig>>;
   readonly cwd?: string;
   readonly env?: Record<string, string | undefined>;
   readonly auth?: NodeAuthOptions;
   readonly executor?: LocalSandboxExecutorOptions;
 }
+
+export type NodeUpstreamMcpConfig =
+  | {
+      readonly transport: "stdio";
+      readonly command: string;
+      readonly args?: ReadonlyArray<string>;
+      readonly env?: Readonly<Record<string, string>>;
+      readonly cwd?: string;
+    }
+  | {
+      readonly transport: "http";
+      readonly url: string;
+      readonly headers?: Readonly<Record<string, string>>;
+      readonly auth?: {
+        readonly type: "oauth";
+        readonly scope?: string;
+        readonly resourceMetadataUrl?: string;
+        readonly clientId?: string;
+        readonly clientSecret?: string;
+        readonly clientMetadataUrl?: string;
+        readonly redirectUri?: string;
+      };
+    };
 
 export interface CreateNodeCodeModeFromConfigFileOptions {
   readonly argv?: ReadonlyArray<string>;
@@ -81,17 +108,60 @@ export const NodeCodeModeServerLive = (
     Layer.provide(
       NodeCodeModeLiveFromResolvedConfig({
         hostId: options.hostId ?? DEFAULT_HOST_ID,
-        config: {
-          mcpServers: options.mcpServers,
-          ...(options.executor === undefined
-            ? {}
-            : { executor: options.executor }),
-        },
+        config: ResolvedPtoolsConfig.make({
+          mcpServers: resolvePublicMcpServers(options.mcpServers),
+          executor: Option.fromNullable(options.executor).pipe(
+            Option.map((executor) =>
+              ResolvedExecutorConfig.make({
+                defaultTimeoutMs: Option.fromNullable(
+                  executor.defaultTimeoutMs,
+                ),
+              }),
+            ),
+          ),
+        }),
         env: options.env ?? process.env,
         cwd: options.cwd ?? process.cwd(),
         ...(options.auth === undefined ? {} : { auth: options.auth }),
       }),
     ),
+  );
+
+const resolvePublicMcpServers = (
+  servers: Readonly<Record<string, NodeUpstreamMcpConfig>>,
+): UpstreamMcpServers =>
+  Object.fromEntries(
+    Object.entries(servers).map(([name, config]) => [
+      name,
+      config.transport === "stdio"
+        ? ResolvedStdioMcpConfig.make({
+            command: config.command,
+            args: Option.fromNullable(config.args),
+            env: Option.fromNullable(config.env),
+            cwd: Option.fromNullable(config.cwd),
+          })
+        : ResolvedHttpMcpConfig.make({
+            url: config.url,
+            headers: Option.fromNullable(config.headers),
+            auth: Option.fromNullable(config.auth).pipe(
+              Option.map((auth) =>
+                ResolvedHttpMcpAuthConfig.make({
+                  type: "oauth",
+                  scope: Option.fromNullable(auth.scope),
+                  resourceMetadataUrl: Option.fromNullable(
+                    auth.resourceMetadataUrl,
+                  ),
+                  clientId: Option.fromNullable(auth.clientId),
+                  clientSecret: Option.fromNullable(auth.clientSecret),
+                  clientMetadataUrl: Option.fromNullable(
+                    auth.clientMetadataUrl,
+                  ),
+                  redirectUri: Option.fromNullable(auth.redirectUri),
+                }),
+              ),
+            ),
+          }),
+    ]),
   );
 
 export const NodeCodeModeServerFromConfigFileLive = (
@@ -151,7 +221,17 @@ const NodeCodeModeLiveFromResolvedConfig = (options: {
           Layer.provide(NodeMcpConnectorLive),
           Layer.provide(makeNodeAuthCoordinatorLive(options)),
         ),
-        makeLocalSandboxExecutorLive(options.config.executor),
+        makeLocalSandboxExecutorLive(
+          Option.match(options.config.executor, {
+            onNone: () => undefined,
+            onSome: (executor) => ({
+              ...Option.match(executor.defaultTimeoutMs, {
+                onNone: () => ({}),
+                onSome: (defaultTimeoutMs) => ({ defaultTimeoutMs }),
+              }),
+            }),
+          }),
+        ),
       ),
     ),
     Layer.mapError((cause) =>

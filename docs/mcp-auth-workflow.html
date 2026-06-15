@@ -1,0 +1,1594 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ptools MCP auth workflow</title>
+  <style>
+    :root {
+      --bg: #08101f;
+      --panel: #111a31;
+      --panel-2: #17213d;
+      --text: #e7ecf8;
+      --muted: #a9b4d0;
+      --accent: #79a9ff;
+      --accent-2: #8dffb0;
+      --warn: #f4ce62;
+      --bad: #ff7b72;
+      --border: #293453;
+      --lane: rgba(255,255,255,0.035);
+      --edge: rgba(121, 169, 255, 0.22);
+      --edge-focus: rgba(121, 169, 255, 0.75);
+      --edge-desc: rgba(141, 255, 176, 0.75);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #06101d 0%, #08101f 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    main { max-width: 1380px; margin: 0 auto; padding: 28px 18px 64px; }
+    #graph.card {
+      max-width: none;
+      width: calc(100vw - 36px);
+      margin-left: calc(50% - 50vw + 18px);
+    }
+    h1, h2, h3, h4 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 34px; }
+    h2 { font-size: 24px; margin-top: 28px; }
+    h3 { font-size: 18px; }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+    .small { font-size: 13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    a { color: #c5d7ff; }
+
+    .card {
+      background: rgba(17, 26, 49, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 12px 42px rgba(0, 0, 0, 0.2);
+      margin-top: 16px;
+    }
+    .grid { display: grid; gap: 16px; }
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @media (max-width: 980px) {
+      .two, .three { grid-template-columns: 1fr; }
+    }
+
+    .toc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .toc a {
+      text-decoration: none;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(17, 26, 49, 0.72);
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(121, 169, 255, 0.08);
+      padding: 14px 16px;
+      border-radius: 0 12px 12px 0;
+      margin-top: 14px;
+    }
+    .callout.warn { border-left-color: var(--warn); background: rgba(244, 206, 98, 0.08); }
+    .callout.bad { border-left-color: var(--bad); background: rgba(255, 123, 114, 0.08); }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(121, 169, 255, 0.28);
+      background: rgba(121, 169, 255, 0.12);
+      color: #dce7ff;
+      font-size: 12px;
+      margin-right: 6px;
+      margin-bottom: 6px;
+      white-space: nowrap;
+    }
+    .pill.green {
+      border-color: rgba(141, 255, 176, 0.28);
+      background: rgba(141, 255, 176, 0.12);
+      color: #defbe5;
+    }
+    .pill.muted {
+      border-color: rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+    }
+    .pill.contract {
+      border-color: rgba(121, 169, 255, 0.45);
+      background: rgba(121, 169, 255, 0.18);
+      color: #edf4ff;
+    }
+    .pill.impl {
+      border-color: rgba(141, 255, 176, 0.45);
+      background: rgba(141, 255, 176, 0.14);
+      color: #defbe5;
+    }
+    .pill.core-layer {
+      border-color: rgba(196, 181, 253, 0.45);
+      background: rgba(196, 181, 253, 0.14);
+      color: #efe9ff;
+    }
+    .pill.host-only {
+      border-color: rgba(244, 206, 98, 0.45);
+      background: rgba(244, 206, 98, 0.12);
+      color: #fff3c4;
+    }
+
+    .boundary-box {
+      background: rgba(17, 26, 49, 0.86);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .dag-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 14px;
+    }
+    .dag-tab {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(17, 26, 49, 0.75);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .dag-tab.active {
+      border-color: rgba(121, 169, 255, 0.72);
+      background: rgba(121, 169, 255, 0.16);
+      color: #edf4ff;
+    }
+
+    .dag-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+      gap: 16px;
+      align-items: start;
+    }
+    .dag-layout.details-hidden {
+      grid-template-columns: 1fr;
+    }
+    .dag-layout.details-hidden .dag-detail {
+      display: none;
+    }
+    @media (max-width: 1180px) {
+      .dag-layout { grid-template-columns: 1fr; }
+    }
+    .dag-board,
+    .dag-detail {
+      background: rgba(17, 26, 49, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      min-width: 0;
+    }
+    .dag-board {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: min(78vh, 920px);
+    }
+    .dag-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .dag-toolbar-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .dag-tool {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: rgba(17, 26, 49, 0.75);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 7px 11px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+    }
+    .dag-tool:hover {
+      border-color: rgba(121, 169, 255, 0.55);
+      background: rgba(121, 169, 255, 0.10);
+    }
+    .dag-tool.active {
+      border-color: rgba(121, 169, 255, 0.72);
+      background: rgba(121, 169, 255, 0.16);
+    }
+    .dag-zoom-label {
+      min-width: 52px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .dag-viewport {
+      flex: 1 1 auto;
+      min-height: min(68vh, 780px);
+      max-height: 82vh;
+      overflow: auto;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      background:
+        radial-gradient(circle at 1px 1px, rgba(255,255,255,0.045) 1px, transparent 0) 0 0 / 20px 20px,
+        linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01));
+      position: relative;
+      overscroll-behavior: contain;
+    }
+    .dag-viewport-hint {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      margin: 0;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(17, 26, 49, 0.92);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      backdrop-filter: blur(8px);
+    }
+    .dag-canvas {
+      position: relative;
+      width: max-content;
+      min-width: 100%;
+      padding: 12px;
+    }
+    .dag-board:fullscreen {
+      padding: 20px;
+      background: var(--bg);
+      border-radius: 0;
+      min-height: 100vh;
+    }
+    .dag-board:fullscreen .dag-viewport {
+      max-height: none;
+      min-height: calc(100vh - 140px);
+    }
+    .dag-head {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .dag-title { font-size: 18px; font-weight: 700; }
+    .dag-subtitle { color: var(--muted); font-size: 13px; }
+    .dag-legend { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; margin-right: 6px; }
+    .dot.selected { background: var(--warn); }
+    .dot.ancestor { background: var(--accent); }
+    .dot.descendant { background: var(--accent-2); }
+    .dot.concept { background: #9099ac; }
+    .dot.contract { background: #79a9ff; }
+    .dot.impl { background: #8dffb0; }
+    .dot.core-layer { background: #c4b5fd; }
+    .dot.host-only { background: #f4ce62; }
+    .dot.provides { background: #8dffb0; box-shadow: 0 0 0 2px rgba(141, 255, 176, 0.25); }
+    .dot.depends { background: #79a9ff; }
+
+    .dag-stage {
+      position: relative;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      background: rgba(8, 16, 31, 0.35);
+      overflow: visible;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+    .dag-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .dag-lane {
+      position: absolute;
+      border: 1px dashed rgba(255,255,255,0.08);
+      background: var(--lane);
+      border-radius: 18px;
+    }
+    .dag-lane-label {
+      position: absolute;
+      top: -10px;
+      left: 12px;
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(17, 26, 49, 0.95);
+      padding: 0 6px;
+      border-radius: 999px;
+    }
+    .dag-node {
+      position: absolute;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(121, 169, 255, 0.22);
+      background: linear-gradient(180deg, rgba(121, 169, 255, 0.12), rgba(121, 169, 255, 0.08));
+      color: var(--text);
+      text-align: left;
+      font: inherit;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+    }
+    button.dag-node { cursor: pointer; }
+    button.dag-node:hover { transform: translateY(-1px); }
+    .dag-node .name {
+      font-weight: 700;
+      font-size: 14px;
+      line-height: 1.25;
+    }
+    .dag-node .meta {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.25;
+    }
+    .dag-node.concept,
+    .dag-node.platform {
+      border-style: dashed;
+      background: rgba(255,255,255,0.05);
+      color: #d4dcf0;
+    }
+    .dag-node.contract {
+      border-color: rgba(121, 169, 255, 0.55);
+      background: linear-gradient(180deg, rgba(121, 169, 255, 0.22), rgba(121, 169, 255, 0.12));
+    }
+    .dag-node.core-layer {
+      border-color: rgba(196, 181, 253, 0.55);
+      background: linear-gradient(180deg, rgba(196, 181, 253, 0.20), rgba(196, 181, 253, 0.10));
+    }
+    .dag-node.impl {
+      border-color: rgba(141, 255, 176, 0.55);
+      background: linear-gradient(180deg, rgba(141, 255, 176, 0.18), rgba(141, 255, 176, 0.10));
+    }
+    .dag-node.host-only {
+      border-color: rgba(244, 206, 98, 0.55);
+      background: linear-gradient(180deg, rgba(244, 206, 98, 0.18), rgba(244, 206, 98, 0.10));
+    }
+    .dag-node.consumer {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+    }
+    .dag-node .role {
+      font-size: 10px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #c8d4ef;
+    }
+    .dag-node.selected {
+      border-color: rgba(244, 206, 98, 0.88);
+      box-shadow: 0 0 0 2px rgba(244, 206, 98, 0.18);
+      background: linear-gradient(180deg, rgba(244, 206, 98, 0.18), rgba(244, 206, 98, 0.10));
+    }
+    .dag-node.ancestor {
+      border-color: rgba(121, 169, 255, 0.62);
+      background: linear-gradient(180deg, rgba(121, 169, 255, 0.18), rgba(121, 169, 255, 0.10));
+    }
+    .dag-node.descendant {
+      border-color: rgba(141, 255, 176, 0.62);
+      background: linear-gradient(180deg, rgba(141, 255, 176, 0.18), rgba(141, 255, 176, 0.10));
+    }
+
+    .dag-edge {
+      fill: none;
+      stroke: var(--edge);
+      stroke-width: 2;
+      marker-end: url(#dag-arrow);
+    }
+    .dag-edge.provides {
+      stroke: rgba(141, 255, 176, 0.55);
+      stroke-width: 2.4;
+      marker-end: url(#dag-arrow-provides);
+    }
+    .dag-edge.depends {
+      stroke: rgba(121, 169, 255, 0.35);
+      stroke-width: 2;
+      marker-end: url(#dag-arrow);
+    }
+    .dag-edge.focus { stroke: var(--edge-focus); stroke-width: 2.6; }
+    .dag-edge.desc { stroke: var(--edge-desc); stroke-width: 2.6; }
+    .dag-edge.provides.focus,
+    .dag-edge.provides.desc { stroke: rgba(141, 255, 176, 0.95); stroke-width: 2.8; }
+    .dag-edge-label {
+      font-size: 11px;
+      fill: var(--muted);
+    }
+
+    .dag-detail {
+      max-height: min(78vh, 920px);
+      overflow: auto;
+      position: sticky;
+      top: 12px;
+    }
+    .detail-title { font-size: 20px; margin-bottom: 4px; }
+    .detail-job { margin: 10px 0 14px; }
+    .detail-list { margin: 8px 0 0 18px; }
+    .detail-list li { margin: 6px 0; }
+    .detail-files { margin-top: 10px; }
+    .detail-files code { display: inline-block; margin-bottom: 6px; }
+    .detail-section { margin-top: 14px; }
+    .detail-section h4 { margin-bottom: 6px; }
+    .mapping-table td:first-child { white-space: nowrap; }
+    .mapping-table .impl-cell { color: #defbe5; }
+    .mapping-table .contract-cell { color: #dce7ff; }
+    .mapping-table tbody tr { cursor: pointer; }
+    .mapping-table tbody tr:hover { background: rgba(121, 169, 255, 0.08); }
+
+    .flow-card {
+      background: rgba(17, 26, 49, 0.86);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+    .flow-steps { margin: 0; padding-left: 18px; }
+    .flow-steps li { margin: 8px 0; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-size: 14px;
+    }
+    th { background: rgba(255,255,255,0.04); }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(17, 26, 49, 0.86);
+    }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <header class="card">
+    <h1>MCP auth workflow in ptools</h1>
+    <p class="muted">
+      This doc is about <strong>upstream MCP auth</strong> — OAuth / bearer tokens for
+      upstream MCP servers like GitHub, Notion, etc. It is <strong>not</strong> about a ptools user login system.
+    </p>
+    <div class="toc small">
+      <a href="#boundary">Boundary</a>
+      <a href="#graph">Interactive DAG</a>
+      <a href="#flows">Flows</a>
+      <a href="#routes">Routes</a>
+      <a href="#statuses">Statuses</a>
+      <a href="#review">Review checklist</a>
+    </div>
+    <div class="callout warn small">
+      <strong>Current state:</strong> Node auth is end-to-end. Cloudflare auth/config/ingress exists,
+      but <code>CodeModeObject.call()</code> is still stubbed and Cloudflare currently supports only HTTP upstreams.
+    </div>
+  </header>
+
+  <section id="boundary" class="card">
+    <h2>1) What lives where</h2>
+    <div class="grid three">
+      <div class="boundary-box">
+        <h3>Code Mode runtime</h3>
+        <div class="pill green">model-facing</div>
+        <div class="pill">auth_status</div>
+        <div class="pill">refresh</div>
+        <p class="small muted">
+          These are Code Mode operations. The model host calls <code>@ptools/mcp-server</code>,
+          which forwards to the host runtime.
+        </p>
+      </div>
+      <div class="boundary-box">
+        <h3>Host auth surface</h3>
+        <div class="pill green">browser / route-facing</div>
+        <div class="pill">start auth</div>
+        <div class="pill">setup</div>
+        <div class="pill">callback</div>
+        <p class="small muted">
+          These are the URLs that a user opens, or that the OAuth provider redirects back into.
+          They are host-specific, not model-facing tools.
+        </p>
+      </div>
+      <div class="boundary-box">
+        <h3>Shared auth core</h3>
+        <div class="pill contract">Context.Tag contracts</div>
+        <div class="pill core-layer">shared Layers</div>
+        <div class="pill impl">host implementations</div>
+        <p class="small muted">
+          <code>@ptools/auth</code> defines contracts (<code>CredentialsStore</code>,
+          <code>AuthCoordinatorCore</code>, …) and the shared state machine Layer.
+          Host packages provide <em>implementation Layers</em> that satisfy those contracts.
+        </p>
+      </div>
+    </div>
+    <div class="callout small">
+      <strong>Rule of thumb:</strong> <code>auth_status</code> and <code>refresh</code> belong to Code Mode runtime.
+      The user-facing auth URLs belong to the host auth layer.
+    </div>
+  </section>
+
+  <section id="graph" class="card">
+    <h2>2) Interactive dependency DAG</h2>
+    <p class="muted small">
+      This is a real dependency graph for code review. <strong>Blue edges = requires / consumes.</strong>
+      <strong>Green edges = provides / implements a shared <code>@ptools/auth</code> contract.</strong>
+      Click a node to inspect its role, what shared contract it implements, and key files.
+      Use <strong>Fit width</strong>, zoom, or <strong>Fullscreen</strong> for a larger canvas.
+    </p>
+    <div class="callout small">
+      <strong>Review rule:</strong> shared packages define the contracts (<code>Context.Tag</code> + shared
+      <code>Layer</code>). Host packages only add platform-specific <em>implementations</em> of those contracts.
+      When reviewing a host file, first identify which shared contract it provides — that is the core boundary.
+    </div>
+    <div class="dag-tabs" id="dag-tabs"></div>
+    <div class="dag-layout" id="dag-layout">
+      <div class="dag-board" id="dag-board">
+        <div class="dag-head">
+          <div>
+            <div class="dag-title" id="dag-title">Shared auth core</div>
+            <div class="dag-subtitle" id="dag-subtitle"></div>
+          </div>
+          <div class="dag-legend small">
+            <span><span class="dot contract"></span>shared contract</span>
+            <span><span class="dot core-layer"></span>shared layer</span>
+            <span><span class="dot impl"></span>host implementation</span>
+            <span><span class="dot host-only"></span>host-only service</span>
+            <span><span class="dot provides"></span>provides edge</span>
+            <span><span class="dot depends"></span>requires edge</span>
+          </div>
+        </div>
+        <div class="dag-toolbar">
+          <div class="dag-toolbar-group">
+            <button type="button" class="dag-tool" id="dag-fit-width" title="Scale graph to viewport width">Fit width</button>
+            <button type="button" class="dag-tool" id="dag-zoom-reset" title="Reset zoom to 100%">100%</button>
+            <button type="button" class="dag-tool" id="dag-zoom-out" title="Zoom out">−</button>
+            <span class="dag-zoom-label" id="dag-zoom-label">100%</span>
+            <button type="button" class="dag-tool" id="dag-zoom-in" title="Zoom in">+</button>
+          </div>
+          <div class="dag-toolbar-group">
+            <button type="button" class="dag-tool" id="dag-toggle-details">Hide details</button>
+            <button type="button" class="dag-tool" id="dag-fullscreen">Fullscreen</button>
+          </div>
+        </div>
+        <div class="dag-viewport" id="dag-viewport">
+          <p class="dag-viewport-hint">Scroll to pan. Use Fit width or Fullscreen for a larger view.</p>
+          <div class="dag-canvas" id="dag-canvas">
+            <div id="dag-stage" class="dag-stage" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+      <aside class="dag-detail">
+        <div class="detail-title" id="detail-title">AuthCoordinatorCore</div>
+        <div id="detail-pills"></div>
+        <p class="detail-job small" id="detail-job"></p>
+        <div class="detail-section" id="detail-contract-section">
+          <h4>Shared contract</h4>
+          <p class="small" id="detail-contract"></p>
+        </div>
+        <div class="detail-section" id="detail-implements-section">
+          <h4>Implements</h4>
+          <p class="small" id="detail-implements"></p>
+        </div>
+        <div class="detail-section" id="detail-implemented-by-section">
+          <h4>Implemented by (host layers)</h4>
+          <ul class="detail-list small" id="detail-implemented-by"></ul>
+        </div>
+        <div class="detail-section">
+          <h4>Requires</h4>
+          <ul class="detail-list small" id="detail-depends"></ul>
+        </div>
+        <div class="detail-section">
+          <h4>Used by</h4>
+          <ul class="detail-list small" id="detail-used-by"></ul>
+        </div>
+        <div class="detail-section">
+          <h4>Key files</h4>
+          <div class="detail-files small" id="detail-files"></div>
+        </div>
+      </aside>
+    </div>
+    <div class="table-wrap" style="margin-top:16px;">
+      <table class="mapping-table">
+        <thead>
+          <tr>
+            <th>Shared contract (<code>@ptools/auth</code>)</th>
+            <th>Node implementation</th>
+            <th>Cloudflare implementation</th>
+          </tr>
+        </thead>
+        <tbody id="contract-mapping-body"></tbody>
+      </table>
+      <p class="small muted" style="padding:10px 12px;margin:0;">
+        Click a row to jump to that contract or implementation in the DAG.
+      </p>
+    </div>
+  </section>
+
+  <section id="flows" class="card">
+    <h2>3) How the auth flows work</h2>
+    <div class="grid three">
+      <div class="flow-card">
+        <h3>Model host → auth_status / refresh</h3>
+        <ol class="flow-steps small">
+          <li>The model host calls <code>@ptools/mcp-server</code>.</li>
+          <li>The MCP adapter forwards <code>auth_status</code> or <code>refresh</code> to the Code Mode client/runtime.</li>
+          <li>Code Mode asks the registry for <code>authStatus</code> or <code>refresh</code>.</li>
+          <li>The registry reads the shared <code>AuthCoordinator</code>.</li>
+          <li><code>AuthCoordinatorCore</code> returns the auth center URL, server statuses, and any authorize/setup URLs.</li>
+        </ol>
+      </div>
+      <div class="flow-card">
+        <h3>Node browser auth</h3>
+        <ol class="flow-steps small">
+          <li><code>NodeAuthCoordinatorLive</code> starts a local auth center on localhost.</li>
+          <li><code>PtoolsAuthManager</code> serves <code>/auth</code>, <code>/auth/:server</code>, <code>/setup</code>, <code>/refresh</code>, and the callback route.</li>
+          <li><code>PtoolsOAuthProvider</code> stores OAuth material in the OS keyring.</li>
+          <li><code>NodeMcpConnectorLive</code> attaches OAuth only when the HTTP upstream actually needs it.</li>
+        </ol>
+      </div>
+      <div class="flow-card">
+        <h3>Cloudflare browser auth</h3>
+        <ol class="flow-steps small">
+          <li>The Worker verifies the public bearer token for auth/config routes.</li>
+          <li>Worker routes call typed Durable Object RPCs.</li>
+          <li><code>CloudflareOAuthFlow</code> signs state and stores pending state in DO storage.</li>
+          <li>The DO stores tokens, client info, discovery state, and PKCE verifier in DO storage.</li>
+        </ol>
+      </div>
+    </div>
+    <div class="callout bad small">
+      <strong>Cloudflare limitation:</strong> HTTP upstream MCP only for the first release. Stdio is intentionally rejected.
+    </div>
+  </section>
+
+  <section id="routes" class="card">
+    <h2>4) Route map</h2>
+    <div class="grid two">
+      <div>
+        <h3>Node auth center</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Route</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>GET /auth</code></td><td>Auth center overview.</td></tr>
+              <tr><td><code>GET /auth/:server</code></td><td>Starts OAuth and redirects to the provider.</td></tr>
+              <tr><td><code>GET /auth/:server/setup</code></td><td>Shows manual OAuth client setup snippets.</td></tr>
+              <tr><td><code>GET /refresh/:server</code></td><td>Re-runs the per-server refresh handler.</td></tr>
+              <tr><td><code>GET /oauth/callback/:server</code></td><td>Finishes OAuth with the returned code.</td></tr>
+              <tr><td><code>GET /status.json</code></td><td>Returns current auth status.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3>Cloudflare worker routes</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Route</th><th>Auth?</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>GET /health</code></td><td>no</td><td>Health check.</td></tr>
+              <tr><td><code>POST /hosts/:hostId/code-mode</code></td><td>yes</td><td>Code Mode RPC.</td></tr>
+              <tr><td><code>PUT /hosts/:hostId/config</code></td><td>yes</td><td>Stores raw host config.</td></tr>
+              <tr><td><code>PUT /hosts/:hostId/secrets</code></td><td>yes</td><td>Stores per-host secrets.</td></tr>
+              <tr><td><code>GET /hosts/:hostId/auth/status</code></td><td>yes</td><td>Returns auth status JSON.</td></tr>
+              <tr><td><code>GET /hosts/:hostId/auth/:serverName</code></td><td>yes</td><td>Starts OAuth.</td></tr>
+              <tr><td><code>GET /hosts/:hostId/auth/:serverName/setup</code></td><td>yes</td><td>Shows setup guidance.</td></tr>
+              <tr><td><code>GET|POST /hosts/:hostId/oauth/callback/:provider</code></td><td>no bearer</td><td>OAuth callback.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="statuses" class="card">
+    <h2>5) Statuses</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Status</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>connected</code></td><td>HTTP upstream is ready and usable.</td></tr>
+          <tr><td><code>static_credentials</code></td><td>HTTP upstream uses static headers, so no OAuth provider is needed.</td></tr>
+          <tr><td><code>requires_auth</code></td><td>User should open the auth center and authorize.</td></tr>
+          <tr><td><code>auth_in_progress</code></td><td>OAuth has started and is waiting for callback.</td></tr>
+          <tr><td><code>auth_failed</code></td><td>Unexpected auth/connect failure.</td></tr>
+          <tr><td><code>needs_config</code></td><td>Dynamic client registration is unsupported; manual setup is required.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="review" class="card">
+    <h2>6) Review checklist</h2>
+    <ol class="flow-steps small">
+      <li>Start with shared contracts in <code>packages/auth/src/index.ts</code> and <code>packages/auth/src/coordinatorCore.ts</code>. These define the core boundary every host must implement.</li>
+      <li>For any host change, name the shared contract it provides (<code>CredentialsStore</code>, <code>AuthCoordinatorPolicy</code>, etc.) before reading implementation details.</li>
+      <li>Check status / URL / provider-cache behavior in <code>AuthCoordinatorCoreLayer</code> first — host layers should not reimplement that state machine.</li>
+      <li>Then check the host adapter: <code>packages/host-node/src/auth.ts</code> or <code>packages/host-cloudflare/src/layers/auth/*</code>.</li>
+      <li>For auth-route changes, review <code>packages/host-node/src/auth.ts</code> and <code>packages/host-cloudflare/src/worker/routes/mcpAuth.ts</code>.</li>
+      <li>For upstream connection changes, review <code>packages/host-node/src/mcpConnector.ts</code>, <code>packages/host-cloudflare/src/layers/mcpConnector.ts</code>, and <code>packages/mcp-registry/src/connect.ts</code>.</li>
+      <li>For model-facing tools, review <code>packages/mcp-server/src/server.ts</code> and <code>packages/code-mode/src/CodeMode.ts</code>.</li>
+    </ol>
+    <div class="callout small">
+      <strong>One-line mental model:</strong> <code>@ptools/auth</code> owns contracts + the shared state machine;
+      hosts own platform Layers that <em>provide</em> those contracts; Code Mode only exposes status/refresh to the model host.
+    </div>
+  </section>
+
+  <p class="footer small">
+    Open this file in a browser to use the interactive DAG. Green edges mark host Layers that provide shared
+    <code>@ptools/auth</code> contracts.
+  </p>
+</main>
+
+<script>
+  (() => {
+    const roleLabels = {
+      contract: "Shared contract",
+      "core-layer": "Shared layer",
+      impl: "Host implementation",
+      "host-only": "Host-only service",
+      "host-service": "Host helper",
+      consumer: "Consumer",
+      platform: "Platform binding",
+    };
+
+    const contractMappings = [
+      {
+        contract: "CredentialsStore",
+        node: "NodeCredentialsStoreLive",
+        cloudflare: "DurableObjectCredentialsStoreLayer",
+      },
+      {
+        contract: "AuthCoordinatorPolicy",
+        node: "NodeAuthPolicyLayer",
+        cloudflare: "CloudflareAuthPolicyLayer",
+      },
+      {
+        contract: "AuthProviderFactory",
+        node: "NodeAuthProviderFactoryLayer",
+        cloudflare: "CloudflareAuthProviderFactoryLayer",
+      },
+      {
+        contract: "AuthCoordinatorCore",
+        node: "AuthCoordinatorCoreLayer (inside NodeAuthCoordinatorLive)",
+        cloudflare: "DurableObjectAuthCoreLayer",
+      },
+      {
+        contract: "AuthCoordinator",
+        node: "NodeAuthCoordinatorLive",
+        cloudflare: "AuthCoordinatorLayer",
+      },
+    ];
+
+    const meta = {
+      CredentialsStore: {
+        package: "@ptools/auth",
+        role: "contract",
+        tag: "Context.Tag @ptools/CredentialsStore",
+        job: "Shared credential persistence contract: get / set / delete OAuth material by key.",
+        dependsOn: [],
+        usedBy: ["AuthProviderFactory", "CloudflareAuthProviderFactoryLayer", "NodeAuthProviderFactoryLayer"],
+        implementedBy: ["DurableObjectCredentialsStoreLayer", "NodeCredentialsStoreLive"],
+        files: ["packages/auth/src/index.ts"],
+      },
+      AuthProviderFactory: {
+        package: "@ptools/auth",
+        role: "contract",
+        tag: "Context.Tag @ptools/AuthProviderFactory",
+        job: "Shared factory contract for MCP SDK OAuthClientProvider instances.",
+        dependsOn: ["CredentialsStore"],
+        usedBy: ["AuthCoordinatorCoreLayer", "DurableObjectAuthCoreLayer"],
+        implementedBy: ["CloudflareAuthProviderFactoryLayer", "NodeAuthProviderFactoryLayer"],
+        files: ["packages/auth/src/coordinatorCore.ts"],
+      },
+      AuthCoordinatorPolicy: {
+        package: "@ptools/auth",
+        role: "contract",
+        tag: "Context.Tag @ptools/AuthCoordinatorPolicy",
+        job: "Shared projection policy for auth URLs and user-facing messages. No mutable state.",
+        dependsOn: ["host identity / origin"],
+        usedBy: ["AuthCoordinatorCoreLayer", "DurableObjectAuthCoreLayer"],
+        implementedBy: ["CloudflareAuthPolicyLayer", "NodeAuthPolicyLayer"],
+        files: ["packages/auth/src/coordinatorCore.ts"],
+      },
+      AuthCoordinatorCoreLayer: {
+        package: "@ptools/auth",
+        role: "core-layer",
+        implements: "AuthCoordinatorCore",
+        job: "Shared Layer that builds the in-memory auth state machine from policy + provider factory.",
+        dependsOn: ["AuthCoordinatorPolicy", "AuthProviderFactory"],
+        usedBy: ["DurableObjectAuthCoreLayer", "NodeAuthCoordinatorLive"],
+        files: ["packages/auth/src/coordinatorCore.ts"],
+      },
+      AuthCoordinatorCore: {
+        package: "@ptools/auth",
+        role: "contract",
+        tag: "Context.Tag @ptools/AuthCoordinatorCore",
+        job: "Shared auth state machine: status projection, provider cache, noteConfigured/Connected/Error, markAuthorized.",
+        dependsOn: ["AuthCoordinatorPolicy", "AuthProviderFactory"],
+        usedBy: ["AuthCoordinatorLayer", "CloudflareOAuthFlowLayer", "PtoolsAuthManager"],
+        implementedBy: ["AuthCoordinatorCoreLayer", "DurableObjectAuthCoreLayer"],
+        files: ["packages/auth/src/coordinatorCore.ts"],
+      },
+      AuthCoordinator: {
+        package: "@ptools/auth",
+        role: "contract",
+        tag: "Context.Tag @ptools/AuthCoordinator",
+        job: "Shared facade for registry/connectors. Delegates to AuthCoordinatorCore with no separate state.",
+        dependsOn: ["AuthCoordinatorCore"],
+        usedBy: ["McpRegistry", "NodeMcpConnectorLive", "CloudflareHttpMcpConnectorLayer", "CodeModeObject"],
+        implementedBy: ["AuthCoordinatorLayer", "NodeAuthCoordinatorLive"],
+        files: ["packages/auth/src/index.ts", "packages/host-cloudflare/src/layers/auth/authCoordinatorLayer.ts"],
+      },
+      McpRegistry: {
+        package: "@ptools/mcp-registry",
+        role: "consumer",
+        job: "Connect upstream MCP servers, discover tools, refresh state, and dispatch calls.",
+        dependsOn: ["AuthCoordinator", "McpConnector"],
+        usedBy: ["CodeMode"],
+        files: ["packages/mcp-registry/src/McpRegistryLive.ts", "packages/mcp-registry/src/connect.ts"],
+      },
+      CodeMode: {
+        package: "@ptools/code-mode",
+        role: "consumer",
+        job: "Expose auth_status / refresh / search / execute to the model host.",
+        dependsOn: ["McpRegistry", "CodeExecutor"],
+        usedBy: ["@ptools/mcp-server"],
+        files: ["packages/code-mode/src/CodeMode.ts"],
+      },
+      NodeCredentialsStoreLive: {
+        package: "@ptools/host-node",
+        role: "impl",
+        implements: "CredentialsStore",
+        job: "Node Layer that stores OAuth material in the OS keyring.",
+        dependsOn: ["OS keyring backend"],
+        usedBy: ["NodeAuthCoordinatorLive", "NodeAuthProviderFactoryLayer"],
+        files: ["packages/host-node/src/auth.ts"],
+      },
+      NodeAuthPolicyLayer: {
+        package: "@ptools/host-node",
+        role: "impl",
+        implements: "AuthCoordinatorPolicy",
+        job: "Node Layer that builds localhost auth-center URLs and messages.",
+        dependsOn: ["origin"],
+        usedBy: ["NodeAuthCoordinatorLive"],
+        files: ["packages/host-node/src/auth.ts"],
+      },
+      NodeAuthProviderFactoryLayer: {
+        package: "@ptools/host-node",
+        role: "impl",
+        implements: "AuthProviderFactory",
+        job: "Node Layer that creates PtoolsOAuthProvider instances.",
+        dependsOn: ["CredentialsStore"],
+        usedBy: ["NodeAuthCoordinatorLive"],
+        files: ["packages/host-node/src/auth.ts"],
+      },
+      PtoolsAuthManager: {
+        package: "@ptools/host-node",
+        role: "host-service",
+        job: "Local HTTP auth center: serve /auth pages, callbacks, and refresh routes.",
+        dependsOn: ["AuthCoordinatorCore"],
+        usedBy: ["NodeAuthCoordinatorLive"],
+        files: ["packages/host-node/src/auth.ts"],
+      },
+      NodeAuthCoordinatorLive: {
+        package: "@ptools/host-node",
+        role: "impl",
+        implements: "AuthCoordinator",
+        job: "Node assembly root: composes shared core + Node policy/factory/credentials and starts the auth center.",
+        dependsOn: ["CredentialsStore", "AuthCoordinatorPolicy", "AuthProviderFactory", "PtoolsAuthManager"],
+        usedBy: ["NodeMcpConnectorLive"],
+        files: ["packages/host-node/src/auth.ts"],
+      },
+      NodeMcpConnectorLive: {
+        package: "@ptools/host-node",
+        role: "consumer",
+        job: "Connect stdio and HTTP upstream MCP servers; attach OAuth providers when needed.",
+        dependsOn: ["AuthCoordinator"],
+        usedBy: ["McpRegistry"],
+        files: ["packages/host-node/src/mcpConnector.ts"],
+      },
+      CodeModeObjectPlatformLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "platform",
+        job: "Provide Durable Object storage and host identity to the runtime layer graph.",
+        dependsOn: ["Durable Object runtime"],
+        usedBy: ["CodeModeObjectStorage", "CodeModeObjectIdentity"],
+        files: ["packages/host-cloudflare/src/layers/platform.ts"],
+      },
+      CodeModeObjectStorage: {
+        package: "@ptools/host-cloudflare",
+        role: "platform",
+        job: "Durable Object storage handle for one host runtime.",
+        dependsOn: ["CodeModeObjectPlatformLayer"],
+        usedBy: ["DurableObjectCredentialsStoreLayer", "CloudflareAuthProviderFactoryLayer"],
+        files: ["packages/host-cloudflare/src/layers/platform.ts"],
+      },
+      CodeModeObjectIdentity: {
+        package: "@ptools/host-cloudflare",
+        role: "platform",
+        job: "Host ID + public origin for one Durable Object host runtime.",
+        dependsOn: ["CodeModeObjectPlatformLayer"],
+        usedBy: ["CloudflareAuthPolicyLayer", "CloudflareAuthProviderFactoryLayer"],
+        files: ["packages/host-cloudflare/src/layers/platform.ts"],
+      },
+      DurableObjectCredentialsStoreLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "impl",
+        implements: "CredentialsStore",
+        job: "Cloudflare Layer that stores OAuth material in Durable Object storage.",
+        dependsOn: ["CodeModeObjectStorage"],
+        usedBy: ["DurableObjectAuthLayer"],
+        files: ["packages/host-cloudflare/src/layers/auth/credentials.ts"],
+      },
+      CloudflareAuthPolicyLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "impl",
+        implements: "AuthCoordinatorPolicy",
+        job: "Cloudflare Layer that builds /hosts/:hostId/auth URLs and messages.",
+        dependsOn: ["CodeModeObjectIdentity"],
+        usedBy: ["DurableObjectAuthCoreLayer"],
+        files: ["packages/host-cloudflare/src/layers/auth/policy.ts"],
+      },
+      CloudflareAuthProviderFactoryLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "impl",
+        implements: "AuthProviderFactory",
+        job: "Cloudflare Layer that creates CloudflareOAuthProvider wrappers.",
+        dependsOn: ["CredentialsStore", "CodeModeObjectStorage", "CodeModeObjectIdentity"],
+        usedBy: ["DurableObjectAuthCoreLayer"],
+        files: ["packages/host-cloudflare/src/layers/auth/providerFactory.ts"],
+      },
+      DurableObjectAuthCoreLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "impl",
+        implements: "AuthCoordinatorCore",
+        job: "Cloudflare assembly Layer: pipes AuthCoordinatorCoreLayer with Cloudflare policy + provider factory.",
+        dependsOn: ["AuthCoordinatorPolicy", "AuthProviderFactory"],
+        usedBy: ["DurableObjectAuthLayer"],
+        files: ["packages/host-cloudflare/src/layers/auth/durableObjectAuthCoreLayer.ts"],
+      },
+      AuthCoordinatorLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "impl",
+        implements: "AuthCoordinator",
+        job: "Cloudflare Layer that exposes the shared AuthCoordinator facade to registry/connectors.",
+        dependsOn: ["AuthCoordinatorCore"],
+        usedBy: ["DurableObjectAuthLayer"],
+        files: ["packages/host-cloudflare/src/layers/auth/authCoordinatorLayer.ts"],
+      },
+      CloudflareOAuthFlowLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "impl",
+        implements: "CloudflareOAuthFlow",
+        job: "Cloudflare Layer that starts/finishes browser OAuth via MCP SDK auth().",
+        dependsOn: ["AuthCoordinatorCore"],
+        usedBy: ["DurableObjectAuthLayer"],
+        files: ["packages/host-cloudflare/src/layers/auth/oauthFlowLayer.ts"],
+      },
+      CloudflareOAuthFlow: {
+        package: "@ptools/host-cloudflare",
+        role: "host-only",
+        tag: "Context.Tag @ptools/host-cloudflare/CloudflareOAuthFlow",
+        job: "Host-only route service for beginAuthorization / finishAuthorization. Not part of @ptools/auth.",
+        dependsOn: ["CloudflareOAuthFlowLayer"],
+        usedBy: ["CodeModeObject"],
+        files: ["packages/host-cloudflare/src/layers/auth/oauthFlow.ts"],
+      },
+      ConfigSource: {
+        package: "@ptools/config",
+        role: "consumer",
+        job: "Loads the resolved host config for the current runtime.",
+        dependsOn: ["host config loader"],
+        usedBy: ["CodeModeObject"],
+        files: ["packages/config/src/config.ts", "packages/host-cloudflare/src/layers/config.ts"],
+      },
+      CodeModeObject: {
+        package: "@ptools/host-cloudflare",
+        role: "consumer",
+        job: "Own the Cloudflare host runtime and typed auth RPCs.",
+        dependsOn: ["AuthCoordinator", "CloudflareOAuthFlow", "ConfigSource"],
+        usedBy: ["Worker routes"],
+        files: ["packages/host-cloudflare/src/objects/CodeModeObject.ts"],
+      },
+      CloudflareHttpMcpConnectorLayer: {
+        package: "@ptools/host-cloudflare",
+        role: "consumer",
+        job: "Connect HTTP upstream MCP servers and reject stdio in the first release.",
+        dependsOn: ["AuthCoordinator"],
+        usedBy: ["McpRegistry"],
+        files: ["packages/host-cloudflare/src/layers/mcpConnector.ts"],
+      },
+    };
+
+    const graphs = {
+      shared: {
+        title: "Shared auth core DAG",
+        subtitle: "Contracts and shared Layers from @ptools/auth. Hosts must provide implementations of these — not reimplement them.",
+        defaultNode: "AuthCoordinatorCore",
+        width: 1560,
+        height: 430,
+        lanes: [
+          { x: 16, y: 110, w: 430, h: 200, label: "shared contracts" },
+          { x: 460, y: 110, w: 360, h: 200, label: "shared layers" },
+          { x: 840, y: 40, w: 690, h: 300, label: "runtime consumers" },
+        ],
+        nodes: [
+          { id: "CredentialsStore", x: 40, y: 150, w: 210, h: 88 },
+          { id: "AuthProviderFactory", x: 40, y: 250, w: 220, h: 88 },
+          { id: "AuthCoordinatorPolicy", x: 250, y: 150, w: 220, h: 88 },
+          { id: "AuthCoordinatorCoreLayer", x: 500, y: 150, w: 250, h: 88 },
+          { id: "AuthCoordinatorCore", x: 500, y: 260, w: 230, h: 88 },
+          { id: "AuthCoordinator", x: 880, y: 120, w: 220, h: 88 },
+          { id: "McpRegistry", x: 1140, y: 120, w: 220, h: 88 },
+          { id: "CodeMode", x: 1140, y: 240, w: 220, h: 88 },
+        ],
+        edges: [
+          { from: "CredentialsStore", to: "AuthProviderFactory", kind: "depends" },
+          { from: "AuthProviderFactory", to: "AuthCoordinatorCoreLayer", kind: "depends" },
+          { from: "AuthCoordinatorPolicy", to: "AuthCoordinatorCoreLayer", kind: "depends" },
+          { from: "AuthCoordinatorCoreLayer", to: "AuthCoordinatorCore", kind: "provides" },
+          { from: "AuthCoordinatorCore", to: "AuthCoordinator", kind: "depends" },
+          { from: "AuthCoordinator", to: "McpRegistry", kind: "depends" },
+          { from: "McpRegistry", to: "CodeMode", kind: "depends" },
+        ],
+      },
+      node: {
+        title: "host-node auth DAG",
+        subtitle: "Green arrows = host Layer provides a shared @ptools/auth contract. Blue arrows = requires another service.",
+        defaultNode: "NodeAuthCoordinatorLive",
+        width: 1980,
+        height: 540,
+        lanes: [
+          { x: 16, y: 30, w: 520, h: 470, label: "host-node implementations" },
+          { x: 560, y: 30, w: 560, h: 470, label: "@ptools/auth contracts" },
+          { x: 1140, y: 30, w: 820, h: 470, label: "consumers + helpers" },
+        ],
+        nodes: [
+          { id: "NodeCredentialsStoreLive", x: 40, y: 60, w: 250, h: 92 },
+          { id: "NodeAuthProviderFactoryLayer", x: 40, y: 190, w: 270, h: 92 },
+          { id: "NodeAuthPolicyLayer", x: 40, y: 320, w: 230, h: 92 },
+          { id: "NodeAuthCoordinatorLive", x: 280, y: 420, w: 250, h: 92 },
+
+          { id: "CredentialsStore", x: 590, y: 60, w: 210, h: 88 },
+          { id: "AuthProviderFactory", x: 820, y: 190, w: 230, h: 88 },
+          { id: "AuthCoordinatorPolicy", x: 820, y: 320, w: 230, h: 88 },
+          { id: "AuthCoordinatorCoreLayer", x: 590, y: 250, w: 250, h: 88 },
+          { id: "AuthCoordinatorCore", x: 860, y: 420, w: 230, h: 88 },
+          { id: "AuthCoordinator", x: 1120, y: 250, w: 220, h: 88 },
+
+          { id: "PtoolsAuthManager", x: 1140, y: 60, w: 220, h: 88 },
+          { id: "NodeMcpConnectorLive", x: 1400, y: 250, w: 230, h: 88 },
+          { id: "McpRegistry", x: 1660, y: 250, w: 220, h: 88 },
+        ],
+        edges: [
+          { from: "NodeCredentialsStoreLive", to: "CredentialsStore", kind: "provides" },
+          { from: "NodeAuthProviderFactoryLayer", to: "AuthProviderFactory", kind: "provides" },
+          { from: "NodeAuthPolicyLayer", to: "AuthCoordinatorPolicy", kind: "provides" },
+          { from: "NodeAuthCoordinatorLive", to: "AuthCoordinator", kind: "provides" },
+          { from: "CredentialsStore", to: "NodeAuthProviderFactoryLayer", kind: "depends" },
+          { from: "CredentialsStore", to: "NodeAuthCoordinatorLive", kind: "depends" },
+          { from: "AuthProviderFactory", to: "AuthCoordinatorCoreLayer", kind: "depends" },
+          { from: "AuthCoordinatorPolicy", to: "AuthCoordinatorCoreLayer", kind: "depends" },
+          { from: "AuthCoordinatorCoreLayer", to: "AuthCoordinatorCore", kind: "provides" },
+          { from: "AuthCoordinatorCore", to: "PtoolsAuthManager", kind: "depends" },
+          { from: "AuthCoordinatorCore", to: "NodeAuthCoordinatorLive", kind: "depends" },
+          { from: "AuthCoordinator", to: "NodeMcpConnectorLive", kind: "depends" },
+          { from: "NodeMcpConnectorLive", to: "McpRegistry", kind: "depends" },
+        ],
+      },
+      cloudflare: {
+        title: "host-cloudflare auth DAG",
+        subtitle: "Review pattern: find the green provides edge from a host Layer to the shared contract it implements.",
+        defaultNode: "DurableObjectAuthCoreLayer",
+        width: 2580,
+        height: 620,
+        lanes: [
+          { x: 16, y: 70, w: 360, h: 470, label: "platform bindings" },
+          { x: 390, y: 20, w: 560, h: 540, label: "Cloudflare implementation Layers" },
+          { x: 970, y: 20, w: 560, h: 540, label: "@ptools/auth contracts" },
+          { x: 1550, y: 20, w: 1000, h: 540, label: "consumers + host-only services" },
+        ],
+        nodes: [
+          { id: "CodeModeObjectPlatformLayer", x: 40, y: 250, w: 250, h: 92 },
+          { id: "CodeModeObjectStorage", x: 40, y: 120, w: 210, h: 88 },
+          { id: "CodeModeObjectIdentity", x: 40, y: 390, w: 210, h: 88 },
+
+          { id: "DurableObjectCredentialsStoreLayer", x: 420, y: 80, w: 280, h: 92 },
+          { id: "CloudflareAuthPolicyLayer", x: 420, y: 220, w: 250, h: 92 },
+          { id: "CloudflareAuthProviderFactoryLayer", x: 420, y: 360, w: 300, h: 92 },
+          { id: "DurableObjectAuthCoreLayer", x: 420, y: 500, w: 280, h: 92 },
+          { id: "AuthCoordinatorLayer", x: 740, y: 80, w: 240, h: 92 },
+          { id: "CloudflareOAuthFlowLayer", x: 740, y: 500, w: 250, h: 92 },
+
+          { id: "CredentialsStore", x: 1000, y: 80, w: 210, h: 88 },
+          { id: "AuthCoordinatorPolicy", x: 1000, y: 220, w: 230, h: 88 },
+          { id: "AuthProviderFactory", x: 1000, y: 360, w: 230, h: 88 },
+          { id: "AuthCoordinatorCore", x: 1000, y: 500, w: 230, h: 88 },
+          { id: "AuthCoordinator", x: 1270, y: 80, w: 220, h: 88 },
+          { id: "CloudflareOAuthFlow", x: 1270, y: 500, w: 240, h: 88 },
+
+          { id: "CloudflareHttpMcpConnectorLayer", x: 1580, y: 80, w: 280, h: 92 },
+          { id: "CodeModeObject", x: 1920, y: 280, w: 230, h: 92 },
+          { id: "ConfigSource", x: 1920, y: 500, w: 220, h: 88 },
+        ],
+        edges: [
+          { from: "CodeModeObjectPlatformLayer", to: "CodeModeObjectStorage", kind: "depends" },
+          { from: "CodeModeObjectPlatformLayer", to: "CodeModeObjectIdentity", kind: "depends" },
+          { from: "CodeModeObjectStorage", to: "DurableObjectCredentialsStoreLayer", kind: "depends" },
+          { from: "CodeModeObjectIdentity", to: "CloudflareAuthPolicyLayer", kind: "depends" },
+          { from: "CodeModeObjectStorage", to: "CloudflareAuthProviderFactoryLayer", kind: "depends" },
+          { from: "CodeModeObjectIdentity", to: "CloudflareAuthProviderFactoryLayer", kind: "depends" },
+          { from: "DurableObjectCredentialsStoreLayer", to: "CredentialsStore", kind: "provides" },
+          { from: "CloudflareAuthPolicyLayer", to: "AuthCoordinatorPolicy", kind: "provides" },
+          { from: "CloudflareAuthProviderFactoryLayer", to: "AuthProviderFactory", kind: "provides" },
+          { from: "DurableObjectAuthCoreLayer", to: "AuthCoordinatorCore", kind: "provides" },
+          { from: "AuthCoordinatorLayer", to: "AuthCoordinator", kind: "provides" },
+          { from: "CloudflareOAuthFlowLayer", to: "CloudflareOAuthFlow", kind: "provides" },
+          { from: "CredentialsStore", to: "CloudflareAuthProviderFactoryLayer", kind: "depends" },
+          { from: "AuthCoordinatorPolicy", to: "DurableObjectAuthCoreLayer", kind: "depends" },
+          { from: "AuthProviderFactory", to: "DurableObjectAuthCoreLayer", kind: "depends" },
+          { from: "AuthCoordinatorCore", to: "AuthCoordinatorLayer", kind: "depends" },
+          { from: "AuthCoordinatorCore", to: "CloudflareOAuthFlowLayer", kind: "depends" },
+          { from: "AuthCoordinator", to: "CloudflareHttpMcpConnectorLayer", kind: "depends" },
+          { from: "AuthCoordinator", to: "CodeModeObject", kind: "depends" },
+          { from: "CloudflareOAuthFlow", to: "CodeModeObject", kind: "depends" },
+          { from: "ConfigSource", to: "CodeModeObject", kind: "depends" },
+        ],
+      },
+    };
+
+    const dagTabs = document.getElementById('dag-tabs');
+    const dagStage = document.getElementById('dag-stage');
+    const dagTitle = document.getElementById('dag-title');
+    const dagSubtitle = document.getElementById('dag-subtitle');
+    const detailTitle = document.getElementById('detail-title');
+    const detailPills = document.getElementById('detail-pills');
+    const detailJob = document.getElementById('detail-job');
+    const detailDepends = document.getElementById('detail-depends');
+    const detailUsedBy = document.getElementById('detail-used-by');
+    const detailFiles = document.getElementById('detail-files');
+    const detailContract = document.getElementById('detail-contract');
+    const detailImplements = document.getElementById('detail-implements');
+    const detailImplementedBy = document.getElementById('detail-implemented-by');
+    const detailContractSection = document.getElementById('detail-contract-section');
+    const detailImplementsSection = document.getElementById('detail-implements-section');
+    const detailImplementedBySection = document.getElementById('detail-implemented-by-section');
+    const contractMappingBody = document.getElementById('contract-mapping-body');
+    const dagViewport = document.getElementById('dag-viewport');
+    const dagCanvas = document.getElementById('dag-canvas');
+    const dagBoard = document.getElementById('dag-board');
+    const dagLayout = document.getElementById('dag-layout');
+    const dagZoomLabel = document.getElementById('dag-zoom-label');
+    const dagFitWidth = document.getElementById('dag-fit-width');
+    const dagZoomReset = document.getElementById('dag-zoom-reset');
+    const dagZoomOut = document.getElementById('dag-zoom-out');
+    const dagZoomIn = document.getElementById('dag-zoom-in');
+    const dagToggleDetails = document.getElementById('dag-toggle-details');
+    const dagFullscreen = document.getElementById('dag-fullscreen');
+
+    let currentGraph = 'shared';
+    let currentNode = graphs.shared.defaultNode;
+    let dagScale = 1;
+    let scaleMode = 'fit';
+    let detailsVisible = true;
+
+    const create = (tag, className, text) => {
+      const el = document.createElement(tag);
+      if (className) el.className = className;
+      if (text !== undefined) el.textContent = text;
+      return el;
+    };
+
+    const pathFor = (fromNode, toNode) => {
+      const x1 = fromNode.x + fromNode.w;
+      const y1 = fromNode.y + fromNode.h / 2;
+      const x2 = toNode.x;
+      const y2 = toNode.y + toNode.h / 2;
+      const dx = Math.max(80, (x2 - x1) * 0.45);
+      return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+    };
+
+    const adjacency = (graph) => {
+      const forward = new Map();
+      const reverse = new Map();
+      graph.edges.forEach((edge) => {
+        if (!forward.has(edge.from)) forward.set(edge.from, []);
+        if (!reverse.has(edge.to)) reverse.set(edge.to, []);
+        forward.get(edge.from).push(edge.to);
+        reverse.get(edge.to).push(edge.from);
+      });
+      return { forward, reverse };
+    };
+
+    const walk = (start, map) => {
+      const seen = new Set();
+      const stack = [start];
+      while (stack.length > 0) {
+        const current = stack.pop();
+        const next = map.get(current) ?? [];
+        next.forEach((value) => {
+          if (!seen.has(value)) {
+            seen.add(value);
+            stack.push(value);
+          }
+        });
+      }
+      return seen;
+    };
+
+    const pillClassForRole = (role) => {
+      if (role === 'contract') return 'pill contract';
+      if (role === 'core-layer') return 'pill core-layer';
+      if (role === 'impl') return 'pill impl';
+      if (role === 'host-only') return 'pill host-only';
+      return 'pill muted';
+    };
+
+    const nodeClassForRole = (role) => {
+      if (role === 'contract') return 'contract';
+      if (role === 'core-layer') return 'core-layer';
+      if (role === 'impl') return 'impl';
+      if (role === 'host-only') return 'host-only';
+      if (role === 'consumer') return 'consumer';
+      if (role === 'platform') return 'platform';
+      if (role === 'host-service') return 'host-only';
+      return '';
+    };
+
+    const renderContractMapping = () => {
+      contractMappingBody.innerHTML = '';
+      contractMappings.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td class="contract-cell"><code>${row.contract}</code></td>` +
+          `<td class="impl-cell"><code>${row.node}</code></td>` +
+          `<td class="impl-cell"><code>${row.cloudflare}</code></td>`;
+        tr.addEventListener('click', () => {
+          const cloudflareTarget = row.cloudflare.split(' ')[0];
+          if (meta[cloudflareTarget]) {
+            renderGraph('cloudflare');
+            currentNode = cloudflareTarget;
+          } else if (meta[row.contract]) {
+            renderGraph('shared');
+            currentNode = row.contract;
+          }
+          applySelection();
+        });
+        contractMappingBody.appendChild(tr);
+      });
+    };
+
+    const renderDetails = (nodeId) => {
+      const item = meta[nodeId];
+      detailTitle.textContent = nodeId;
+      detailPills.innerHTML = '';
+      if (item) {
+        detailPills.appendChild(create('span', pillClassForRole(item.role), roleLabels[item.role] ?? item.role));
+        detailPills.appendChild(create('span', 'pill muted', item.package));
+        if (item.tag) {
+          detailPills.appendChild(create('span', 'pill muted', item.tag));
+        }
+        detailJob.textContent = item.job;
+
+        if (item.role === 'contract') {
+          detailContractSection.style.display = '';
+          detailContract.textContent = item.tag ?? 'Shared Context.Tag from @ptools/auth';
+          detailImplementsSection.style.display = 'none';
+          detailImplementedBySection.style.display = '';
+          detailImplementedBy.innerHTML = '';
+          const impls = item.implementedBy ?? [];
+          (impls.length ? impls : ['none yet']).forEach((value) => {
+            detailImplementedBy.appendChild(create('li', '', value));
+          });
+        } else if (item.role === 'impl' || item.role === 'core-layer') {
+          detailContractSection.style.display = 'none';
+          detailImplementsSection.style.display = '';
+          detailImplements.textContent = item.implements
+            ? `Provides shared contract: ${item.implements}`
+            : 'Provides a shared @ptools/auth contract.';
+          detailImplementedBySection.style.display = 'none';
+        } else {
+          detailContractSection.style.display = 'none';
+          detailImplementsSection.style.display = 'none';
+          detailImplementedBySection.style.display = 'none';
+        }
+
+        detailDepends.innerHTML = '';
+        (item.dependsOn.length ? item.dependsOn : ['none']).forEach((value) => {
+          detailDepends.appendChild(create('li', '', value));
+        });
+        detailUsedBy.innerHTML = '';
+        (item.usedBy.length ? item.usedBy : ['none']).forEach((value) => {
+          detailUsedBy.appendChild(create('li', '', value));
+        });
+        detailFiles.innerHTML = '';
+        item.files.forEach((file) => {
+          detailFiles.appendChild(create('code', '', file));
+          detailFiles.appendChild(document.createElement('br'));
+        });
+      } else {
+        detailJob.textContent = 'No metadata recorded for this node.';
+        detailContractSection.style.display = 'none';
+        detailImplementsSection.style.display = 'none';
+        detailImplementedBySection.style.display = 'none';
+        detailDepends.innerHTML = '<li>—</li>';
+        detailUsedBy.innerHTML = '<li>—</li>';
+        detailFiles.innerHTML = '<div class="muted small">—</div>';
+      }
+    };
+
+    const applyDagScale = () => {
+      const graph = graphs[currentGraph];
+      dagStage.style.transform = `scale(${dagScale})`;
+      dagCanvas.style.width = `${Math.ceil(graph.width * dagScale + 24)}px`;
+      dagCanvas.style.height = `${Math.ceil(graph.height * dagScale + 24)}px`;
+      dagZoomLabel.textContent = `${Math.round(dagScale * 100)}%`;
+      dagFitWidth.classList.toggle('active', scaleMode === 'fit');
+      dagZoomReset.classList.toggle('active', scaleMode === 'manual' && dagScale === 1);
+    };
+
+    const fitDagWidth = () => {
+      const graph = graphs[currentGraph];
+      const available = Math.max(320, dagViewport.clientWidth - 28);
+      dagScale = Math.min(1.25, Math.max(0.4, (available / graph.width) * 0.98));
+      scaleMode = 'fit';
+      applyDagScale();
+    };
+
+    const setManualScale = (nextScale) => {
+      dagScale = Math.min(1.5, Math.max(0.35, nextScale));
+      scaleMode = 'manual';
+      applyDagScale();
+    };
+
+    const scrollSelectedIntoView = () => {
+      const selected = dagStage.querySelector('.dag-node.selected');
+      if (!selected) return;
+
+      const nodeLeft = parseFloat(selected.style.left) * dagScale + 12;
+      const nodeTop = parseFloat(selected.style.top) * dagScale + 12;
+      const nodeW = parseFloat(selected.style.width) * dagScale;
+      const nodeH = parseFloat(selected.style.height) * dagScale;
+      const viewLeft = dagViewport.scrollLeft;
+      const viewTop = dagViewport.scrollTop;
+      const viewRight = viewLeft + dagViewport.clientWidth;
+      const viewBottom = viewTop + dagViewport.clientHeight;
+      const padding = 24;
+
+      if (
+        nodeLeft < viewLeft + padding ||
+        nodeLeft + nodeW > viewRight - padding ||
+        nodeTop < viewTop + padding ||
+        nodeTop + nodeH > viewBottom - padding
+      ) {
+        dagViewport.scrollTo({
+          left: Math.max(0, nodeLeft - dagViewport.clientWidth * 0.25),
+          top: Math.max(0, nodeTop - 48),
+          behavior: 'smooth',
+        });
+      }
+    };
+
+    const applySelection = (options = {}) => {
+      const graph = graphs[currentGraph];
+      const { forward, reverse } = adjacency(graph);
+      const ancestors = walk(currentNode, reverse);
+      const descendants = walk(currentNode, forward);
+      const focus = new Set([currentNode, ...ancestors, ...descendants]);
+
+      dagStage.querySelectorAll('.dag-node').forEach((nodeEl) => {
+        const id = nodeEl.dataset.id;
+        nodeEl.classList.remove('selected', 'ancestor', 'descendant');
+        if (id === currentNode) {
+          nodeEl.classList.add('selected');
+        } else if (ancestors.has(id)) {
+          nodeEl.classList.add('ancestor');
+        } else if (descendants.has(id)) {
+          nodeEl.classList.add('descendant');
+        }
+      });
+
+      dagStage.querySelectorAll('.dag-edge').forEach((edgeEl) => {
+        const from = edgeEl.dataset.from;
+        const to = edgeEl.dataset.to;
+        edgeEl.classList.remove('focus', 'desc');
+        if (focus.has(from) && focus.has(to)) {
+          if (descendants.has(from) || from === currentNode) {
+            edgeEl.classList.add('desc');
+          } else {
+            edgeEl.classList.add('focus');
+          }
+        }
+      });
+
+      renderDetails(currentNode);
+      if (options.scroll !== false) {
+        scrollSelectedIntoView();
+      }
+    };
+
+    const renderGraph = (graphName) => {
+      currentGraph = graphName;
+      const graph = graphs[graphName];
+      currentNode = graph.defaultNode;
+      dagTitle.textContent = graph.title;
+      dagSubtitle.textContent = graph.subtitle;
+      dagStage.innerHTML = '';
+      dagStage.style.width = `${graph.width}px`;
+      dagStage.style.height = `${graph.height}px`;
+
+      graph.lanes.forEach((lane) => {
+        const laneEl = create('div', 'dag-lane');
+        laneEl.style.left = `${lane.x}px`;
+        laneEl.style.top = `${lane.y}px`;
+        laneEl.style.width = `${lane.w}px`;
+        laneEl.style.height = `${lane.h}px`;
+        const label = create('div', 'dag-lane-label', lane.label);
+        laneEl.appendChild(label);
+        dagStage.appendChild(laneEl);
+      });
+
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('class', 'dag-svg');
+      svg.setAttribute('viewBox', `0 0 ${graph.width} ${graph.height}`);
+      const defs = document.createElementNS(svgNS, 'defs');
+      const makeMarker = (id, fill) => {
+        const marker = document.createElementNS(svgNS, 'marker');
+        marker.setAttribute('id', id);
+        marker.setAttribute('markerWidth', '10');
+        marker.setAttribute('markerHeight', '10');
+        marker.setAttribute('refX', '8');
+        marker.setAttribute('refY', '5');
+        marker.setAttribute('orient', 'auto');
+        marker.setAttribute('markerUnits', 'strokeWidth');
+        const markerPath = document.createElementNS(svgNS, 'path');
+        markerPath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+        markerPath.setAttribute('fill', fill);
+        marker.appendChild(markerPath);
+        defs.appendChild(marker);
+      };
+      makeMarker('dag-arrow', 'rgba(121,169,255,0.75)');
+      makeMarker('dag-arrow-provides', 'rgba(141,255,176,0.85)');
+      svg.appendChild(defs);
+
+      const nodeMap = new Map();
+      graph.nodes.forEach((node) => nodeMap.set(node.id, node));
+      graph.edges.forEach((edge) => {
+        const fromNode = nodeMap.get(edge.from);
+        const toNode = nodeMap.get(edge.to);
+        if (!fromNode || !toNode) return;
+        const path = document.createElementNS(svgNS, 'path');
+        const edgeKind = edge.kind ?? 'depends';
+        path.setAttribute('class', `dag-edge ${edgeKind}`);
+        path.setAttribute('d', pathFor(fromNode, toNode));
+        path.setAttribute(
+          'marker-end',
+          edgeKind === 'provides' ? 'url(#dag-arrow-provides)' : 'url(#dag-arrow)',
+        );
+        path.dataset.from = edge.from;
+        path.dataset.to = edge.to;
+        path.dataset.kind = edgeKind;
+        svg.appendChild(path);
+      });
+      dagStage.appendChild(svg);
+
+      graph.nodes.forEach((node) => {
+        const item = meta[node.id];
+        const role = item?.role ?? 'platform';
+        const roleClass = nodeClassForRole(role);
+        const isInteractive = role !== 'platform' || item !== undefined;
+        const el = document.createElement(isInteractive ? 'button' : 'div');
+        el.className = `dag-node ${roleClass}`.trim();
+        if (isInteractive) el.type = 'button';
+        el.dataset.id = node.id;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        el.style.width = `${node.w}px`;
+        el.style.height = `${node.h}px`;
+        const roleLabel = roleLabels[role] ?? role;
+        const subline = item?.implements
+          ? `→ ${item.implements}`
+          : (item ? item.package : 'platform binding');
+        el.innerHTML =
+          `<div class="role">${roleLabel}</div>` +
+          `<div class="name">${node.id}</div>` +
+          `<div class="meta">${subline}</div>`;
+        if (isInteractive) {
+          el.addEventListener('click', () => {
+            currentNode = node.id;
+            applySelection();
+          });
+        }
+        dagStage.appendChild(el);
+      });
+
+      document.querySelectorAll('.dag-tab').forEach((tab) => {
+        tab.classList.toggle('active', tab.dataset.graph === graphName);
+      });
+
+      applySelection({ scroll: false });
+      if (scaleMode === 'fit') {
+        fitDagWidth();
+      } else {
+        applyDagScale();
+      }
+      scrollSelectedIntoView();
+    };
+
+    Object.keys(graphs).forEach((graphName) => {
+      const tab = create('button', 'dag-tab', graphs[graphName].title);
+      tab.type = 'button';
+      tab.dataset.graph = graphName;
+      tab.addEventListener('click', () => renderGraph(graphName));
+      dagTabs.appendChild(tab);
+    });
+
+    dagFitWidth.addEventListener('click', fitDagWidth);
+    dagZoomReset.addEventListener('click', () => setManualScale(1));
+    dagZoomOut.addEventListener('click', () => setManualScale(dagScale - 0.1));
+    dagZoomIn.addEventListener('click', () => setManualScale(dagScale + 0.1));
+    dagToggleDetails.addEventListener('click', () => {
+      detailsVisible = !detailsVisible;
+      dagLayout.classList.toggle('details-hidden', !detailsVisible);
+      dagToggleDetails.textContent = detailsVisible ? 'Hide details' : 'Show details';
+      if (scaleMode === 'fit') {
+        fitDagWidth();
+      }
+    });
+    dagFullscreen.addEventListener('click', async () => {
+      if (document.fullscreenElement === dagBoard) {
+        await document.exitFullscreen();
+      } else {
+        await dagBoard.requestFullscreen();
+      }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      dagFullscreen.textContent =
+        document.fullscreenElement === dagBoard ? 'Exit fullscreen' : 'Fullscreen';
+      if (scaleMode === 'fit') {
+        fitDagWidth();
+      }
+    });
+    window.addEventListener('resize', () => {
+      if (scaleMode === 'fit') {
+        fitDagWidth();
+      }
+    });
+
+    renderContractMapping();
+    renderGraph('shared');
+  })();
+</script>
+</body>
+</html>

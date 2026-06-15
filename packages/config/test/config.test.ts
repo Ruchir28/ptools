@@ -1,9 +1,15 @@
 import { join } from "node:path";
-import { Effect, Either } from "effect";
+import { Effect, Either, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   hashResolvedPtoolsConfig,
   parsePtoolsConfigJson,
+  PtoolsConfig,
+  ResolvedExecutorConfig,
+  ResolvedHttpMcpAuthConfig,
+  ResolvedHttpMcpConfig,
+  ResolvedPtoolsConfig,
+  ResolvedStdioMcpConfig,
   resolvePtoolsConfig,
   resolvePtoolsConfigWithSecrets,
   ServerConfigError,
@@ -11,6 +17,98 @@ import {
 } from "../src/config.js";
 
 describe("server config", () => {
+  it("requires validated construction for the PtoolsConfig domain value", () => {
+    // @ts-expect-error Plain objects must not satisfy the validated config type.
+    const plainConfig: PtoolsConfig = { mcpServers: {} };
+
+    expect(plainConfig).toEqual({ mcpServers: {} });
+    expect(
+      PtoolsConfig.make({ mcpServers: {}, executor: Option.none() }),
+    ).toBeInstanceOf(PtoolsConfig);
+  });
+
+  it("encodes resolved domain classes into plain boundary objects", async () => {
+    const resolved = ResolvedPtoolsConfig.make({
+      mcpServers: {
+        remote: ResolvedHttpMcpConfig.make({
+          url: "https://example.com/mcp",
+          headers: Option.none(),
+          auth: Option.none(),
+        }),
+      },
+      executor: Option.none(),
+    });
+
+    const encoded = await Effect.runPromise(
+      Schema.encode(ResolvedPtoolsConfig)(resolved),
+    );
+
+    expect(encoded).toEqual({
+      mcpServers: {
+        remote: {
+          transport: "http",
+          url: "https://example.com/mcp",
+        },
+      },
+    });
+  });
+
+  it("decodes executor absence into Option.none", async () => {
+    const config = await parseConfig({ mcpServers: {} });
+
+    expect(config).toBeInstanceOf(PtoolsConfig);
+    expect(config.executor).toEqual(Option.none());
+  });
+
+  it("decodes optional unresolved config fields into Options", async () => {
+    const config = await parseConfig({
+      mcpServers: {
+        local: { command: "node" },
+        remote: { url: "https://example.com/mcp" },
+      },
+    });
+
+    expect(config.mcpServers.local).toMatchObject({
+      transport: "stdio",
+      args: Option.none(),
+      cwd: Option.none(),
+      env: Option.none(),
+    });
+    expect(config.mcpServers.remote).toMatchObject({
+      transport: "http",
+      headers: Option.none(),
+      auth: Option.none(),
+    });
+  });
+
+  it("exposes the normalized unresolved config as a runtime schema", async () => {
+    const result = await Effect.runPromise(
+      Schema.decodeUnknown(PtoolsConfig)({
+        mcpServers: {
+          remote: {
+            transport: "http",
+            url: 42,
+          },
+        },
+      }).pipe(Effect.either),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+  });
+
+  it("validates package-owned config construction", () => {
+    expect(() =>
+      PtoolsConfig.make({
+        mcpServers: {
+          remote: {
+            transport: "http",
+            url: 42,
+          },
+        },
+      } as never),
+    ).toThrow();
+  });
+
   it("resolves valid stdio config to registry-compatible config", async () => {
     const config = await parseConfig({
       mcpServers: {
@@ -24,16 +122,19 @@ describe("server config", () => {
 
     const resolved = await Effect.runPromise(resolvePtoolsConfig(config, {}));
 
-    expect(resolved).toEqual({
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-          command: "node",
-          args: ["server.js"],
-          cwd: "/tmp",
+    expect(resolved).toEqual(
+      ResolvedPtoolsConfig.make({
+        mcpServers: {
+          fixture: ResolvedStdioMcpConfig.make({
+            command: "node",
+            args: Option.some(["server.js"]),
+            cwd: Option.some("/tmp"),
+            env: Option.none(),
+          }),
         },
-      },
-    });
+        executor: Option.none(),
+      }),
+    );
   });
 
   it("resolves valid HTTP config to registry-compatible config", async () => {
@@ -47,14 +148,18 @@ describe("server config", () => {
 
     const resolved = await Effect.runPromise(resolvePtoolsConfig(config, {}));
 
-    expect(resolved).toEqual({
-      mcpServers: {
-        docs: {
-          transport: "http",
-          url: "https://example.com/mcp",
+    expect(resolved).toEqual(
+      ResolvedPtoolsConfig.make({
+        mcpServers: {
+          docs: ResolvedHttpMcpConfig.make({
+            url: "https://example.com/mcp",
+            headers: Option.none(),
+            auth: Option.none(),
+          }),
         },
-      },
-    });
+        executor: Option.none(),
+      }),
+    );
   });
 
   it("preserves literal env and headers", async () => {
@@ -77,12 +182,12 @@ describe("server config", () => {
 
     const resolved = await Effect.runPromise(resolvePtoolsConfig(config, {}));
 
-    expect(resolved.mcpServers.local).toMatchObject({
-      env: { LOG_LEVEL: "debug" },
-    });
-    expect(resolved.mcpServers.remote).toMatchObject({
-      headers: { "x-client": "ptools" },
-    });
+    expect(stdioServer(resolved, "local").env).toEqual(
+      Option.some({ LOG_LEVEL: "debug" }),
+    );
+    expect(httpServer(resolved, "remote").headers).toEqual(
+      Option.some({ "x-client": "ptools" }),
+    );
   });
 
   it("resolves env placeholders in string fields", async () => {
@@ -119,30 +224,34 @@ describe("server config", () => {
       }),
     );
 
-    expect(resolved).toEqual({
-      mcpServers: {
-        local: {
-          transport: "stdio",
-          command: "node",
-          args: ["server.js"],
-          env: {
-            LOG_LEVEL: "info",
-            TOKEN: "secret-token",
-          },
+    expect(resolved).toEqual(
+      ResolvedPtoolsConfig.make({
+        mcpServers: {
+          local: ResolvedStdioMcpConfig.make({
+            command: "node",
+            args: Option.some(["server.js"]),
+            env: Option.some({
+              LOG_LEVEL: "info",
+              TOKEN: "secret-token",
+            }),
+            cwd: Option.none(),
+          }),
+          remote: ResolvedHttpMcpConfig.make({
+            url: "https://example.com/mcp",
+            headers: Option.some({
+              "x-client": "ptools",
+              authorization: "Bearer secret",
+            }),
+            auth: Option.none(),
+          }),
         },
-        remote: {
-          transport: "http",
-          url: "https://example.com/mcp",
-          headers: {
-            "x-client": "ptools",
-            authorization: "Bearer secret",
-          },
-        },
-      },
-      executor: {
-        defaultTimeoutMs: 1234,
-      },
-    });
+        executor: Option.some(
+          ResolvedExecutorConfig.make({
+            defaultTimeoutMs: Option.some(1234),
+          }),
+        ),
+      }),
+    );
   });
 
   it("resolves env placeholders in HTTP OAuth config", async () => {
@@ -168,20 +277,27 @@ describe("server config", () => {
       resolvePtoolsConfig(config, { OAUTH_CLIENT_SECRET: "secret" }),
     );
 
-    expect(resolved.mcpServers.notion).toEqual({
-      transport: "http",
-      url: "https://example.com/mcp",
-      auth: {
-        type: "oauth",
-        scope: "read write",
-        resourceMetadataUrl:
-          "https://example.com/.well-known/oauth-protected-resource",
-        clientId: "client-id",
-        clientSecret: "secret",
-        clientMetadataUrl: "https://example.com/client.json",
-        redirectUri: "http://127.0.0.1:9000/oauth/callback/notion",
-      },
-    });
+    expect(resolved.mcpServers.notion).toEqual(
+      ResolvedHttpMcpConfig.make({
+        url: "https://example.com/mcp",
+        headers: Option.none(),
+        auth: Option.some(
+          ResolvedHttpMcpAuthConfig.make({
+            type: "oauth",
+            scope: Option.some("read write"),
+            resourceMetadataUrl: Option.some(
+              "https://example.com/.well-known/oauth-protected-resource",
+            ),
+            clientId: Option.some("client-id"),
+            clientSecret: Option.some("secret"),
+            clientMetadataUrl: Option.some("https://example.com/client.json"),
+            redirectUri: Option.some(
+              "http://127.0.0.1:9000/oauth/callback/notion",
+            ),
+          }),
+        ),
+      }),
+    );
   });
 
   it("fails when an env placeholder is missing", async () => {
@@ -234,12 +350,10 @@ describe("server config", () => {
       ),
     );
 
-    expect(resolved.mcpServers.local).toMatchObject({
-      command: "node",
-      env: {
-        TOKEN: "secret-token",
-      },
-    });
+    expect(stdioServer(resolved, "local").command).toBe("node");
+    expect(stdioServer(resolved, "local").env).toEqual(
+      Option.some({ TOKEN: "secret-token" }),
+    );
   });
 
   it("infers stdio and HTTP transport from command and url", async () => {
@@ -297,7 +411,7 @@ describe("server config", () => {
     }
   });
 
-  it("rejects transport and type fields clearly", async () => {
+  it("rejects transport and type fields outside the user config schema", async () => {
     for (const field of ["transport", "type"]) {
       const result = await Effect.runPromise(
         parsePtoolsConfigJson(
@@ -315,8 +429,8 @@ describe("server config", () => {
       expect(Either.isLeft(result), field).toBe(true);
 
       if (Either.isLeft(result)) {
-        expect(result.left.message).toContain("use command");
-        expect(result.left.message).toContain("url");
+        expect(result.left.message).toContain(field);
+        expect(result.left.message).toContain("is unexpected");
       }
     }
   });
@@ -339,7 +453,7 @@ describe("server config", () => {
 
     if (Either.isLeft(result)) {
       expect(result.left.message).toContain("envFile");
-      expect(result.left.message).toContain("not supported");
+      expect(result.left.message).toContain("is unexpected");
     }
   });
 
@@ -382,9 +496,9 @@ describe("server config", () => {
       resolvePtoolsConfig(config, {}, { baseDir: "/repo" }),
     );
 
-    expect(resolved.mcpServers.fixture).toMatchObject({
-      cwd: join("/repo", "servers"),
-    });
+    expect(stdioServer(resolved, "fixture").cwd).toEqual(
+      Option.some(join("/repo", "servers")),
+    );
   });
 
   it("fails invalid config shape", async () => {
@@ -405,34 +519,66 @@ describe("server config", () => {
 
   it("hashes resolved configs deterministically", () => {
     expect(
-      hashResolvedPtoolsConfig({
-        mcpServers: {
-          remote: {
-            transport: "http",
-            url: "https://example.com/mcp",
-            headers: {
-              b: "2",
-              a: "1",
-            },
+      hashResolvedPtoolsConfig(
+        ResolvedPtoolsConfig.make({
+          mcpServers: {
+            remote: ResolvedHttpMcpConfig.make({
+              url: "https://example.com/mcp",
+              headers: Option.some({
+                b: "2",
+                a: "1",
+              }),
+              auth: Option.none(),
+            }),
           },
-        },
-      }),
+          executor: Option.none(),
+        }),
+      ),
     ).toBe(
-      hashResolvedPtoolsConfig({
-        mcpServers: {
-          remote: {
-            headers: {
-              a: "1",
-              b: "2",
-            },
-            url: "https://example.com/mcp",
-            transport: "http",
+      hashResolvedPtoolsConfig(
+        ResolvedPtoolsConfig.make({
+          mcpServers: {
+            remote: ResolvedHttpMcpConfig.make({
+              headers: Option.some({
+                a: "1",
+                b: "2",
+              }),
+              url: "https://example.com/mcp",
+              auth: Option.none(),
+            }),
           },
-        },
-      }),
+          executor: Option.none(),
+        }),
+      ),
     );
   });
 });
 
 const parseConfig = (value: unknown) =>
   Effect.runPromise(parsePtoolsConfigJson(JSON.stringify(value)));
+
+const stdioServer = (
+  config: ResolvedPtoolsConfig,
+  name: string,
+): ResolvedStdioMcpConfig => {
+  const server = config.mcpServers[name];
+
+  if (!(server instanceof ResolvedStdioMcpConfig)) {
+    throw new Error(`Expected ${name} to be a resolved stdio config`);
+  }
+
+  return server;
+};
+
+const httpServer = (
+  config: ResolvedPtoolsConfig,
+  name: string,
+): ResolvedHttpMcpConfig => {
+  const server = config.mcpServers[name];
+
+  if (!(server instanceof ResolvedHttpMcpConfig)) {
+    throw new Error(`Expected ${name} to be a resolved HTTP config`);
+  }
+
+  return server;
+};

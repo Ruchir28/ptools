@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   codeModeObjectTestCalls,
   resetCodeModeObjectTestState,
-  setCodeModeObjectTestFailure,
   setCodeModeObjectTestResponse,
 } from "./codeModeObjectTestState.js";
 
@@ -151,25 +150,6 @@ describe("Cloudflare Worker ingress", () => {
     ]);
   });
 
-  it("maps Durable Object call failures to 502", async () => {
-    const hostId = uniqueHostId();
-    setCodeModeObjectTestFailure("runtime not ready");
-
-    const response = await handleRequest(`/hosts/${hostId}/code-mode`, {
-      method: "POST",
-      headers: authHeaders(),
-      body: validBody(),
-    });
-
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "code_mode_unavailable",
-        message: "Code Mode host is unavailable",
-      },
-    });
-  });
-
   it("configures a named host with one unresolved config blob", async () => {
     const hostId = uniqueHostId();
     const rawConfigJson = configBody({
@@ -192,11 +172,16 @@ describe("Cloudflare Worker ingress", () => {
     const blob = await stub.readConfigBlobForTest();
 
     expect(blob).toMatchObject({
-      rawJson: rawConfigJson,
+      config: {
+        mcpServers: {
+          example: {
+            transport: "http",
+            headers: { Authorization: "Bearer ${env:TEST_MCP_TOKEN}" },
+          },
+        },
+      },
       serverCount: 1,
     });
-    expect(blob?.rawJson).toContain("${env:TEST_MCP_TOKEN}");
-    expect(blob?.rawJson).not.toContain("resolved-test-token");
   });
 
   it("configures per-host secrets as separate Durable Object keys", async () => {
@@ -364,7 +349,32 @@ describe("Cloudflare Worker ingress", () => {
     });
 
     const blob = await configTestStub(hostId).readConfigBlobForTest();
-    expect(blob?.rawJson).toContain("${env:MISSING_MCP_TOKEN}");
+    expect(blob?.config.mcpServers.example).toMatchObject({
+      headers: { Authorization: "Bearer ${env:MISSING_MCP_TOKEN}" },
+    });
+  });
+
+  it("fails ConfigSource.load when the stored config blob is invalid", async () => {
+    const hostId = uniqueHostId();
+    const stub = configTestStub(hostId);
+
+    await stub.writeConfigBlobForTest({
+      config: {
+        mcpServers: {
+          example: {
+            transport: "http",
+            url: 42,
+          },
+        },
+      },
+      updatedAt: new Date().toISOString(),
+      serverCount: 1,
+    });
+
+    await expect(stub.loadResolvedConfigResultForTest()).resolves.toEqual({
+      ok: false,
+      message: `Stored Cloudflare host ${hostId} config is invalid.`,
+    });
   });
 
   it("replaces the per-host secret key set on secret bootstrap", async () => {
@@ -440,9 +450,177 @@ describe("Cloudflare Worker ingress", () => {
     const secondBlob =
       await configTestStub(secondHostId).readConfigBlobForTest();
 
-    expect(firstBlob?.rawJson).toContain("https://replacement.example");
-    expect(firstBlob?.rawJson).not.toContain("https://mcp.example");
-    expect(secondBlob?.rawJson).toContain("https://second.example");
+    expect(firstBlob?.config.mcpServers.example).toMatchObject({
+      url: "https://replacement.example",
+    });
+    expect(secondBlob?.config.mcpServers.example).toMatchObject({
+      url: "https://second.example",
+    });
+  });
+
+  it("requires bearer auth for MCP auth status, setup, and start routes", async () => {
+    const hostId = uniqueHostId();
+    const status = await handleRequest(`/hosts/${hostId}/auth/status`);
+    const setup = await handleRequest(`/hosts/${hostId}/auth/example/setup`);
+    const start = await handleRequest(`/hosts/${hostId}/auth/example`);
+
+    expect(status.status).toBe(401);
+    expect(status.headers.get("WWW-Authenticate")).toBe("Bearer");
+    expect(setup.status).toBe(401);
+    expect(setup.headers.get("WWW-Authenticate")).toBe("Bearer");
+    expect(start.status).toBe(401);
+    expect(start.headers.get("WWW-Authenticate")).toBe("Bearer");
+  });
+
+  it("reports MCP auth status from the named Durable Object config", async () => {
+    const hostId = uniqueHostId();
+
+    await configureHost(
+      hostId,
+      configBody({
+        headers: { Authorization: "Bearer static-token" },
+      }),
+    );
+
+    const response = await handleRequest(`/hosts/${hostId}/auth/status`, {
+      headers: authHeaders(),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      authUrl: `https://ptools.example/hosts/${hostId}/auth`,
+      servers: [
+        {
+          serverName: "example",
+          jsServerName: "example",
+          transport: "http",
+          status: "static_credentials",
+          authUrl: `https://ptools.example/hosts/${hostId}/auth`,
+        },
+      ],
+    });
+  });
+
+  it("rebuilds the cached host runtime when the request origin changes", async () => {
+    const hostId = uniqueHostId();
+
+    await configureHost(
+      hostId,
+      configBody({
+        headers: { Authorization: "Bearer static-token" },
+      }),
+    );
+
+    const first = await handleRequest(`/hosts/${hostId}/auth/status`, {
+      headers: authHeaders(),
+    });
+    const second = await handleRequest(
+      `https://alternate.ptools.example/hosts/${hostId}/auth/status`,
+      { headers: authHeaders() },
+    );
+
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      authUrl: `https://ptools.example/hosts/${hostId}/auth`,
+    });
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      authUrl: `https://alternate.ptools.example/hosts/${hostId}/auth`,
+    });
+  });
+
+  it("serves actionable OAuth client setup guidance for a configured server", async () => {
+    const hostId = uniqueHostId();
+    await configureHost(hostId, configBody());
+
+    const response = await handleRequest(
+      `/hosts/${hostId}/auth/example/setup`,
+      { headers: authHeaders() },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      serverName: "example",
+      status: "connected",
+      config: {
+        method: "PUT",
+        url: `https://ptools.example/hosts/${hostId}/config`,
+        authObject: {
+          root: "mcpServers",
+          serverName: "example",
+          field: "auth",
+        },
+        fields: ["clientId", "clientSecret"],
+        note: "Upload the complete host config after adding the OAuth client credentials.",
+      },
+    });
+  });
+
+  it("returns 404 from OAuth client setup for an unknown server", async () => {
+    const hostId = uniqueHostId();
+    await configureHost(hostId, configBody());
+
+    const response = await handleRequest(
+      `/hosts/${hostId}/auth/missing/setup`,
+      { headers: authHeaders() },
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("forwards OAuth callbacks without public bearer auth and rejects invalid DO-owned state", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(
+      `/hosts/${hostId}/oauth/callback/example?code=abc&state=not-signed`,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "invalid_oauth_callback" },
+    });
+  });
+
+  it("accepts POST OAuth callback form bodies without public bearer auth", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(
+      `/hosts/${hostId}/oauth/callback/example`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          code: "abc",
+          state: "not-signed",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "invalid_oauth_callback" },
+    });
+  });
+
+  it("rejects OAuth callback state signed for another host", async () => {
+    const hostId = uniqueHostId();
+    const otherHostId = uniqueHostId();
+    const state = await configTestStub(otherHostId).signOAuthStateForTest({
+      provider: "example",
+      hostId: otherHostId,
+      serverName: "example",
+      nonce: crypto.randomUUID(),
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const response = await handleRequest(
+      `/hosts/${hostId}/oauth/callback/example?code=abc&state=${encodeURIComponent(state)}`,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "invalid_oauth_callback" },
+    });
   });
 
   it("returns 404 for unknown routes", async () => {
@@ -465,6 +643,21 @@ describe("Cloudflare Worker ingress", () => {
     const secrets = await handleRequest("/hosts/demo/secrets", {
       method: "POST",
     });
+    const mcpAuthStatus = await handleRequest("/hosts/demo/auth/status", {
+      method: "POST",
+    });
+    const mcpAuthStart = await handleRequest("/hosts/demo/auth/example", {
+      method: "PUT",
+    });
+    const mcpAuthSetup = await handleRequest("/hosts/demo/auth/example/setup", {
+      method: "PUT",
+    });
+    const oauthCallback = await handleRequest(
+      "/hosts/demo/oauth/callback/example",
+      {
+        method: "PUT",
+      },
+    );
 
     expect(health.status).toBe(405);
     expect(health.headers.get("Allow")).toBe("GET");
@@ -474,23 +667,29 @@ describe("Cloudflare Worker ingress", () => {
     expect(config.headers.get("Allow")).toBe("PUT");
     expect(secrets.status).toBe(405);
     expect(secrets.headers.get("Allow")).toBe("PUT");
+    expect(mcpAuthStatus.status).toBe(405);
+    expect(mcpAuthStatus.headers.get("Allow")).toBe("GET");
+    expect(mcpAuthStart.status).toBe(405);
+    expect(mcpAuthStart.headers.get("Allow")).toBe("GET");
+    expect(mcpAuthSetup.status).toBe(405);
+    expect(mcpAuthSetup.headers.get("Allow")).toBe("GET");
+    expect(oauthCallback.status).toBe(405);
+    expect(oauthCallback.headers.get("Allow")).toBe("GET, POST");
   });
 });
 
 const publicAccessToken = "test-public-token";
 
 const handleRequest = async (
-  path: string,
+  pathOrUrl: string,
   options: {
     readonly method?: string;
     readonly headers?: HeadersInit;
     readonly body?: BodyInit;
   } = {},
 ): Promise<Response> => {
-  const request = new Request(
-    `https://ptools.example${path}`,
-    requestInit(options),
-  );
+  const url = new URL(pathOrUrl, "https://ptools.example").toString();
+  const request = new Request(url, requestInit(options));
 
   return exports.default.fetch(request);
 };

@@ -1,5 +1,6 @@
 import {
   AuthCoordinator,
+  type AuthError,
   isAuthRequiredError,
   isDynamicClientRegistrationUnsupported,
 } from "@ptools/auth";
@@ -28,7 +29,7 @@ export const connectConfiguredMcpClients = (
   connector: McpConnectorService,
 ): Effect.Effect<
   ConnectConfiguredMcpClientsResult,
-  NameCollisionError,
+  AuthError | NameCollisionError,
   Scope.Scope
 > =>
   Effect.gen(function* () {

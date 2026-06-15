@@ -91,11 +91,9 @@ const resolveNodeConfigPath = (
 
     if (envPath !== undefined) {
       if (envPath.trim().length === 0) {
-        return yield* Effect.fail(
-          new ServerConfigError({
-            message: "PTOOLS_CONFIG must not be empty.",
-          }),
-        );
+        return yield* new ServerConfigError({
+          message: "PTOOLS_CONFIG must not be empty.",
+        });
       }
 
       return resolveConfigFilePath(envPath, cwd);
@@ -110,12 +108,10 @@ const resolveNodeConfigPath = (
       }
     }
 
-    return yield* Effect.fail(
-      new ServerConfigError({
-        message:
-          "Missing config file. Pass --config <path>, set PTOOLS_CONFIG, or create .ptools/config.json in the launch directory.",
-      }),
-    );
+    return yield* new ServerConfigError({
+      message:
+        "Missing config file. Pass --config <path>, set PTOOLS_CONFIG, or create .ptools/config.json in the launch directory.",
+    });
   });
 
 const loadConfigFile = (
@@ -147,7 +143,7 @@ const parseConfigArg = (
   const index = argv.indexOf("--config");
 
   if (index === -1) {
-    return Effect.succeed(undefined);
+    return Effect.sync((): string | undefined => undefined);
   }
 
   const value = argv[index + 1];

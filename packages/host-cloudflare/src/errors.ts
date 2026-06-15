@@ -10,6 +10,7 @@ export type HostCloudflareErrorCode =
   | "invalid_code_mode_request"
   | "invalid_config"
   | "invalid_secrets"
+  | "invalid_oauth_callback"
   | "unsupported_config"
   | "code_mode_unavailable"
   | "misconfigured_worker";

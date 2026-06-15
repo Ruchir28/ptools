@@ -1,3 +1,4 @@
+import type { AuthError } from "@ptools/auth";
 import { Context, Effect } from "effect";
 import type {
   InvalidToolArguments,
@@ -19,7 +20,7 @@ export class McpRegistry extends Context.Tag("@ptools/McpRegistry")<
     readonly listTools: Effect.Effect<ReadonlyArray<DiscoveredMcpTool>>;
     readonly diagnostics: Effect.Effect<ReadonlyArray<McpRegistryDiagnostic>>;
     readonly authStatus: Effect.Effect<McpAuthStatus>;
-    readonly refresh: Effect.Effect<void, NameCollisionError>;
+    readonly refresh: Effect.Effect<void, AuthError | NameCollisionError>;
     readonly callTool: (
       request: CallToolRequest,
     ) => Effect.Effect<

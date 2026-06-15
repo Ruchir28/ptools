@@ -1,65 +1,232 @@
-import { Context, Data, Effect } from "effect";
+import { Array as Arr, Context, Data, Effect, Option, Schema } from "effect";
 
 export class ServerConfigError extends Data.TaggedError("ServerConfigError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
-export interface PtoolsConfig {
-  readonly mcpServers: Readonly<Record<string, ServerMcpConfig>>;
-  readonly executor?: {
-    readonly defaultTimeoutMs?: number;
-  };
+const StringRecord = Schema.Record({
+  key: Schema.String,
+  value: Schema.String,
+});
+
+const ExecutorConfig = Schema.Struct({
+  defaultTimeoutMs: Schema.optionalWith(Schema.Number, {
+    exact: true,
+    as: "Option",
+  }),
+});
+
+const UnresolvedHttpMcpAuthConfig = Schema.Struct({
+  type: Schema.tag("oauth"),
+  scope: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  resourceMetadataUrl: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+  clientId: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  clientSecret: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+  clientMetadataUrl: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+  /**
+   * Override the OAuth redirect URI sent to the upstream IdP.
+   *
+   * By default, ptools uses its own origin to construct the callback URL
+   * (discovered from the host runtime). Set this field when the upstream
+   * IdP requires a specific redirect URI that differs from ptools' default,
+   * for example:
+   *
+   * - **Custom domain / proxy**: ptools is deployed behind a custom domain
+   *   (e.g. `https://mcp.my-company.com`) that routes to the same Worker.
+   *   The IdP must redirect to the custom domain, not the `.workers.dev`
+   *   origin.
+   *
+   * - **Pre-registered OAuth client**: the upstream MCP server does not
+   *   support Dynamic Client Registration, and the pre-registered client
+   *   has a fixed redirect URI that doesn't match ptools' default callback.
+   *   Common with Google-backed MCP servers and enterprise IdPs.
+   *
+   * The URL set here MUST route back to the ptools runtime (directly or
+   * through a proxy), otherwise the authorization code cannot be received.
+   */
+  redirectUri: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+});
+type UnresolvedHttpMcpAuthConfig = typeof UnresolvedHttpMcpAuthConfig.Type;
+
+export const ServerMcpConfig = Schema.Union(
+  Schema.Struct({
+    transport: Schema.Literal("stdio"),
+    command: Schema.String,
+    args: Schema.optionalWith(Schema.Array(Schema.String), {
+      exact: true,
+      as: "Option",
+    }),
+    cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+    env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
+  }),
+  Schema.Struct({
+    transport: Schema.Literal("http"),
+    url: Schema.String,
+    headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
+    auth: Schema.optionalWith(UnresolvedHttpMcpAuthConfig, {
+      exact: true,
+      as: "Option",
+    }),
+  }),
+);
+export type ServerMcpConfig = typeof ServerMcpConfig.Type;
+
+const UserServerMcpConfig = Schema.Struct({
+  command: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  args: Schema.optionalWith(Schema.Array(Schema.String), {
+    exact: true,
+    as: "Option",
+  }),
+  cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
+  url: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
+  auth: Schema.optionalWith(UnresolvedHttpMcpAuthConfig, {
+    exact: true,
+    as: "Option",
+  }),
+  enabled: Schema.optionalWith(Schema.Boolean, { exact: true, as: "Option" }),
+  disabled: Schema.optionalWith(Schema.Boolean, { exact: true, as: "Option" }),
+});
+type UserServerMcpConfig = typeof UserServerMcpConfig.Type;
+
+/**
+ * Schema for the JSON representation authored by users.
+ *
+ * This intentionally differs from `PtoolsConfig`: users select a transport by
+ * providing `command` or `url` and may disable a server. Parsing normalizes
+ * that representation into `PtoolsConfig`, whose servers have an explicit
+ * `transport` discriminator and contain only enabled servers. Optional JSON
+ * properties decode directly into `Option` values for functional processing.
+ */
+const UserPtoolsConfig = Schema.Struct({
+  mcpServers: Schema.Record({
+    key: Schema.String,
+    value: UserServerMcpConfig,
+  }),
+  executor: Schema.optionalWith(ExecutorConfig, { exact: true, as: "Option" }),
+});
+type UserPtoolsConfig = typeof UserPtoolsConfig.Type;
+
+/**
+ * Validated, normalized config used internally before secrets are resolved.
+ *
+ * Unlike `UserPtoolsConfig`, this domain value contains explicit transport
+ * discriminators and does not contain disabled servers. Its optional domain
+ * values remain `Option`s until resolution crosses into external contracts.
+ */
+export class PtoolsConfig extends Schema.Class<PtoolsConfig>("PtoolsConfig")({
+  mcpServers: Schema.Record({
+    key: Schema.String,
+    value: ServerMcpConfig,
+  }),
+  executor: Schema.optionalWith(ExecutorConfig, { exact: true, as: "Option" }),
+}) {
+  declare private readonly _ptoolsConfigBrand: void;
 }
 
-export type ServerMcpConfig =
-  | {
-      readonly transport: "stdio";
-      readonly command: string;
-      readonly args?: ReadonlyArray<string>;
-      readonly cwd?: string;
-      readonly env?: Record<string, string>;
-    }
-  | {
-      readonly transport: "http";
-      readonly url: string;
-      readonly headers?: Record<string, string>;
-      readonly auth?: HttpMcpAuthConfig;
-    };
-
-export interface HttpMcpAuthConfig {
-  readonly type: "oauth";
-  readonly scope?: string;
-  readonly resourceMetadataUrl?: string;
-  readonly clientId?: string;
-  readonly clientSecret?: string;
-  readonly clientMetadataUrl?: string;
-  readonly redirectUri?: string;
+export class ResolvedExecutorConfig extends Schema.Class<ResolvedExecutorConfig>(
+  "ResolvedExecutorConfig",
+)({
+  defaultTimeoutMs: Schema.optionalWith(Schema.Number, {
+    exact: true,
+    as: "Option",
+  }),
+}) {
+  declare private readonly _resolvedExecutorConfigBrand: void;
 }
 
-export interface ResolvedPtoolsConfig {
-  readonly mcpServers: ResolvedMcpServers;
-  readonly executor?: {
-    readonly defaultTimeoutMs?: number;
-  };
+export class ResolvedHttpMcpAuthConfig extends Schema.Class<ResolvedHttpMcpAuthConfig>(
+  "ResolvedHttpMcpAuthConfig",
+)({
+  type: Schema.Literal("oauth"),
+  scope: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  resourceMetadataUrl: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+  clientId: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  clientSecret: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+  clientMetadataUrl: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+  redirectUri: Schema.optionalWith(Schema.String, {
+    exact: true,
+    as: "Option",
+  }),
+}) {
+  declare private readonly _resolvedHttpMcpAuthConfigBrand: void;
 }
 
+export class ResolvedStdioMcpConfig extends Schema.Class<ResolvedStdioMcpConfig>(
+  "ResolvedStdioMcpConfig",
+)({
+  transport: Schema.Literal("stdio").pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => "stdio"),
+  ),
+  command: Schema.String,
+  args: Schema.optionalWith(Schema.Array(Schema.String), {
+    exact: true,
+    as: "Option",
+  }),
+  env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
+  cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+}) {
+  declare private readonly _resolvedStdioMcpConfigBrand: void;
+}
+
+export class ResolvedHttpMcpConfig extends Schema.Class<ResolvedHttpMcpConfig>(
+  "ResolvedHttpMcpConfig",
+)({
+  transport: Schema.Literal("http").pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => "http"),
+  ),
+  url: Schema.String,
+  headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
+  auth: Schema.optionalWith(ResolvedHttpMcpAuthConfig, {
+    exact: true,
+    as: "Option",
+  }),
+}) {
+  declare private readonly _resolvedHttpMcpConfigBrand: void;
+}
+
+export type ResolvedMcpConfig = ResolvedStdioMcpConfig | ResolvedHttpMcpConfig;
 export type ResolvedMcpServers = Readonly<Record<string, ResolvedMcpConfig>>;
 
-export type ResolvedMcpConfig =
-  | {
-      readonly transport: "stdio";
-      readonly command: string;
-      readonly args?: ReadonlyArray<string>;
-      readonly env?: Record<string, string>;
-      readonly cwd?: string;
-    }
-  | {
-      readonly transport: "http";
-      readonly url: string;
-      readonly headers?: Record<string, string>;
-      readonly auth?: HttpMcpAuthConfig;
-    };
+export class ResolvedPtoolsConfig extends Schema.Class<ResolvedPtoolsConfig>(
+  "ResolvedPtoolsConfig",
+)({
+  mcpServers: Schema.Record({
+    key: Schema.String,
+    value: Schema.Union(ResolvedStdioMcpConfig, ResolvedHttpMcpConfig),
+  }),
+  executor: Schema.optionalWith(ResolvedExecutorConfig, {
+    exact: true,
+    as: "Option",
+  }),
+}) {
+  declare private readonly _resolvedPtoolsConfigBrand: void;
+}
 
 export interface LoadPtoolsConfigOptions {
   readonly baseDir?: string;
@@ -117,7 +284,7 @@ export const parsePtoolsConfigJson = (
  *
  * @param config Server-owned ptools config.
  * @param env Environment map used as the source for explicit env refs.
- * @returns Config that can be passed directly to `makeMcpRegistryLive`.
+ * @returns Resolved ptools-owned runtime config.
  */
 export const resolvePtoolsConfig = (
   config: PtoolsConfig,
@@ -156,26 +323,28 @@ const resolvePtoolsConfigWithLookup = (
   options: LoadPtoolsConfigOptions,
 ): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const mcpServers: Record<string, ResolvedMcpConfig> = {};
-
-    for (const [serverName, serverConfig] of Object.entries(
-      config.mcpServers,
-    )) {
-      mcpServers[serverName] =
-        serverConfig.transport === "stdio"
-          ? yield* resolveStdioConfig(
+    const mcpServerEntries = yield* Effect.forEach(
+      Object.entries(config.mcpServers),
+      ([serverName, serverConfig]) =>
+        (serverConfig.transport === "stdio"
+          ? resolveStdioConfig(
               serverName,
               serverConfig,
               lookupSecret,
               options,
             )
-          : yield* resolveHttpConfig(serverName, serverConfig, lookupSecret);
-    }
+          : resolveHttpConfig(serverName, serverConfig, lookupSecret)
+        ).pipe(Effect.map((resolved) => [serverName, resolved] as const)),
+    );
 
-    return {
-      mcpServers,
-      ...(config.executor === undefined ? {} : { executor: config.executor }),
-    };
+    return ResolvedPtoolsConfig.make({
+      mcpServers: Object.fromEntries(mcpServerEntries),
+      executor: Option.map(config.executor, (executor) =>
+        ResolvedExecutorConfig.make({
+          defaultTimeoutMs: executor.defaultTimeoutMs,
+        }),
+      ),
+    });
   });
 
 export const hashResolvedMcpConfig = (config: ResolvedMcpConfig): string =>
@@ -198,54 +367,35 @@ const resolveStdioConfig = (
       config.command,
       lookupSecret,
     );
-    const args =
-      config.args === undefined
-        ? undefined
-        : yield* Effect.all(
-            config.args.map((arg, index) =>
-              resolveEnvString(
-                serverName,
-                `args[${index}]`,
-                arg,
-                lookupSecret,
-              ),
-            ),
-          );
-    const cwd =
-      config.cwd === undefined
-        ? undefined
-        : yield* resolveEnvString(
-            serverName,
-            "cwd",
-            config.cwd,
-            lookupSecret,
-          ).pipe(
-            Effect.map((resolvedCwd) =>
-              options.baseDir !== undefined && !isAbsolutePath(resolvedCwd)
-                ? (options.resolvePath ?? resolveRelativePath)(
-                    options.baseDir,
-                    resolvedCwd,
-                  )
-                : resolvedCwd,
-            ),
-          );
-    const resolvedEnv =
-      config.env === undefined
-        ? {}
-        : yield* resolveStringRecord(
-            serverName,
-            "env",
-            config.env,
-            lookupSecret,
-          );
+    const args = yield* Effect.transposeMapOption(config.args, (args) =>
+      Effect.all(
+        args.map((arg, index) =>
+          resolveEnvString(serverName, `args[${index}]`, arg, lookupSecret),
+        ),
+      ),
+    );
+    const cwd = yield* Effect.transposeMapOption(config.cwd, (cwd) =>
+      resolveEnvString(serverName, "cwd", cwd, lookupSecret).pipe(
+        Effect.map((resolvedCwd) =>
+          options.baseDir !== undefined && !isAbsolutePath(resolvedCwd)
+            ? (options.resolvePath ?? resolveRelativePath)(
+                options.baseDir,
+                resolvedCwd,
+              )
+            : resolvedCwd,
+        ),
+      ),
+    );
+    const resolvedEnv = yield* Effect.transposeMapOption(config.env, (env) =>
+      resolveStringRecord(serverName, "env", env, lookupSecret),
+    );
 
-    return {
-      transport: "stdio" as const,
+    return ResolvedStdioMcpConfig.make({
       command,
-      ...(args === undefined ? {} : { args }),
-      ...(cwd === undefined ? {} : { cwd }),
-      ...(Object.keys(resolvedEnv).length === 0 ? {} : { env: resolvedEnv }),
-    };
+      args,
+      cwd,
+      env: resolvedEnv,
+    });
   });
 
 const resolveHttpConfig = (
@@ -260,98 +410,60 @@ const resolveHttpConfig = (
       config.url,
       lookupSecret,
     );
-    const headers =
-      config.headers === undefined
-        ? {}
-        : yield* resolveStringRecord(
-            serverName,
-            "headers",
-            config.headers,
-            lookupSecret,
-          );
-    const auth =
-      config.auth === undefined
-        ? undefined
-        : yield* resolveHttpAuthConfig(serverName, config.auth, lookupSecret);
+    const headers = yield* Effect.transposeMapOption(
+      config.headers,
+      (headers) =>
+        resolveStringRecord(serverName, "headers", headers, lookupSecret),
+    );
+    const auth = yield* Effect.transposeMapOption(config.auth, (auth) =>
+      resolveHttpAuthConfig(serverName, auth, lookupSecret),
+    );
 
-    return {
-      transport: "http" as const,
+    return ResolvedHttpMcpConfig.make({
       url,
-      ...(Object.keys(headers).length === 0 ? {} : { headers }),
-      ...(auth === undefined ? {} : { auth }),
-    };
+      headers,
+      auth,
+    });
   });
 
 const resolveHttpAuthConfig = (
   serverName: string,
-  config: HttpMcpAuthConfig,
+  config: UnresolvedHttpMcpAuthConfig,
   lookupSecret: SecretLookup,
-): Effect.Effect<HttpMcpAuthConfig, ServerConfigError> =>
+): Effect.Effect<ResolvedHttpMcpAuthConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const scope =
-      config.scope === undefined
-        ? undefined
-        : yield* resolveEnvString(
-            serverName,
-            "auth.scope",
-            config.scope,
-            lookupSecret,
-          );
-    const resourceMetadataUrl =
-      config.resourceMetadataUrl === undefined
-        ? undefined
-        : yield* resolveEnvString(
-            serverName,
-            "auth.resourceMetadataUrl",
-            config.resourceMetadataUrl,
-            lookupSecret,
-          );
-    const clientId =
-      config.clientId === undefined
-        ? undefined
-        : yield* resolveEnvString(
-            serverName,
-            "auth.clientId",
-            config.clientId,
-            lookupSecret,
-          );
-    const clientSecret =
-      config.clientSecret === undefined
-        ? undefined
-        : yield* resolveEnvString(
-            serverName,
-            "auth.clientSecret",
-            config.clientSecret,
-            lookupSecret,
-          );
-    const clientMetadataUrl =
-      config.clientMetadataUrl === undefined
-        ? undefined
-        : yield* resolveEnvString(
-            serverName,
-            "auth.clientMetadataUrl",
-            config.clientMetadataUrl,
-            lookupSecret,
-          );
-    const redirectUri =
-      config.redirectUri === undefined
-        ? undefined
-        : yield* resolveEnvString(
-            serverName,
-            "auth.redirectUri",
-            config.redirectUri,
-            lookupSecret,
-          );
+    const resolveField = (fieldName: string, value: Option.Option<string>) =>
+      Effect.transposeMapOption(value, (value) =>
+        resolveEnvString(serverName, fieldName, value, lookupSecret),
+      );
+    const scope = yield* resolveField("auth.scope", config.scope);
+    const resourceMetadataUrl = yield* resolveField(
+      "auth.resourceMetadataUrl",
+      config.resourceMetadataUrl,
+    );
+    const clientId = yield* resolveField("auth.clientId", config.clientId);
+    const clientSecret = yield* resolveField(
+      "auth.clientSecret",
+      config.clientSecret,
+    );
+    const clientMetadataUrl = yield* resolveField(
+      "auth.clientMetadataUrl",
+      config.clientMetadataUrl,
+    );
+    const redirectUri = yield* resolveField(
+      "auth.redirectUri",
+      config.redirectUri,
+    );
 
-    return {
+    return ResolvedHttpMcpAuthConfig.make({
       type: "oauth",
-      ...(scope === undefined ? {} : { scope }),
-      ...(resourceMetadataUrl === undefined ? {} : { resourceMetadataUrl }),
-      ...(clientId === undefined ? {} : { clientId }),
-      ...(clientSecret === undefined ? {} : { clientSecret }),
-      ...(clientMetadataUrl === undefined ? {} : { clientMetadataUrl }),
-      ...(redirectUri === undefined ? {} : { redirectUri }),
-    };
+      scope,
+      resourceMetadataUrl,
+      clientId,
+      clientSecret,
+      clientMetadataUrl,
+      redirectUri,
+    });
   });
 
 const resolveStringRecord = (
@@ -360,20 +472,14 @@ const resolveStringRecord = (
   record: Readonly<Record<string, string>>,
   lookupSecret: SecretLookup,
 ): Effect.Effect<Record<string, string>, ServerConfigError> =>
-  Effect.gen(function* () {
-    const result: Record<string, string> = {};
-
-    for (const [key, value] of Object.entries(record)) {
-      result[key] = yield* resolveEnvString(
-        serverName,
-        `${fieldName}.${key}`,
-        value,
-        lookupSecret,
-      );
-    }
-
-    return result;
-  });
+  Effect.forEach(Object.entries(record), ([key, value]) =>
+    resolveEnvString(
+      serverName,
+      `${fieldName}.${key}`,
+      value,
+      lookupSecret,
+    ).pipe(Effect.map((resolved) => [key, resolved] as const)),
+  ).pipe(Effect.map((entries) => Object.fromEntries(entries)));
 
 const ENV_PLACEHOLDER_PATTERN = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
@@ -417,129 +523,54 @@ const parsePtoolsConfigValue = (
   source: string,
 ): Effect.Effect<PtoolsConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const root = yield* expectRecord(
-      value,
-      `Invalid ptools config in ${source}`,
+    const userConfig: UserPtoolsConfig = yield* Schema.decodeUnknown(
+      UserPtoolsConfig,
+    )(value, {
+      errors: "all",
+      onExcessProperty: "error",
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ServerConfigError({
+            message: `Invalid ptools config in ${source}: ${cause.message}`,
+            cause,
+          }),
+      ),
     );
-    const rootKeys = new Set(Object.keys(root));
-
-    for (const key of rootKeys) {
-      if (key !== "mcpServers" && key !== "executor") {
-        return yield* invalidConfig(
-          source,
-          `Unsupported top-level field ${key}`,
-        );
-      }
-    }
-
-    const mcpServers = yield* expectRecord(
-      root.mcpServers,
-      `Invalid ptools config in ${source}: mcpServers must be an object`,
+    const parsedServerEntries = yield* Effect.forEach(
+      Object.entries(userConfig.mcpServers),
+      ([serverName, serverConfig]) =>
+        normalizeServerConfig(serverName, serverConfig, source).pipe(
+          Effect.map(
+            Option.map((serverConfig) => [serverName, serverConfig] as const),
+          ),
+        ),
     );
-    const executor =
-      root.executor === undefined
-        ? undefined
-        : yield* parseExecutorConfig(root.executor, source);
-    const parsedServers: Record<string, ServerMcpConfig> = {};
+    const parsedServers = Object.fromEntries(Arr.getSomes(parsedServerEntries));
 
-    for (const [serverName, rawServerConfig] of Object.entries(mcpServers)) {
-      const parsed = yield* parseServerConfig(
-        serverName,
-        rawServerConfig,
-        source,
-      );
-
-      if (parsed !== undefined) {
-        parsedServers[serverName] = parsed;
-      }
-    }
-
-    return {
+    return PtoolsConfig.make({
       mcpServers: parsedServers,
-      ...(executor === undefined ? {} : { executor }),
-    };
+      executor: userConfig.executor,
+    });
   });
 
-const parseExecutorConfig = (
-  value: unknown,
-  source: string,
-): Effect.Effect<{ readonly defaultTimeoutMs?: number }, ServerConfigError> =>
-  Effect.gen(function* () {
-    const executor = yield* expectRecord(
-      value,
-      `Invalid ptools config in ${source}: executor must be an object`,
-    );
-
-    for (const key of Object.keys(executor)) {
-      if (key !== "defaultTimeoutMs") {
-        return yield* invalidConfig(
-          source,
-          `Unsupported executor field ${key}`,
-        );
-      }
-    }
-
-    if (
-      executor.defaultTimeoutMs !== undefined &&
-      typeof executor.defaultTimeoutMs !== "number"
-    ) {
-      return yield* invalidConfig(
-        source,
-        "executor.defaultTimeoutMs must be a number",
-      );
-    }
-
-    return executor.defaultTimeoutMs === undefined
-      ? {}
-      : { defaultTimeoutMs: executor.defaultTimeoutMs };
-  });
-
-const parseServerConfig = (
+const normalizeServerConfig = (
   serverName: string,
-  value: unknown,
+  config: UserServerMcpConfig,
   source: string,
-): Effect.Effect<ServerMcpConfig | undefined, ServerConfigError> =>
+): Effect.Effect<Option.Option<ServerMcpConfig>, ServerConfigError> =>
   Effect.gen(function* () {
-    const config = yield* expectRecord(
-      value,
-      `Invalid ptools config in ${source}: mcpServers.${serverName} must be an object`,
-    );
-
-    for (const field of Object.keys(config)) {
-      const unsupported = unsupportedServerFieldMessage(field);
-
-      if (unsupported !== undefined) {
-        return yield* invalidServerConfig(source, serverName, unsupported);
-      }
+    if (
+      Option.contains(config.enabled, false) ||
+      Option.contains(config.disabled, true)
+    ) {
+      return Option.none();
     }
 
-    const enabled = config.enabled;
-    const disabled = config.disabled;
+    const command = config.command;
+    const url = config.url;
 
-    if (enabled !== undefined && typeof enabled !== "boolean") {
-      return yield* invalidServerConfig(
-        source,
-        serverName,
-        "enabled must be a boolean when provided",
-      );
-    }
-
-    if (disabled !== undefined && typeof disabled !== "boolean") {
-      return yield* invalidServerConfig(
-        source,
-        serverName,
-        "disabled must be a boolean when provided",
-      );
-    }
-
-    if (enabled === false || disabled === true) {
-      return undefined;
-    }
-
-    const hasCommand = config.command !== undefined;
-    const hasUrl = config.url !== undefined;
-
-    if (hasCommand && hasUrl) {
+    if (Option.isSome(command) && Option.isSome(url)) {
       return yield* invalidServerConfig(
         source,
         serverName,
@@ -547,298 +578,41 @@ const parseServerConfig = (
       );
     }
 
-    if (!hasCommand && !hasUrl) {
-      return yield* invalidServerConfig(
-        source,
-        serverName,
-        "must provide command for stdio or url for HTTP",
-      );
+    if (Option.isSome(command)) {
+      return Option.some(normalizeStdioServerConfig(config, command.value));
     }
 
-    return hasCommand
-      ? yield* parseStdioServerConfig(serverName, config, source)
-      : yield* parseHttpServerConfig(serverName, config, source);
-  });
+    if (Option.isSome(url)) {
+      return Option.some(normalizeHttpServerConfig(config, url.value));
+    }
 
-const parseStdioServerConfig = (
-  serverName: string,
-  config: Readonly<Record<string, unknown>>,
-  source: string,
-): Effect.Effect<ServerMcpConfig, ServerConfigError> =>
-  Effect.gen(function* () {
-    const command = yield* expectStringField(
-      config.command,
+    return yield* invalidServerConfig(
       source,
       serverName,
-      "command",
+      "must provide command for stdio or url for HTTP",
     );
-    const args =
-      config.args === undefined
-        ? undefined
-        : yield* expectStringArrayField(
-            config.args,
-            source,
-            serverName,
-            "args",
-          );
-    const cwd =
-      config.cwd === undefined
-        ? undefined
-        : yield* expectStringField(config.cwd, source, serverName, "cwd");
-    const env =
-      config.env === undefined
-        ? undefined
-        : yield* expectStringRecordField(config.env, source, serverName, "env");
-
-    return {
-      transport: "stdio",
-      command,
-      ...(args === undefined ? {} : { args }),
-      ...(cwd === undefined ? {} : { cwd }),
-      ...(env === undefined ? {} : { env }),
-    };
   });
 
-const parseHttpServerConfig = (
-  serverName: string,
-  config: Readonly<Record<string, unknown>>,
-  source: string,
-): Effect.Effect<ServerMcpConfig, ServerConfigError> =>
-  Effect.gen(function* () {
-    const url = yield* expectStringField(config.url, source, serverName, "url");
-    const headers =
-      config.headers === undefined
-        ? undefined
-        : yield* expectStringRecordField(
-            config.headers,
-            source,
-            serverName,
-            "headers",
-          );
-    const auth =
-      config.auth === undefined
-        ? undefined
-        : yield* parseHttpAuthConfig(serverName, config.auth, source);
+const normalizeStdioServerConfig = (
+  config: UserServerMcpConfig,
+  command: string,
+): ServerMcpConfig => ({
+  transport: "stdio",
+  command,
+  args: config.args,
+  cwd: config.cwd,
+  env: config.env,
+});
 
-    return {
-      transport: "http",
-      url,
-      ...(headers === undefined ? {} : { headers }),
-      ...(auth === undefined ? {} : { auth }),
-    };
-  });
-
-const parseHttpAuthConfig = (
-  serverName: string,
-  value: unknown,
-  source: string,
-): Effect.Effect<HttpMcpAuthConfig, ServerConfigError> =>
-  Effect.gen(function* () {
-    const auth = yield* expectRecord(
-      value,
-      `Invalid ptools config in ${source}: mcpServers.${serverName}.auth must be an object`,
-    );
-
-    for (const key of Object.keys(auth)) {
-      if (
-        key !== "type" &&
-        key !== "scope" &&
-        key !== "resourceMetadataUrl" &&
-        key !== "clientId" &&
-        key !== "clientSecret" &&
-        key !== "clientMetadataUrl" &&
-        key !== "redirectUri"
-      ) {
-        return yield* invalidServerConfig(
-          source,
-          serverName,
-          `Unsupported auth field ${key}`,
-        );
-      }
-    }
-
-    if (auth.type !== "oauth") {
-      return yield* invalidServerConfig(
-        source,
-        serverName,
-        'auth.type must be "oauth"',
-      );
-    }
-
-    const scope =
-      auth.scope === undefined
-        ? undefined
-        : yield* expectStringField(
-            auth.scope,
-            source,
-            serverName,
-            "auth.scope",
-          );
-    const resourceMetadataUrl =
-      auth.resourceMetadataUrl === undefined
-        ? undefined
-        : yield* expectStringField(
-            auth.resourceMetadataUrl,
-            source,
-            serverName,
-            "auth.resourceMetadataUrl",
-          );
-    const clientId =
-      auth.clientId === undefined
-        ? undefined
-        : yield* expectStringField(
-            auth.clientId,
-            source,
-            serverName,
-            "auth.clientId",
-          );
-    const clientSecret =
-      auth.clientSecret === undefined
-        ? undefined
-        : yield* expectStringField(
-            auth.clientSecret,
-            source,
-            serverName,
-            "auth.clientSecret",
-          );
-    const clientMetadataUrl =
-      auth.clientMetadataUrl === undefined
-        ? undefined
-        : yield* expectStringField(
-            auth.clientMetadataUrl,
-            source,
-            serverName,
-            "auth.clientMetadataUrl",
-          );
-    const redirectUri =
-      auth.redirectUri === undefined
-        ? undefined
-        : yield* expectStringField(
-            auth.redirectUri,
-            source,
-            serverName,
-            "auth.redirectUri",
-          );
-
-    return {
-      type: "oauth",
-      ...(scope === undefined ? {} : { scope }),
-      ...(resourceMetadataUrl === undefined ? {} : { resourceMetadataUrl }),
-      ...(clientId === undefined ? {} : { clientId }),
-      ...(clientSecret === undefined ? {} : { clientSecret }),
-      ...(clientMetadataUrl === undefined ? {} : { clientMetadataUrl }),
-      ...(redirectUri === undefined ? {} : { redirectUri }),
-    };
-  });
-
-const unsupportedServerFieldMessage = (field: string): string | undefined => {
-  switch (field) {
-    case "command":
-    case "args":
-    case "cwd":
-    case "env":
-    case "url":
-    case "headers":
-    case "auth":
-    case "enabled":
-    case "disabled":
-      return undefined;
-    case "transport":
-    case "type":
-      return `${field} is not part of the ptools config shape; use command for stdio servers or url for HTTP servers`;
-    case "serverUrl":
-      return "serverUrl is not supported; use url for HTTP MCP servers";
-    case "envFrom":
-      return "envFrom is not supported; use ${env:NAME} placeholders inside env values";
-    case "headersFromEnv":
-      return "headersFromEnv is not supported; use ${env:NAME} placeholders inside headers values";
-    case "tools":
-    case "enabled_tools":
-    case "disabled_tools":
-    case "envFile":
-    case "oauth":
-    case "authorization":
-    case "approvalPolicy":
-    case "approval_policy":
-      return `${field} is not supported in ptools MCP server config yet`;
-    default:
-      return `Unsupported MCP server field ${field}`;
-  }
-};
-
-const expectStringField = (
-  value: unknown,
-  source: string,
-  serverName: string,
-  fieldName: string,
-): Effect.Effect<string, ServerConfigError> =>
-  typeof value === "string"
-    ? Effect.succeed(value)
-    : invalidServerConfig(source, serverName, `${fieldName} must be a string`);
-
-const expectStringArrayField = (
-  value: unknown,
-  source: string,
-  serverName: string,
-  fieldName: string,
-): Effect.Effect<ReadonlyArray<string>, ServerConfigError> =>
-  Effect.gen(function* () {
-    if (!Array.isArray(value)) {
-      return yield* invalidServerConfig(
-        source,
-        serverName,
-        `${fieldName} must be an array of strings`,
-      );
-    }
-
-    for (const [index, item] of value.entries()) {
-      if (typeof item !== "string") {
-        return yield* invalidServerConfig(
-          source,
-          serverName,
-          `${fieldName}[${index}] must be a string`,
-        );
-      }
-    }
-
-    return value;
-  });
-
-const expectStringRecordField = (
-  value: unknown,
-  source: string,
-  serverName: string,
-  fieldName: string,
-): Effect.Effect<Record<string, string>, ServerConfigError> =>
-  Effect.gen(function* () {
-    const record = yield* expectRecord(
-      value,
-      `Invalid ptools config in ${source}: mcpServers.${serverName}.${fieldName} must be an object of strings`,
-    );
-    const result: Record<string, string> = {};
-
-    for (const [key, item] of Object.entries(record)) {
-      if (typeof item !== "string") {
-        return yield* invalidServerConfig(
-          source,
-          serverName,
-          `${fieldName}.${key} must be a string`,
-        );
-      }
-
-      result[key] = item;
-    }
-
-    return result;
-  });
-
-const expectRecord = (
-  value: unknown,
-  message: string,
-): Effect.Effect<Record<string, unknown>, ServerConfigError> =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-    ? Effect.succeed(value as Record<string, unknown>)
-    : Effect.fail(new ServerConfigError({ message }));
+const normalizeHttpServerConfig = (
+  config: UserServerMcpConfig,
+  url: string,
+): ServerMcpConfig => ({
+  transport: "http",
+  url,
+  headers: config.headers,
+  auth: config.auth,
+});
 
 const invalidConfig = (
   source: string,

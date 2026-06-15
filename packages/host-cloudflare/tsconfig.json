@@ -1,7 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../code-mode-api" }, { "path": "../config" }],
+  "references": [
+    { "path": "../auth" },
+    { "path": "../code-mode-api" },
+    { "path": "../config" },
+    { "path": "../mcp-registry" }
+  ],
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",

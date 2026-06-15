@@ -1,5 +1,6 @@
 import { AuthCoordinator, AuthError } from "@ptools/auth";
-import { Effect, Layer } from "effect";
+import { ResolvedStdioMcpConfig } from "@ptools/config";
+import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { McpConnector } from "../src/connector.js";
 import { McpConnectionError } from "../src/errors.js";
@@ -28,10 +29,7 @@ describe("McpRegistry connector integration", () => {
       }).pipe(
         Effect.provide(
           makeMcpRegistryLive({
-            fixture: {
-              transport: "stdio",
-              command: "ignored-by-fake-connector",
-            },
+            fixture: stdioConfig(),
           }).pipe(
             Layer.provide(makeFakeMcpConnectorLive()),
             Layer.provide(makeTestAuthCoordinatorLive()),
@@ -86,14 +84,8 @@ describe("McpRegistry connector integration", () => {
       }).pipe(
         Effect.provide(
           makeMcpRegistryLive({
-            fixture: {
-              transport: "stdio",
-              command: "ignored-by-fake-connector",
-            },
-            unavailable: {
-              transport: "stdio",
-              command: "ignored-by-fake-connector",
-            },
+            fixture: stdioConfig(),
+            unavailable: stdioConfig(),
           }).pipe(
             Layer.provide(makeFakeMcpConnectorLive()),
             Layer.provide(makeTestAuthCoordinatorLive()),
@@ -125,10 +117,7 @@ describe("McpRegistry connector integration", () => {
       }).pipe(
         Effect.provide(
           makeMcpRegistryLive({
-            unavailable: {
-              transport: "stdio",
-              command: "ignored-by-fake-connector",
-            },
+            unavailable: stdioConfig(),
           }).pipe(
             Layer.provide(makeFakeMcpConnectorLive()),
             Layer.provide(makeTestAuthCoordinatorLive()),
@@ -163,10 +152,7 @@ describe("McpRegistry connector integration", () => {
       }).pipe(
         Effect.provide(
           makeMcpRegistryLive({
-            broken: {
-              transport: "stdio",
-              command: "ignored-by-fake-connector",
-            },
+            broken: stdioConfig(),
           }).pipe(
             Layer.provide(makeFakeMcpConnectorLive()),
             Layer.provide(makeTestAuthCoordinatorLive()),
@@ -203,6 +189,14 @@ describe("McpRegistry connector integration", () => {
     );
   });
 });
+
+const stdioConfig = (): ResolvedStdioMcpConfig =>
+  ResolvedStdioMcpConfig.make({
+    command: "ignored-by-fake-connector",
+    args: Option.none(),
+    env: Option.none(),
+    cwd: Option.none(),
+  });
 
 const makeFakeMcpConnectorLive = () =>
   Layer.succeed(McpConnector, {

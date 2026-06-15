@@ -1,73 +1,107 @@
 import type { CodeModeRequest, CodeModeResponse } from "@ptools/code-mode-api";
+import { AuthCoordinator } from "@ptools/auth";
 import {
   ConfigSource,
-  parsePtoolsConfigJson,
-  type PtoolsConfig,
+  ServerConfigError,
   type ResolvedPtoolsConfig,
-  type ServerConfigError,
 } from "@ptools/config";
 import { DurableObject } from "cloudflare:workers";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, ManagedRuntime, Option } from "effect";
 import {
-  CODE_MODE_OBJECT_CONFIG_BLOB_KEY,
-  CODE_MODE_OBJECT_SECRET_KEY_PREFIX,
+  CloudflareOAuthFlow,
+  CodeModeObjectIdentity,
+  CodeModeObjectPlatformLayer,
+  CodeModeObjectRequestOriginLayer,
+  CodeModeObjectStorage,
+  DurableObjectAuthLayer,
   DurableObjectConfigSourceLayer,
+  DurableObjectCredentialsStoreLayer,
   DurableObjectSecretResolverLayer,
-  codeModeObjectSecretKey,
-  type StoredConfigBlob,
-} from "../layers/config.js";
+  makeCodeModeObjectStorage,
+} from "../layers/index.js";
 import type { PtoolsWorkerEnv } from "../worker/ingress.js";
+import {
+  ParsedCompleteMcpOAuthCallback,
+  codeModeObjectMcpAuthErrorFromCause,
+  finishMcpOAuthCallback,
+  getMcpAuthStatus,
+  initializeConfiguredMcpAuth,
+  parseCompleteMcpOAuthCallback,
+  renderOAuthMessage,
+  startMcpAuth,
+} from "./codeModeObject/auth.js";
+import {
+  configureCodeModeObject,
+  configureCodeModeObjectSecrets,
+} from "./codeModeObject/config.js";
+import type {
+  CodeModeObjectMcpAuthError,
+  CompleteMcpOAuthCallbackInput,
+  CompleteMcpOAuthCallbackResponse,
+  ConfigureCodeModeObjectInput,
+  ConfigureCodeModeObjectResponse,
+  ConfigureCodeModeObjectSecretsInput,
+  ConfigureCodeModeObjectSecretsResponse,
+  GetMcpAuthStatusInput,
+  GetMcpAuthStatusResponse,
+  StartMcpAuthInput,
+  StartMcpAuthResponse,
+} from "./codeModeObject/rpc.js";
 
-export interface ConfigureCodeModeObjectInput {
-  readonly rawConfigJson: string;
-}
+export type {
+  CodeModeObjectMcpAuthError,
+  CodeModeObjectRpc,
+  CompleteMcpOAuthCallbackInput,
+  CompleteMcpOAuthCallbackResponse,
+  CompleteMcpOAuthCallbackResult,
+  ConfigureCodeModeObjectError,
+  ConfigureCodeModeObjectInput,
+  ConfigureCodeModeObjectResponse,
+  ConfigureCodeModeObjectResult,
+  ConfigureCodeModeObjectSecretsInput,
+  ConfigureCodeModeObjectSecretsResponse,
+  ConfigureCodeModeObjectSecretsResult,
+  GetMcpAuthStatusInput,
+  GetMcpAuthStatusResponse,
+  StartMcpAuthInput,
+  StartMcpAuthResponse,
+} from "./codeModeObject/rpc.js";
 
-export interface ConfigureCodeModeObjectResult {
-  readonly hostId: string;
-  readonly serverCount: number;
-  readonly updatedAt: string;
-}
+type HostRuntime = ManagedRuntime.ManagedRuntime<
+  AuthCoordinator | CloudflareOAuthFlow | ConfigSource,
+  never
+>;
 
-export interface ConfigureCodeModeObjectSecretsInput {
-  readonly rawSecretsJson: string;
-}
-
-export interface ConfigureCodeModeObjectSecretsResult {
-  readonly hostId: string;
-  readonly secretCount: number;
-  readonly updatedAt: string;
-}
-
-export type ConfigureCodeModeObjectResponse =
-  | {
-      readonly ok: true;
-      readonly result: ConfigureCodeModeObjectResult;
-    }
-  | {
-      readonly ok: false;
-      readonly error: ConfigureCodeModeObjectError;
-    };
-
-export type ConfigureCodeModeObjectSecretsResponse =
-  | {
-      readonly ok: true;
-      readonly result: ConfigureCodeModeObjectSecretsResult;
-    }
-  | {
-      readonly ok: false;
-      readonly error: ConfigureCodeModeObjectError;
-    };
-
-export interface ConfigureCodeModeObjectError {
-  readonly code:
-    | "invalid_config"
-    | "invalid_secrets"
-    | "unsupported_config"
-    | "config_storage_unavailable";
-  readonly message: string;
+interface CachedHostRuntime {
+  readonly origin: string;
+  readonly runtime: HostRuntime;
 }
 
 export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
+  /**
+   * Platform services are passive values owned by this Durable Object instance.
+   *
+   * The storage adapter is constructed once here and this same Layer.succeed
+   * graph is provided to pre-config workflows and the config-dependent host
+   * runtime. A separate platform ManagedRuntime or shared MemoMap would only be
+   * needed if these services later acquire scoped resources, start background
+   * fibers, or require runtime-specific configuration.
+   */
+  readonly #platformLayer: Layer.Layer<
+    CodeModeObjectStorage | CodeModeObjectIdentity
+  >;
+
+  #hostRuntime: Option.Option<CachedHostRuntime> = Option.none();
+
+  constructor(ctx: DurableObjectState, env: PtoolsWorkerEnv) {
+    super(ctx, env);
+
+    this.#platformLayer = CodeModeObjectPlatformLayer({
+      storage: makeCodeModeObjectStorage(ctx.storage),
+      hostId: requireHostId(ctx),
+    });
+  }
+
   call(_request: CodeModeRequest): Promise<CodeModeResponse> {
     return Effect.runPromise(
       Effect.die(
@@ -80,22 +114,14 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     input: ConfigureCodeModeObjectInput,
   ): Promise<ConfigureCodeModeObjectResponse> {
     return Effect.runPromise(
-      configureCodeModeObject({
-        storage: this.ctx.storage,
-        hostId: this.hostId,
-        rawConfigJson: input.rawConfigJson,
-      }).pipe(
-        Effect.match({
-          onFailure: (error) => ({
-            ok: false as const,
-            error,
-          }),
-          onSuccess: (result) => ({
-            ok: true as const,
-            result,
-          }),
-        }),
-      ),
+      Effect.gen(this, function* () {
+        const result = yield* configureCodeModeObject({
+          rawConfigJson: input.rawConfigJson,
+        });
+        yield* this.disposeHostRuntimeEffect();
+
+        return result;
+      }).pipe(Effect.provide(this.#platformLayer), toRpcResponse),
     );
   }
 
@@ -103,21 +129,86 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     input: ConfigureCodeModeObjectSecretsInput,
   ): Promise<ConfigureCodeModeObjectSecretsResponse> {
     return Effect.runPromise(
-      configureCodeModeObjectSecrets({
-        storage: this.ctx.storage,
-        hostId: this.hostId,
-        rawSecretsJson: input.rawSecretsJson,
+      Effect.gen(this, function* () {
+        const result = yield* configureCodeModeObjectSecrets({
+          rawSecretsJson: input.rawSecretsJson,
+        });
+        yield* this.disposeHostRuntimeEffect();
+
+        return result;
+      }).pipe(Effect.provide(this.#platformLayer), toRpcResponse),
+    );
+  }
+
+  mcpAuthStatus(
+    input: GetMcpAuthStatusInput,
+  ): Promise<GetMcpAuthStatusResponse> {
+    return this.runHostMcpAuthRpc(input.origin, getMcpAuthStatus());
+  }
+
+  startMcpAuth(input: StartMcpAuthInput): Promise<StartMcpAuthResponse> {
+    return this.runHostMcpAuthRpc(
+      input.origin,
+      startMcpAuth({
+        serverName: input.serverName,
+        force: Option.fromNullable(input.force).pipe(
+          Option.getOrElse(() => false),
+        ),
+      }),
+    );
+  }
+
+  /**
+   * Handles the browser redirect after an upstream MCP OAuth provider
+   * authorizes a server. The Worker forwards the raw callback request here;
+   * this method returns an HTML page the user sees in the browser.
+   *
+   * The flow is split into two phases:
+   * 1. Parse + verify state (platform layer only) — cheap early exit for bad
+   *    callbacks or provider-side errors.
+   * 2. Exchange code for tokens (full host runtime) — only when state is valid
+   *    and the provider returned an authorization code.
+   */
+  completeMcpOAuthCallback(
+    input: CompleteMcpOAuthCallbackInput,
+  ): Promise<CompleteMcpOAuthCallbackResponse> {
+    return Effect.runPromise(
+      // Phase 1: parse callback params and verify/consume the OAuth state nonce.
+      parseCompleteMcpOAuthCallback({
+        provider: input.provider,
+        method: input.method,
+        url: input.url,
+        bodyText: Option.fromNullable(input.bodyText),
       }).pipe(
-        Effect.match({
-          onFailure: (error) => ({
-            ok: false as const,
-            error,
+        Effect.provide(this.#platformLayer),
+        Effect.flatMap(
+          ParsedCompleteMcpOAuthCallback.$match({
+            // Provider returned ?error=... — HTML response is already built.
+            Complete: ({ result }) => Effect.succeed(result),
+            // Valid code + state — exchange the code and render a success page.
+            Finish: (finish) =>
+              Effect.tryPromise({
+                try: () =>
+                  this.runInHostRuntime(
+                    input.origin,
+                    finishMcpOAuthCallback(finish).pipe(
+                      Effect.map(() => ({
+                        status: 200,
+                        headers: {
+                          "content-type": "text/html; charset=utf-8",
+                        },
+                        body: renderOAuthMessage(
+                          "Authorization complete",
+                          `${finish.serverName} is connected. You can return to your MCP client and retry.`,
+                        ),
+                      })),
+                    ),
+                  ),
+                catch: codeModeObjectMcpAuthErrorFromCause,
+              }),
           }),
-          onSuccess: (result) => ({
-            ok: true as const,
-            result,
-          }),
-        }),
+        ),
+        toRpcResponse,
       ),
     );
   }
@@ -132,187 +223,132 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
       return yield* source.load;
     }).pipe(
       Effect.provide(
-        Layer.provide(
-          DurableObjectConfigSourceLayer({
-            storage: this.ctx.storage,
-            sourceLabel: `Cloudflare host ${this.hostId} config`,
-          }),
-          DurableObjectSecretResolverLayer({
-            storage: this.ctx.storage,
-          }),
-        ),
+        this.configLayer().pipe(Layer.provide(this.#platformLayer)),
       ),
     );
   }
 
-  private get hostId(): string {
-    const hostId = this.ctx.id.name;
+  private async runInHostRuntime<A, E>(
+    origin: string,
+    effect: Effect.Effect<
+      A,
+      E,
+      AuthCoordinator | CloudflareOAuthFlow | ConfigSource
+    >,
+  ): Promise<A> {
+    const runtime = await this.getOrCreateHostRuntime(origin);
 
-    if (hostId === undefined) {
-      throw new Error("CodeModeObject must be addressed by name.");
+    return runtime.runPromise(effect);
+  }
+
+  private runHostMcpAuthRpc<A>(
+    origin: string,
+    effect: Effect.Effect<
+      A,
+      CodeModeObjectMcpAuthError,
+      AuthCoordinator | CloudflareOAuthFlow | ConfigSource
+    >,
+  ): Promise<
+    | { readonly ok: true; readonly result: A }
+    | { readonly ok: false; readonly error: CodeModeObjectMcpAuthError }
+  > {
+    return Effect.runPromise(
+      Effect.tryPromise({
+        try: () => this.runInHostRuntime(origin, effect),
+        catch: codeModeObjectMcpAuthErrorFromCause,
+      }).pipe(toRpcResponse),
+    );
+  }
+
+  private getOrCreateHostRuntime(origin: string): Promise<HostRuntime> {
+    return Option.match(this.#hostRuntime, {
+      onNone: () => this.createHostRuntime(origin),
+      onSome: (cached) =>
+        cached.origin === origin
+          ? Promise.resolve(cached.runtime)
+          : this.replaceHostRuntime(cached, origin),
+    });
+  }
+
+  private async createHostRuntime(origin: string): Promise<HostRuntime> {
+    const runtime = ManagedRuntime.make(this.hostRuntimeLayer(origin));
+
+    try {
+      await runtime.runtime();
+      await runtime.runPromise(initializeConfiguredMcpAuth());
+      this.#hostRuntime = Option.some({ origin, runtime });
+      return runtime;
+    } catch (cause) {
+      await runtime.dispose();
+      throw cause;
     }
+  }
 
-    return hostId;
+  private async replaceHostRuntime(
+    cached: CachedHostRuntime,
+    origin: string,
+  ): Promise<HostRuntime> {
+    this.#hostRuntime = Option.none();
+    await cached.runtime.dispose();
+
+    return this.createHostRuntime(origin);
+  }
+
+  private hostRuntimeLayer(
+    origin: string,
+  ): Layer.Layer<AuthCoordinator | CloudflareOAuthFlow | ConfigSource> {
+    const requestOrigin = CodeModeObjectRequestOriginLayer(origin);
+    const credentials = DurableObjectCredentialsStoreLayer;
+    const auth = DurableObjectAuthLayer.pipe(Layer.provide(credentials));
+    const config = this.configLayer();
+
+    // The host runtime is the only cached ManagedRuntime because these services
+    // contain config-derived state. The stable platform values are supplied as
+    // inputs, while request origin is kept separate because it is not an
+    // intrinsic Durable Object identity. The cache records the origin used to
+    // construct these URL-producing services and is rebuilt before serving a
+    // request from a different origin.
+    return Layer.merge(auth, config).pipe(
+      Layer.provide(this.#platformLayer),
+      Layer.provide(requestOrigin),
+    );
+  }
+
+  private configLayer(): Layer.Layer<
+    ConfigSource,
+    never,
+    CodeModeObjectStorage | CodeModeObjectIdentity
+  > {
+    return DurableObjectConfigSourceLayer.pipe(
+      Layer.provide(DurableObjectSecretResolverLayer),
+    );
+  }
+
+  private disposeHostRuntimeEffect(): Effect.Effect<void> {
+    const runtime = this.#hostRuntime;
+    this.#hostRuntime = Option.none();
+
+    return Option.match(runtime, {
+      onNone: () => Effect.void,
+      onSome: (cached) => Effect.promise(() => cached.runtime.dispose()),
+    });
   }
 }
 
-export type CodeModeObjectRpc = Pick<
-  CodeModeObject,
-  "call" | "configure" | "configureSecrets"
->;
-
-const configureCodeModeObject = (input: {
-  readonly storage: DurableObjectStorage;
-  readonly hostId: string;
-  readonly rawConfigJson: string;
-}): Effect.Effect<
-  ConfigureCodeModeObjectResult,
-  ConfigureCodeModeObjectError
-> =>
-  Effect.gen(function* () {
-    const parsed = yield* parsePtoolsConfigJson(
-      input.rawConfigJson,
-      `Cloudflare host ${input.hostId} config`,
-    ).pipe(
-      Effect.mapError(() => ({
-        code: "invalid_config" as const,
-        message: "Invalid host config",
-      })),
-    );
-
-    yield* rejectUnsupportedStdioConfig(parsed);
-
-    const updatedAt = new Date().toISOString();
-    const serverCount = Object.keys(parsed.mcpServers).length;
-    const blob: StoredConfigBlob = {
-      rawJson: input.rawConfigJson,
-      updatedAt,
-      serverCount,
-    };
-
-    yield* Effect.tryPromise({
-      try: () => input.storage.put(CODE_MODE_OBJECT_CONFIG_BLOB_KEY, blob),
-      catch: () => ({
-        code: "config_storage_unavailable" as const,
-        message: "Cloudflare host config storage is unavailable",
-      }),
-    });
-
-    return {
-      hostId: input.hostId,
-      serverCount,
-      updatedAt,
-    };
-  });
-
-const configureCodeModeObjectSecrets = (input: {
-  readonly storage: DurableObjectStorage;
-  readonly hostId: string;
-  readonly rawSecretsJson: string;
-}): Effect.Effect<
-  ConfigureCodeModeObjectSecretsResult,
-  ConfigureCodeModeObjectError
-> =>
-  Effect.gen(function* () {
-    const secrets = yield* parseSecretsJson(input.rawSecretsJson);
-    const updatedAt = new Date().toISOString();
-    const secretCount = Object.keys(secrets).length;
-
-    const existing = yield* Effect.tryPromise({
-      try: () =>
-        input.storage.list<string>({
-          prefix: CODE_MODE_OBJECT_SECRET_KEY_PREFIX,
-        }),
-      catch: () => ({
-        code: "config_storage_unavailable" as const,
-        message: "Cloudflare host secret storage is unavailable",
-      }),
-    });
-    const submittedKeys = new Set(
-      Object.keys(secrets).map(codeModeObjectSecretKey),
-    );
-    const staleKeys = [...existing.keys()].filter(
-      (key) => !submittedKeys.has(key),
-    );
-
-    yield* Effect.all([
-      ...Object.entries(secrets).map(([name, secret]) =>
-        Effect.tryPromise({
-          try: () => input.storage.put(codeModeObjectSecretKey(name), secret),
-          catch: () => ({
-            code: "config_storage_unavailable" as const,
-            message: "Cloudflare host secret storage is unavailable",
-          }),
-        }),
-      ),
-      staleKeys.length === 0
-        ? Effect.void
-        : Effect.tryPromise({
-            try: () => input.storage.delete(staleKeys),
-            catch: () => ({
-              code: "config_storage_unavailable" as const,
-              message: "Cloudflare host secret storage is unavailable",
-            }),
-          }).pipe(Effect.asVoid),
-    ]);
-
-    return {
-      hostId: input.hostId,
-      secretCount,
-      updatedAt,
-    };
-  });
-
-const parseSecretsJson = (
-  rawSecretsJson: string,
-): Effect.Effect<Record<string, string>, ConfigureCodeModeObjectError> =>
-  Effect.gen(function* () {
-    const value = yield* Effect.try({
-      try: () => JSON.parse(rawSecretsJson) as unknown,
-      catch: () => ({
-        code: "invalid_secrets" as const,
-        message: "Invalid host secrets",
-      }),
-    });
-
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      return yield* Effect.fail({
-        code: "invalid_secrets" as const,
-        message: "Invalid host secrets",
-      });
-    }
-
-    const secrets: Record<string, string> = {};
-
-    for (const [name, secret] of Object.entries(value)) {
-      if (typeof secret !== "string") {
-        return yield* Effect.fail({
-          code: "invalid_secrets" as const,
-          message: "Invalid host secrets",
-        });
-      }
-
-      secrets[name] = secret;
-    }
-
-    return secrets;
-  });
-
-const rejectUnsupportedStdioConfig = (
-  config: PtoolsConfig,
-): Effect.Effect<void, ConfigureCodeModeObjectError> => {
-  const stdioServer = Object.entries(config.mcpServers).find(
-    ([, serverConfig]) => serverConfig.transport === "stdio",
+const requireHostId = (ctx: DurableObjectState): string =>
+  Option.fromNullable(ctx.id.name).pipe(
+    Option.getOrThrowWith(
+      () => new Error("CodeModeObject must be addressed by name."),
+    ),
   );
 
-  if (stdioServer === undefined) {
-    return Effect.void;
-  }
-
-  const [serverName] = stdioServer;
-
-  return Effect.fail({
-    code: "unsupported_config",
-    message: `MCP server "${serverName}" uses stdio, which is not supported by the Cloudflare host first release. Cloudflare stdio MCP over Containers is deferred.`,
+const toRpcResponse = <A, E>(
+  effect: Effect.Effect<A, E>,
+): Effect.Effect<
+  | { readonly ok: true; readonly result: A }
+  | { readonly ok: false; readonly error: E }
+> =>
+  Effect.match(effect, {
+    onFailure: (error) => ({ ok: false as const, error }),
+    onSuccess: (result) => ({ ok: true as const, result }),
   });
-};

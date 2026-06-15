@@ -1,7 +1,14 @@
+import { auth as sdkAuth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { AuthCoordinator, CredentialsStore } from "@ptools/auth";
-import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { ResolvedHttpMcpConfig } from "@ptools/config";
+import { Effect, Layer, Option } from "effect";
+import { describe, expect, it, vi } from "vitest";
 import { NodeAuthCoordinatorLive } from "../src/auth.js";
+
+vi.mock("@modelcontextprotocol/sdk/client/auth.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  auth: vi.fn(),
+}));
 
 describe("NodeAuthCoordinatorLive", () => {
   it("exposes a manual reauthorize URL for connected HTTP servers", async () => {
@@ -10,10 +17,11 @@ describe("NodeAuthCoordinatorLive", () => {
         Effect.gen(function* () {
           const auth = yield* AuthCoordinator;
 
-          yield* auth.noteConfigured("notion", "notion", {
-            transport: "http",
-            url: "https://mcp.notion.com/mcp",
-          });
+          yield* auth.noteConfigured(
+            "notion",
+            "notion",
+            httpConfig("https://mcp.notion.com/mcp"),
+          );
 
           return yield* auth.status;
         }),
@@ -39,11 +47,13 @@ describe("NodeAuthCoordinatorLive", () => {
         Effect.gen(function* () {
           const auth = yield* AuthCoordinator;
 
-          yield* auth.noteConfigured("api", "api", {
-            transport: "http",
-            url: "https://example.com/mcp",
-            headers: { authorization: "Bearer token" },
-          });
+          yield* auth.noteConfigured(
+            "api",
+            "api",
+            httpConfig("https://example.com/mcp", {
+              authorization: "Bearer token",
+            }),
+          );
 
           return yield* auth.status;
         }),
@@ -60,16 +70,51 @@ describe("NodeAuthCoordinatorLive", () => {
     expect(status.servers[0]?.reauthorizeUrl).toBeUndefined();
   });
 
+  it("starts reauthorization from a connected HTTP server", async () => {
+    vi.mocked(sdkAuth).mockImplementationOnce(async (provider) => {
+      provider.redirectToAuthorization(
+        new URL("https://accounts.example/authorize?client_id=ptools"),
+      );
+      return "REDIRECT";
+    });
+
+    const response = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const auth = yield* AuthCoordinator;
+
+          yield* auth.noteConfigured(
+            "sheets",
+            "sheets",
+            httpConfig("https://mcp.example/sheets"),
+          );
+
+          const origin = yield* auth.origin;
+
+          return yield* Effect.promise(() =>
+            fetch(`${origin}/auth/sheets?force=1`, { redirect: "manual" }),
+          );
+        }),
+      ).pipe(Effect.provide(makeTestNodeAuthCoordinatorLive())),
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://accounts.example/authorize?client_id=ptools",
+    );
+  });
+
   it("serves the auth status from the local callback server", async () => {
     const responseStatus = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const auth = yield* AuthCoordinator;
 
-          yield* auth.noteConfigured("notion", "notion", {
-            transport: "http",
-            url: "https://mcp.notion.com/mcp",
-          });
+          yield* auth.noteConfigured(
+            "notion",
+            "notion",
+            httpConfig("https://mcp.notion.com/mcp"),
+          );
 
           const origin = yield* auth.origin;
 
@@ -144,3 +189,13 @@ const makeMemoryCredentialsStoreLive = () => {
       }),
   });
 };
+
+const httpConfig = (
+  url: string,
+  headers?: Readonly<Record<string, string>>,
+): ResolvedHttpMcpConfig =>
+  ResolvedHttpMcpConfig.make({
+    url,
+    headers: Option.fromNullable(headers),
+    auth: Option.none(),
+  });

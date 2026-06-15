@@ -1,7 +1,8 @@
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type {
-  HttpMcpAuthConfig,
+  ResolvedHttpMcpAuthConfig,
+  ResolvedHttpMcpConfig,
   ResolvedMcpConfig,
   ResolvedMcpServers,
 } from "@ptools/config";
@@ -17,13 +18,10 @@ export class CredentialError extends Data.TaggedError("CredentialError")<{
   readonly cause?: unknown;
 }> {}
 
-export type UpstreamHttpAuthConfig = HttpMcpAuthConfig;
+export type UpstreamHttpAuthConfig = ResolvedHttpMcpAuthConfig;
 export type UpstreamMcpConfig = ResolvedMcpConfig;
 export type UpstreamMcpServers = ResolvedMcpServers;
-export type HttpMcpConfig = Extract<
-  ResolvedMcpConfig,
-  { readonly transport: "http" }
->;
+export type HttpMcpConfig = ResolvedHttpMcpConfig;
 
 export interface OAuthStatePayload {
   readonly runtimeId: string;
@@ -89,11 +87,13 @@ export class AuthCoordinator extends Context.Tag("@ptools/AuthCoordinator")<
       jsServerName: string,
       config: ResolvedMcpConfig,
     ) => Effect.Effect<void, never>;
-    readonly noteConnected: (serverName: string) => Effect.Effect<void, never>;
+    readonly noteConnected: (
+      serverName: string,
+    ) => Effect.Effect<void, AuthError>;
     readonly noteConnectionError: (
       serverName: string,
       error: unknown,
-    ) => Effect.Effect<void, never>;
+    ) => Effect.Effect<void, AuthError>;
     readonly shouldAttachAuthProvider: (
       serverName: string,
     ) => Effect.Effect<boolean, never>;
@@ -156,3 +156,5 @@ export const safeErrorMessage = (cause: unknown): string => {
 
   return String(cause);
 };
+
+export * from "./coordinatorCore.js";

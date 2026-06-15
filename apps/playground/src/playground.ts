@@ -17,7 +17,7 @@ import {
   NodeMcpConnectorLive,
 } from "@ptools/host-node";
 import { makeMcpRegistryLive } from "@ptools/mcp-registry";
-import { Data, Effect, Either, Layer, Scope } from "effect";
+import { Data, Effect, Either, Layer, Option, Scope } from "effect";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 
 export class PlaygroundServerError extends Data.TaggedError(
@@ -62,7 +62,16 @@ export const runPlayground = (
             Layer.provide(NodeMcpConnectorLive),
             Layer.provide(makeNodeAuthCoordinatorLive(env)),
           ),
-          makeLocalSandboxExecutorLive(config.executor),
+          makeLocalSandboxExecutorLive(
+            Option.match(config.executor, {
+              onNone: () => undefined,
+              onSome: (executor) =>
+                Option.match(executor.defaultTimeoutMs, {
+                  onNone: () => ({}),
+                  onSome: (defaultTimeoutMs) => ({ defaultTimeoutMs }),
+                }),
+            }),
+          ),
         ),
       ),
     );

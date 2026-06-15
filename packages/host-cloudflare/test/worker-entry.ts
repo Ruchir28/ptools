@@ -1,11 +1,16 @@
 import type { CodeModeRequest, CodeModeResponse } from "@ptools/code-mode-api";
-import type { ResolvedPtoolsConfig } from "@ptools/config";
-import { Effect } from "effect";
+import { ResolvedPtoolsConfig } from "@ptools/config";
+import { Effect, Schema } from "effect";
+import {
+  CloudflareOAuthStatePayloadSchema,
+  signOAuthState,
+} from "../src/layers/auth.js";
 import {
   CODE_MODE_OBJECT_CONFIG_BLOB_KEY,
   CODE_MODE_OBJECT_SECRET_KEY_PREFIX,
-  type StoredConfigBlob,
+  StoredConfigBlob,
 } from "../src/layers/config.js";
+import { makeCodeModeObjectStorage } from "../src/layers/platform.js";
 import { CodeModeObject } from "../src/objects/CodeModeObject.js";
 import worker from "../src/worker/entry.js";
 import {
@@ -28,10 +33,16 @@ export class TestCodeModeObject extends CodeModeObject {
       : Promise.reject(failure);
   }
 
-  readConfigBlobForTest(): Promise<StoredConfigBlob | undefined> {
-    return this.ctx.storage.get<StoredConfigBlob>(
+  readConfigBlobForTest(): Promise<
+    typeof StoredConfigBlob.Encoded | undefined
+  > {
+    return this.ctx.storage.get<typeof StoredConfigBlob.Encoded>(
       CODE_MODE_OBJECT_CONFIG_BLOB_KEY,
     );
+  }
+
+  writeConfigBlobForTest(blob: unknown): Promise<void> {
+    return this.ctx.storage.put(CODE_MODE_OBJECT_CONFIG_BLOB_KEY, blob);
   }
 
   async readSecretsForTest(): Promise<Record<string, string>> {
@@ -48,22 +59,38 @@ export class TestCodeModeObject extends CodeModeObject {
   }
 
   loadResolvedConfigResultForTest(): Promise<
-    | { readonly ok: true; readonly config: ResolvedPtoolsConfig }
+    | {
+        readonly ok: true;
+        readonly config: typeof ResolvedPtoolsConfig.Encoded;
+      }
     | { readonly ok: false; readonly message: string }
   > {
     return Effect.runPromise(
       this.loadResolvedConfig().pipe(
-        Effect.match({
-          onFailure: (error) => ({
-            ok: false as const,
-            message: error.message,
-          }),
-          onSuccess: (config) => ({
-            ok: true as const,
-            config,
-          }),
+        Effect.matchEffect({
+          onFailure: (error) =>
+            Effect.succeed({
+              ok: false as const,
+              message: error.message,
+            }),
+          onSuccess: (config) =>
+            Schema.encode(ResolvedPtoolsConfig)(config).pipe(
+              Effect.orDie,
+              Effect.map((config) => ({ ok: true as const, config })),
+            ),
         }),
       ),
+    );
+  }
+
+  signOAuthStateForTest(
+    payload: Parameters<typeof CloudflareOAuthStatePayloadSchema.make>[0],
+  ): Promise<string> {
+    return Effect.runPromise(
+      signOAuthState({
+        storage: makeCodeModeObjectStorage(this.ctx.storage),
+        payload,
+      }),
     );
   }
 }
