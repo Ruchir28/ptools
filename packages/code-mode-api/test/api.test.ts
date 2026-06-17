@@ -1,8 +1,12 @@
-import { Effect, Either, Layer } from "effect";
+import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   CodeModeClient,
+  CodeModeExecuteRequest,
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchRequest,
   CodeModeServer,
+  CodeModeToolSchemaRequest,
   parseCodeModeRequest,
   parseCodeModeToolCall,
   type CodeModeRequest,
@@ -21,7 +25,10 @@ describe("Code Mode API request validation", () => {
       parseToolCall("search_providers", { query: "github", limit: 1 }),
     ).resolves.toEqual({
       operation: "search_providers",
-      input: { query: "github", limit: 1 },
+      input: CodeModeSearchProvidersRequest.make({
+        query: Option.some("github"),
+        limit: Option.some(1),
+      }),
     });
     await expect(
       parseToolCall("search", {
@@ -31,19 +38,28 @@ describe("Code Mode API request validation", () => {
       }),
     ).resolves.toEqual({
       operation: "search",
-      input: { query: "create issue", provider: "github", limit: 2 },
+      input: CodeModeSearchRequest.make({
+        query: "create issue",
+        provider: Option.some("github"),
+        limit: Option.some(2),
+      }),
     });
     await expect(
       parseToolCall("get_tool_schema", { toolIds: ["github.create_issue"] }),
     ).resolves.toEqual({
       operation: "get_tool_schema",
-      input: { toolIds: ["github.create_issue"] },
+      input: CodeModeToolSchemaRequest.make({
+        toolIds: ["github.create_issue"],
+      }),
     });
     await expect(
       parseToolCall("execute", { code: "async () => 1", timeoutMs: 1000 }),
     ).resolves.toEqual({
       operation: "execute",
-      input: { code: "async () => 1", timeoutMs: 1000 },
+      input: CodeModeExecuteRequest.make({
+        code: "async () => 1",
+        timeoutMs: Option.some(1000),
+      }),
     });
   });
 
@@ -57,7 +73,11 @@ describe("Code Mode API request validation", () => {
       ),
     ).resolves.toEqual({
       operation: "search",
-      input: { query: "issues" },
+      input: CodeModeSearchRequest.make({
+        query: "issues",
+        provider: Option.none(),
+        limit: Option.none(),
+      }),
     });
   });
 
@@ -110,7 +130,11 @@ describe("Code Mode API services", () => {
   it("provides CodeModeClient with Layer.succeed", async () => {
     const request: CodeModeRequest = {
       operation: "search",
-      input: { query: "github" },
+      input: CodeModeSearchRequest.make({
+        query: "github",
+        provider: Option.none(),
+        limit: Option.none(),
+      }),
     };
     const response: CodeModeResponse = {
       operation: "search",

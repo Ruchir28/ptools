@@ -91,26 +91,6 @@ export type CodeModeDiagnostic =
       readonly message: string;
     };
 
-export interface CodeModeSearchProvidersRequest {
-  readonly query?: string;
-  readonly limit?: number;
-}
-
-export interface CodeModeSearchRequest {
-  readonly query: string;
-  readonly provider?: string;
-  readonly limit?: number;
-}
-
-export interface CodeModeToolSchemaRequest {
-  readonly toolIds: ReadonlyArray<string>;
-}
-
-export interface CodeModeExecuteRequest {
-  readonly code: string;
-  readonly timeoutMs?: number;
-}
-
 export interface CodeModeRunResult {
   readonly value: unknown;
   readonly logs: ReadonlyArray<CapturedLog>;
@@ -241,3 +221,9 @@ export interface CodeModeClientHandle {
   readonly call: (request: CodeModeRequest) => Promise<CodeModeResponse>;
   readonly close: () => Promise<void>;
 }
+import type {
+  CodeModeExecuteRequest,
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchRequest,
+  CodeModeToolSchemaRequest,
+} from "./schema.js";

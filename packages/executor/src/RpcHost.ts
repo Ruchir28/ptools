@@ -1,33 +1,45 @@
+/**
+ * Node/local callback transport for sandbox provider calls.
+ *
+ * This is transport mechanics, not executor semantics. It decodes the local
+ * HTTP payloads used by the current child-process backend, delegates provider
+ * dispatch to `invokeProviderCall`, and forwards sandbox completion envelopes
+ * back to the backend. The shared executor contract is the DTOs in
+ * `schema.ts`; this file is just one backend's way of carrying them.
+ */
 import {
   createServer,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Cause, Effect, Option, Scope } from "effect";
+import { Effect, Runtime, Schema, Scope } from "effect";
 import {
   ExecutorProtocolError,
-  ExecutorRuntimeError,
   ExecutorStartError,
-  InvalidExecutorCode,
   type ExecutorError,
 } from "./errors.js";
 import type {
-  ExecuteResult,
   ExecutorProvider,
-  ExecutorProviderHandler,
-  RpcCallRequest,
-  RpcCallResponse,
-  SandboxCompleteRequest,
-  SerializedSandboxError,
+  ExecutorProviders,
 } from "./types.js";
+import {
+  SandboxCompleteRequest,
+  SandboxProviderCall,
+  type SandboxProviderCallResult,
+} from "./schema.js";
+import { invokeProviderCall } from "./semantic.js";
 
 export type ProviderMap = ReadonlyMap<string, ExecutorProvider["fns"]>;
+export const providersToMap = (
+  providers: ExecutorProviders,
+): ProviderMap =>
+  new Map(providers.map((provider) => [provider.name, provider.fns]));
 
 interface RunState {
   readonly token: string;
-  readonly providers: ProviderMap;
-  readonly complete: (result: ExecuteResult) => void;
+  readonly providers: ExecutorProviders;
+  readonly complete: (result: SandboxCompleteRequest) => void;
   readonly fail: (error: ExecutorError) => void;
 }
 
@@ -81,8 +93,10 @@ export class RpcHost {
           ),
         );
 
+        const runPromise = Runtime.runPromise(yield* Effect.runtime<never>());
+
         server.on("request", (request, response) => {
-          void Effect.runPromise(host.handleRequest(request, response));
+          void runPromise(host.handleRequest(request, response));
         });
 
         return host;
@@ -180,21 +194,23 @@ export class RpcHost {
     run: RunState,
   ): Effect.Effect<void, ExecutorProtocolError> {
     return Effect.gen(this, function* () {
-      const body = (yield* readJson(request)) as SandboxCompleteRequest;
+      const body = yield* readJson(request).pipe(
+        Effect.flatMap(
+          Schema.decodeUnknown(SandboxCompleteRequest),
+        ),
+        Effect.mapError(
+          (cause) =>
+            new ExecutorProtocolError({
+              message: "Invalid executor sandbox completion payload",
+              cause,
+            }),
+        ),
+      );
 
       yield* Effect.sync(() => this.unregisterRun(route.runId));
 
-      if (body.ok) {
-        yield* sendJson(response, 200, { ok: true });
-        return yield* Effect.sync(() =>
-          run.complete({ value: body.value, logs: body.logs }),
-        );
-      }
-
       yield* sendJson(response, 200, { ok: true });
-      return yield* Effect.sync(() =>
-        run.fail(toExecutorRuntimeError(body.error)),
-      );
+      return yield* Effect.sync(() => run.complete(body));
     });
   }
 }
@@ -222,45 +238,28 @@ const parseRpcRoute = (
 const handleRpcCall = (
   request: IncomingMessage,
   response: ServerResponse,
-  providers: ProviderMap,
+  providers: ExecutorProviders,
 ): Effect.Effect<void, ExecutorProtocolError> =>
   Effect.gen(function* () {
-    const body = (yield* readJson(request)) as RpcCallRequest;
-    const handler = providers.get(body.provider)?.[body.tool];
-
-    if (handler === undefined) {
-      const result: RpcCallResponse = {
-        ok: false,
-        error: {
-          name: "ProviderToolNotFound",
-          message: `Provider tool not found: ${body.provider}.${body.tool}`,
-          code: "ProviderToolNotFound",
-        },
-      };
-
-      return yield* sendJson(response, 404, result);
-    }
-
-    return yield* runProviderHandler(handler, body.input).pipe(
-      Effect.matchCauseEffect({
-        onFailure: (cause) =>
-          sendJson(response, 200, {
-            ok: false,
-            error: serializeCause(cause, "ProviderToolError"),
-          } satisfies RpcCallResponse),
-        onSuccess: (value) =>
-          sendJson(response, 200, {
-            ok: true,
-            value,
-          } satisfies RpcCallResponse),
-      }),
+    const body = yield* readJson(request).pipe(
+      Effect.flatMap(Schema.decodeUnknown(SandboxProviderCall)),
+      Effect.mapError(
+        (cause) =>
+          new ExecutorProtocolError({
+            message: "Invalid executor provider call payload",
+            cause,
+          }),
+      ),
     );
+
+    const result = yield* invokeProviderCall(providers, body);
+    const statusCode = isProviderNotFound(result) ? 404 : 200;
+
+    return yield* sendJson(response, statusCode, result);
   });
 
-const runProviderHandler = (
-  handler: ExecutorProviderHandler,
-  input: unknown,
-): Effect.Effect<unknown, unknown> => Effect.suspend(() => handler(input));
+const isProviderNotFound = (result: SandboxProviderCallResult): boolean =>
+  !result.ok && result.error.code === "ProviderToolNotFound";
 
 const listen = (
   server: ReturnType<typeof createServer>,
@@ -349,42 +348,3 @@ const sendJson = (
         cause,
       }),
   });
-
-const toExecutorRuntimeError = (
-  error: SerializedSandboxError,
-): InvalidExecutorCode | ExecutorRuntimeError =>
-  error.code === "InvalidExecutorCode"
-    ? new InvalidExecutorCode({ error })
-    : new ExecutorRuntimeError({ error });
-
-const serializeCause = (
-  cause: Cause.Cause<unknown>,
-  code?: string,
-): SerializedSandboxError => {
-  const failure = Option.getOrUndefined(Cause.failureOption(cause));
-
-  return failure === undefined
-    ? serializeUnknownError(new Error(Cause.pretty(cause)), code)
-    : serializeUnknownError(failure, code);
-};
-
-const serializeUnknownError = (
-  cause: unknown,
-  code?: string,
-): SerializedSandboxError => {
-  if (cause instanceof Error) {
-    const serialized: SerializedSandboxError = {
-      name: cause.name,
-      message: cause.message,
-      ...(cause.stack === undefined ? {} : { stack: cause.stack }),
-      ...(code === undefined ? {} : { code }),
-    };
-
-    return serialized;
-  }
-
-  return {
-    message: String(cause),
-    ...(code === undefined ? {} : { code }),
-  };
-};

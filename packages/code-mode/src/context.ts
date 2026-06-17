@@ -8,7 +8,7 @@ import type {
   DiscoveredMcpTool,
   McpRegistryDiagnostic,
 } from "@ptools/mcp-registry";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import {
   buildDeclarationIndex,
   renderServerDeclaration,
@@ -16,10 +16,10 @@ import {
   type SchemaCompiler,
 } from "./declarations.js";
 import { CodeModeInvariantError } from "./errors.js";
+import { CodeModeSearchProvidersRequest } from "@ptools/code-mode-api";
 import type {
   CodeModeActionCandidate,
   CodeModeProviderSummary,
-  CodeModeSearchProvidersRequest,
   CodeModeSearchProvidersResult,
   CodeModeSearchResult,
   CodeModeServerMetadata,
@@ -105,13 +105,17 @@ export const buildCodeModeRuntime = (
 export const makeCodeModeSearchProvidersResult = (
   servers: ReadonlyArray<CodeModeServerMetadata>,
   diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
-  request: CodeModeSearchProvidersRequest = {},
+  request: CodeModeSearchProvidersRequest = CodeModeSearchProvidersRequest.make({
+    query: Option.none(),
+    limit: Option.none(),
+  }),
 ): CodeModeSearchProvidersResult => ({
   providers: limitRows(
-    rankProviders(servers, tokenize(request.query)).map(
-      toCodeModeProviderSummary,
-    ),
-    request.limit,
+    rankProviders(
+      servers,
+      tokenize(Option.getOrUndefined(request.query)),
+    ).map(toCodeModeProviderSummary),
+    Option.getOrUndefined(request.limit),
   ),
   diagnostics,
 });
@@ -131,7 +135,10 @@ export const makeCodeModeSearchResult = (
 ): Effect.Effect<CodeModeSearchResult, CodeModeInvariantError> =>
   Effect.try({
     try: () => ({
-      actions: limitRows(searchActions(servers, request), request.limit),
+      actions: limitRows(
+        searchActions(servers, request),
+        Option.getOrUndefined(request.limit),
+      ),
       diagnostics,
     }),
     catch: normalizeInvariantError,
@@ -322,7 +329,11 @@ const makeToolHandler =
         Effect.flatMap((result) =>
           Effect.try({
             try: () => unwrapMcpToolResult(result),
-            catch: (cause) => normalizeProviderFailure(server, tool, cause),
+            catch: (cause) =>
+              new CodeModeInvariantError({
+                message: normalizeProviderFailure(server, tool, cause).message,
+                cause,
+              }),
           }),
         ),
       );
@@ -431,17 +442,18 @@ const searchActions = (
     });
   }
 
+  const requestedProvider = Option.getOrUndefined(request.provider);
   const scopedServers =
-    request.provider === undefined
+    requestedProvider === undefined
       ? servers
-      : [resolveProvider(servers, request.provider)];
+      : [resolveProvider(servers, requestedProvider)];
 
   return scopedServers
     .flatMap((server) =>
       server.tools
         .map((tool, index) => ({
           candidate: toCodeModeActionCandidate(server, tool),
-          score: scoreAction(server, tool, queryTokens, request.provider),
+          score: scoreAction(server, tool, queryTokens, requestedProvider),
           order: index,
         }))
         .filter((match) => match.score > 0)

@@ -1,5 +1,12 @@
+/**
+ * Typed executor errors. All failures surfaced by the executor kernel are
+ * `Data.TaggedError`s collected in {@link ExecutorError}. `InvalidExecutorCode`
+ * and `ExecutorRuntimeError` carry a {@link SerializedSandboxError} captured
+ * from the sandbox via `decodeSandboxCompleteResult`; `ExecutorProtocolError`
+ * covers request-preparation and backend protocol contract failures.
+ */
 import { Data } from "effect";
-import type { SerializedSandboxError } from "./types.js";
+import type { SerializedSandboxError } from "./schema.js";
 
 export class ExecutorStartError extends Data.TaggedError(
   "ExecutorStartError",

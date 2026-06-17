@@ -1,9 +1,9 @@
-import { CodeExecutor } from "@ptools/executor";
+import { CodeExecutor, ExecuteRequest } from "@ptools/executor";
 import {
   McpRegistry,
   type DiscoveredMcpTool,
 } from "@ptools/mcp-registry";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   buildCodeModeRuntime,
   makeCodeModeSearchResult,
@@ -142,8 +142,9 @@ export const makeCodeModeLive = (
           buildRuntime.pipe(
             Effect.flatMap((runtime) =>
               request === undefined ||
-              ((request.query === undefined || request.query.trim() === "") &&
-                request.limit === undefined)
+              ((Option.isNone(request.query) ||
+                request.query.value.trim() === "") &&
+                Option.isNone(request.limit))
                 ? Effect.succeed(runtime.fullProviderSearchResult)
                 : Effect.try({
                     try: () =>
@@ -186,14 +187,18 @@ export const makeCodeModeLive = (
         execute: (request: CodeModeExecuteRequest) =>
           buildRuntime.pipe(
             Effect.flatMap((runtime) =>
+              // Adapter from the schema-backed Code Mode API DTO into the
+              // executor-domain ExecuteRequest. `timeoutMs` is already
+              // Option<number> from the schema, so no `undefined` branching.
+              // Provider callbacks close over the MCP registry here; the
+              // sandbox only ever receives pure SandboxProviderManifest data.
               executor
-                .execute({
+                .execute(new ExecuteRequest({
                   code: request.code,
-                  providers: runtime.providers,
-                  ...(request.timeoutMs === undefined
-                    ? {}
-                    : { timeoutMs: request.timeoutMs }),
-                })
+                  globals: Option.none(),
+                  providers: Option.some(runtime.providers),
+                  timeoutMs: request.timeoutMs,
+                }))
                 .pipe(
                   Effect.map((result) => ({
                     value: result.value,

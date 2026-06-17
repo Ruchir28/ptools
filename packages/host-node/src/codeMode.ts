@@ -27,9 +27,9 @@ import {
 } from "@ptools/config";
 import {
   makeLocalSandboxExecutorLive,
-  type ExecutorError,
   type LocalSandboxExecutorOptions,
-} from "@ptools/executor";
+} from "@ptools/executor/internal/local";
+import type { ExecutorError } from "@ptools/executor";
 import {
   makeMcpRegistryLive,
   type NameCollisionError,

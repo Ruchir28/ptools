@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeCodeModeLive } from "@ptools/code-mode";
 import { ConfigSource } from "@ptools/config";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { makeLocalSandboxExecutorLive } from "@ptools/executor/internal/local";
 import {
   FileConfigSourceLive,
   NodeAuthCoordinatorLive,

@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { Duration, Effect, Layer, Scope } from "effect";
+import { Duration, Effect, Layer, Option, Scope } from "effect";
+import { ExecutorBackend } from "./backend.js";
 import {
   ExecutorProtocolError,
   ExecutorRuntimeError,
@@ -10,31 +11,32 @@ import {
   InvalidExecutorCode,
   type ExecutorError,
 } from "./errors.js";
-import { CodeExecutor } from "./executor.js";
-import { RpcHost, type ProviderMap } from "./RpcHost.js";
+import { CodeExecutor, CodeExecutorLayer } from "./executor.js";
+import { RpcHost } from "./RpcHost.js";
+import type { SandboxCompleteRequest } from "./schema.js";
 import type {
   ExecuteRequest,
   ExecuteResult,
-  ExecutorProvider,
-  ExecutorProviders,
   LocalSandboxExecutorOptions,
+  PreparedExecuteRequest,
 } from "./types.js";
+import {
+  decodeSandboxCompleteResult,
+  prepareExecuteRequest,
+} from "./semantic.js";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ERROR_OUTPUT_CHARS = 4_000;
-const VALID_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
-const RESERVED_GLOBAL_NAMES = new Set(["console", "globalThis"]);
 
 export class LocalSandboxExecutor {
   readonly #rpcHost: RpcHost;
-  readonly #defaultTimeoutMs: number;
+  readonly #defaultTimeoutMs: Option.Option<number>;
 
   private constructor(
     rpcHost: RpcHost,
     options: LocalSandboxExecutorOptions = {},
   ) {
     this.#rpcHost = rpcHost;
-    this.#defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.#defaultTimeoutMs = Option.fromNullable(options.defaultTimeoutMs);
   }
 
   static make(
@@ -48,57 +50,72 @@ export class LocalSandboxExecutor {
   execute(
     request: ExecuteRequest,
   ): Effect.Effect<ExecuteResult, ExecutorError> {
-    return runLocalSandboxEffect(
-      request,
-      this.#defaultTimeoutMs,
-      this.#rpcHost,
-    ).pipe(Effect.scoped);
+    return prepareExecuteRequest(request, {
+      defaultTimeoutMs: this.#defaultTimeoutMs,
+    }).pipe(
+      Effect.flatMap((prepared) => this.executePrepared(prepared)),
+      Effect.flatMap(decodeSandboxCompleteResult),
+    );
+  }
+
+  executePrepared(
+    request: PreparedExecuteRequest,
+  ): Effect.Effect<SandboxCompleteRequest, ExecutorError> {
+    return runLocalSandboxEffect(request, this.#rpcHost).pipe(Effect.scoped);
   }
 }
 
+/**
+ * Scoped `LocalSandboxExecutor` resource (child process + RPC host).
+ */
 export const makeLocalSandboxExecutor = (
   options?: LocalSandboxExecutorOptions,
 ): Effect.Effect<LocalSandboxExecutor, ExecutorStartError, Scope.Scope> =>
   LocalSandboxExecutor.make(options);
 
-export const makeLocalSandboxExecutorLive = (
+/**
+ * Provides the host-neutral {@link ExecutorBackend} SPI backed by the local
+ * child-process sandbox. Compose this under {@link CodeExecutorLayer} (see
+ * {@link makeLocalSandboxExecutorLive}) so request preparation and result
+ * decoding stay shared.
+ */
+export const makeLocalSandboxExecutorBackendLive = (
   options?: LocalSandboxExecutorOptions,
-): Layer.Layer<CodeExecutor, ExecutorStartError, never> =>
+): Layer.Layer<ExecutorBackend, ExecutorStartError, never> =>
   Layer.scoped(
-    CodeExecutor,
+    ExecutorBackend,
     makeLocalSandboxExecutor(options).pipe(
       Effect.map((executor) => ({
-        execute: (request: ExecuteRequest) => executor.execute(request),
+        executePrepared: (request: PreparedExecuteRequest) =>
+          executor.executePrepared(request),
       })),
     ),
   );
 
+/**
+ * Convenience layer that produces a fully wired {@link CodeExecutor} by
+ * composing {@link CodeExecutorLayer} with the local backend. Hosts that want
+ * to inject a different `ExecutorBackend` should use `CodeExecutorLayer`
+ * directly with their own backend layer instead.
+ */
+export const makeLocalSandboxExecutorLive = (
+  options?: LocalSandboxExecutorOptions,
+): Layer.Layer<CodeExecutor, ExecutorStartError, never> =>
+  CodeExecutorLayer({
+    defaultTimeoutMs: Option.fromNullable(options?.defaultTimeoutMs),
+  }).pipe(
+    Layer.provide(makeLocalSandboxExecutorBackendLive()),
+  );
+
 const runLocalSandboxEffect = (
-  request: ExecuteRequest,
-  defaultTimeoutMs: number,
+  request: PreparedExecuteRequest,
   rpcHost: RpcHost,
-): Effect.Effect<ExecuteResult, ExecutorError, Scope.Scope> =>
+): Effect.Effect<SandboxCompleteRequest, ExecutorError, Scope.Scope> =>
   Effect.gen(function* () {
-    const timeoutMs = request.timeoutMs ?? defaultTimeoutMs;
     const runId = randomUUID();
     const token = randomUUID();
-    const providers = request.providers ?? [];
-    const providerMap = yield* Effect.try({
-      try: () => {
-        validateGlobals(request.globals ?? {}, providers);
-        return buildProviderMap(providers);
-      },
-      catch: normalizeExecutorError,
-    });
     const payload = yield* Effect.try({
-      try: () =>
-        createSandboxPayload(
-          request,
-          providers.map((provider) => ({
-            name: provider.name,
-            tools: Object.keys(provider.fns),
-          })),
-        ),
+      try: () => createSandboxPayload(request),
       catch: normalizeExecutorError,
     });
 
@@ -109,7 +126,7 @@ const runLocalSandboxEffect = (
           rpcHost.registerRun({
             runId,
             token,
-            providers: providerMap,
+            providers: request.providers,
             complete: run.succeed,
             fail: run.fail,
           }),
@@ -147,86 +164,31 @@ const runLocalSandboxEffect = (
       });
     });
 
-    return yield* waitForRunResult(run, timeoutMs);
+    return yield* waitForRunResult(run, request.timeoutMs);
   }).pipe(
-    Effect.catchAll((error) =>
-      Effect.fail(
-        isExecutorError(error)
-          ? error
-          : new ExecutorProtocolError({
-              message: "Local sandbox execution failed unexpectedly",
-              cause: error,
-            }),
-      ),
+    Effect.mapError((error) =>
+      isExecutorError(error)
+        ? error
+        : new ExecutorProtocolError({
+            message: "Local sandbox execution failed unexpectedly",
+            cause: error,
+          }),
     ),
   );
 
 const createSandboxPayload = (
-  request: ExecuteRequest,
-  providers: ReadonlyArray<{
-    readonly name: string;
-    readonly tools: ReadonlyArray<string>;
-  }>,
+  request: PreparedExecuteRequest,
 ): string => {
   try {
     return JSON.stringify({
       code: request.code,
-      globals: request.globals ?? {},
-      providers,
+      globals: request.globals,
+      providers: request.providerManifests,
     });
   } catch (cause) {
     throw new ExecutorProtocolError({
       message: "Executor request contains non-serializable globals",
       cause,
-    });
-  }
-};
-
-const buildProviderMap = (
-  providers: ExecutorProviders,
-): ProviderMap => {
-  const result = new Map<string, ExecutorProvider["fns"]>();
-
-  for (const provider of providers) {
-    validateIdentifier(provider.name, "provider");
-
-    if (result.has(provider.name)) {
-      throw new ExecutorProtocolError({
-        message: `Duplicate provider name: ${provider.name}`,
-      });
-    }
-
-    for (const toolName of Object.keys(provider.fns)) {
-      validateIdentifier(toolName, `tool in provider ${provider.name}`);
-    }
-
-    result.set(provider.name, provider.fns);
-  }
-
-  return result;
-};
-
-const validateGlobals = (
-  globals: Record<string, unknown>,
-  providers: ExecutorProviders,
-): void => {
-  const providerNames = new Set(providers.map((provider) => provider.name));
-
-  for (const name of Object.keys(globals)) {
-    validateIdentifier(name, "global");
-
-    if (providerNames.has(name)) {
-      throw new ExecutorProtocolError({
-        message: `Global name collides with provider name: ${name}`,
-      });
-    }
-  }
-};
-
-const validateIdentifier = (name: string, scope: string): void => {
-  if (!VALID_IDENTIFIER.test(name) || RESERVED_GLOBAL_NAMES.has(name)) {
-    throw new ExecutorProtocolError({
-      message: `Invalid ${scope} identifier: ${name}`,
     });
   }
 };
@@ -283,10 +245,10 @@ const stopSandboxProcess = (child: ChildProcess): void => {
 
 const createRunController = () => {
   let settled = false;
-  let resolveResult: (result: ExecuteResult) => void;
+  let resolveResult: (result: SandboxCompleteRequest) => void;
   let rejectResult: (error: ExecutorError) => void;
 
-  const result = new Promise<ExecuteResult>((resolve, reject) => {
+  const result = new Promise<SandboxCompleteRequest>((resolve, reject) => {
     resolveResult = resolve;
     rejectResult = reject;
   });
@@ -294,7 +256,7 @@ const createRunController = () => {
   return {
     result,
     settled: () => settled,
-    succeed: (value: ExecuteResult) => {
+    succeed: (value: SandboxCompleteRequest) => {
       if (!settled) {
         settled = true;
         resolveResult(value);
@@ -312,7 +274,7 @@ const createRunController = () => {
 const waitForRunResult = (
   run: ReturnType<typeof createRunController>,
   timeoutMs: number,
-): Effect.Effect<ExecuteResult, ExecutorError> => {
+): Effect.Effect<SandboxCompleteRequest, ExecutorError> => {
   const runResult = Effect.tryPromise({
     try: () => run.result,
     catch: normalizeExecutorError,

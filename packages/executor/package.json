@@ -27,6 +27,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./internal/local": {
+      "types": "./dist/local.d.ts",
+      "default": "./dist/local.js"
     }
   },
   "scripts": {

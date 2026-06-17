@@ -6,18 +6,21 @@ import {
   ExecutorRuntimeError,
   ExecutorTimeoutError,
   InvalidExecutorCode,
-  makeLocalSandboxExecutorLive,
+  makeExecuteRequest,
 } from "../src/index.js";
+import { makeLocalSandboxExecutorLive } from "../src/local.js";
 import type { ExecutorError } from "../src/errors.js";
-import { RpcHost, type ProviderMap } from "../src/RpcHost.js";
-import type { ExecuteRequest, ExecuteResult } from "../src/types.js";
+import { RpcHost } from "../src/RpcHost.js";
+import type { ExecuteResult, ExecutorProvider } from "../src/types.js";
+
+type ExecuteRequestInput = Parameters<typeof makeExecuteRequest>[0];
 
 const execute = (
-  request: ExecuteRequest,
+  request: ExecuteRequestInput,
 ): Effect.Effect<ExecuteResult, ExecutorError, CodeExecutor> =>
   Effect.gen(function* () {
     const executor = yield* CodeExecutor;
-    return yield* executor.execute(request);
+    return yield* executor.execute(makeExecuteRequest(request));
   });
 
 const runWithExecutor = <A, E>(
@@ -26,7 +29,7 @@ const runWithExecutor = <A, E>(
   Effect.runPromise(effect.pipe(Effect.provide(makeLocalSandboxExecutorLive())));
 
 const fixtureProviders = (
-  fns: ProviderMap extends ReadonlyMap<string, infer Fns> ? Fns : never,
+  fns: ExecutorProvider["fns"],
 ) => [{ name: "fixture", fns }];
 
 describe("LocalSandboxExecutor", () => {
@@ -95,18 +98,18 @@ describe("LocalSandboxExecutor", () => {
     const values = await runWithExecutor(
       Effect.gen(function* () {
         const executor = yield* CodeExecutor;
-        const first = yield* executor.execute({
+        const first = yield* executor.execute(makeExecuteRequest({
           code: "async () => fixture.value({ run: 1 })",
           providers: fixtureProviders({
             value: (input) => Effect.succeed(input),
           }),
-        });
-        const second = yield* executor.execute({
+        }));
+        const second = yield* executor.execute(makeExecuteRequest({
           code: "async () => fixture.value({ run: 2 })",
           providers: fixtureProviders({
             value: (input) => Effect.succeed(input),
           }),
-        });
+        }));
 
         return [first.value, second.value] as const;
       }),
@@ -122,18 +125,18 @@ describe("LocalSandboxExecutor", () => {
 
         return yield* Effect.all(
           [
-            executor.execute({
+            executor.execute(makeExecuteRequest({
               code: "async () => fixture.tag({ input: 'a' })",
               providers: fixtureProviders({
                 tag: (input) => Effect.succeed({ owner: "a", input }),
               }),
-            }),
-            executor.execute({
+            })),
+            executor.execute(makeExecuteRequest({
               code: "async () => fixture.tag({ input: 'b' })",
               providers: fixtureProviders({
                 tag: (input) => Effect.succeed({ owner: "b", input }),
               }),
-            }),
+            })),
           ],
           { concurrency: "unbounded" },
         );
@@ -161,7 +164,7 @@ describe("LocalSandboxExecutor", () => {
         }`,
         providers: fixtureProviders({
           fail: () => {
-            return Effect.fail(new Error("fixture failure"));
+            return Effect.fail("fixture failure");
           },
         }),
       }),
@@ -298,7 +301,7 @@ describe("RpcHost", () => {
           const registeredRun = host.registerRun({
             runId: "run-token",
             token: "correct-token",
-            providers: makeProviderMap(),
+            providers: makeProviders(),
             complete: vi.fn(),
             fail: vi.fn(),
           });
@@ -326,7 +329,7 @@ describe("RpcHost", () => {
           const registeredRun = host.registerRun({
             runId: "run-known",
             token: "token",
-            providers: makeProviderMap(),
+            providers: makeProviders(),
             complete: vi.fn(),
             fail: vi.fn(),
           });
@@ -355,7 +358,7 @@ describe("RpcHost", () => {
           const registeredRun = host.registerRun({
             runId: "run-complete",
             token: "token",
-            providers: makeProviderMap(),
+            providers: makeProviders(),
             complete: vi.fn(),
             fail: vi.fn(),
           });
@@ -395,7 +398,7 @@ describe("RpcHost", () => {
           const registeredRun = host.registerRun({
             runId: "run-close",
             token: "token",
-            providers: makeProviderMap(),
+            providers: makeProviders(),
             complete: vi.fn(),
             fail: vi.fn(),
           });
@@ -414,15 +417,14 @@ describe("RpcHost", () => {
   });
 });
 
-const makeProviderMap = (): ProviderMap =>
-  new Map([
-    [
-      "fixture",
-      {
-        echo: (input) => Effect.succeed(input),
-      },
-    ],
-  ]);
+const makeProviders = (): ReadonlyArray<ExecutorProvider> => [
+  {
+    name: "fixture",
+    fns: {
+      echo: (input) => Effect.succeed(input),
+    },
+  },
+];
 
 const postJson = async (
   url: string,

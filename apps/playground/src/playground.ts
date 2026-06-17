@@ -8,8 +8,14 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CodeMode, makeCodeModeLive } from "@ptools/code-mode";
+import {
+  CodeModeExecuteRequest,
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchRequest,
+  CodeModeToolSchemaRequest,
+} from "@ptools/code-mode-api";
 import { ConfigSource } from "@ptools/config";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { makeLocalSandboxExecutorLive } from "@ptools/executor/internal/local";
 import {
   NodeAuthCoordinatorLive,
   NodeConfigSourceLive,
@@ -168,14 +174,25 @@ const handleRequest = (
       const context =
         query === undefined || query.length === 0
           ? yield* codeMode
-              .searchProviders({})
+              .searchProviders(
+                CodeModeSearchProvidersRequest.make({
+                  query: Option.none(),
+                  limit: Option.none(),
+                }),
+              )
               .pipe(
                 Effect.map(toPlaygroundContext),
                 Effect.mapError(toErrorBody),
                 Effect.either,
               )
           : yield* codeMode
-              .search({ query })
+              .search(
+                CodeModeSearchRequest.make({
+                  query,
+                  provider: Option.none(),
+                  limit: Option.none(),
+                }),
+              )
               .pipe(
                 Effect.map(toPlaygroundContext),
                 Effect.mapError(toErrorBody),
@@ -382,13 +399,7 @@ const parseArgValue = (
 
 const readExecuteRequest = (
   request: IncomingMessage,
-): Effect.Effect<
-  {
-    readonly code: string;
-    readonly timeoutMs?: number;
-  },
-  PlaygroundServerError
-> =>
+): Effect.Effect<CodeModeExecuteRequest, PlaygroundServerError> =>
   readJson(request).pipe(
     Effect.flatMap((body) => {
       const candidate = body as {
@@ -426,21 +437,17 @@ const readExecuteRequest = (
       }
 
       return Effect.succeed(
-        timeoutMs === undefined
-          ? { code: candidate.code }
-          : { code: candidate.code, timeoutMs },
+        CodeModeExecuteRequest.make({
+          code: candidate.code,
+          timeoutMs: Option.fromNullable(timeoutMs),
+        }),
       );
     }),
   );
 
 const readToolSchemaRequest = (
   request: IncomingMessage,
-): Effect.Effect<
-  {
-    readonly toolIds: ReadonlyArray<string>;
-  },
-  PlaygroundServerError
-> =>
+): Effect.Effect<CodeModeToolSchemaRequest, PlaygroundServerError> =>
   readJson(request).pipe(
     Effect.flatMap((body) => {
       const candidate = body as {
@@ -473,7 +480,7 @@ const readToolSchemaRequest = (
         toolIds.push(toolId.trim());
       }
 
-      return Effect.succeed({ toolIds });
+      return Effect.succeed(CodeModeToolSchemaRequest.make({ toolIds }));
     }),
   );
 

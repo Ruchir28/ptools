@@ -39,6 +39,9 @@ importers:
       '@ptools/code-mode':
         specifier: workspace:*
         version: link:../../packages/code-mode
+      '@ptools/code-mode-api':
+        specifier: workspace:*
+        version: link:../../packages/code-mode-api
       '@ptools/config':
         specifier: workspace:*
         version: link:../../packages/config

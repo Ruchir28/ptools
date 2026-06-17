@@ -1,10 +1,18 @@
+/**
+ * Child-process sandbox entrypoint for the current Node/local backend.
+ *
+ * Generated/user code stays plain JavaScript: this worker reads a serialized
+ * sandbox payload from the environment, installs globals and provider proxy
+ * functions, captures console output, evaluates the user function, and reports
+ * a `SandboxCompleteRequest` envelope back to the local RPC host.
+ */
 import type {
   CapturedLog,
   LogLevel,
-  RpcCallResponse,
   SandboxCompleteRequest,
+  SandboxProviderCallResult,
   SerializedSandboxError,
-} from "./types.js";
+} from "./schema.js";
 
 interface SandboxPayload {
   readonly code: string;
@@ -126,7 +134,7 @@ async function callProviderTool(
     body: JSON.stringify({ provider, tool, input }),
   });
 
-  const payload = (await response.json()) as RpcCallResponse;
+  const payload = (await response.json()) as SandboxProviderCallResult;
 
   if (!response.ok || !payload.ok) {
     throw deserializeSandboxError(

@@ -1,5 +1,5 @@
 import { AuthCoordinator, AuthError } from "@ptools/auth";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor";
+import { makeLocalSandboxExecutorLive } from "@ptools/executor/internal/local";
 import { ResolvedStdioMcpConfig } from "@ptools/config";
 import {
   makeMcpRegistryLive,
@@ -10,6 +10,11 @@ import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/index.js";
 import { CodeModeExecuteError } from "../src/errors.js";
+import {
+  CodeModeExecuteRequest,
+  CodeModeSearchRequest,
+  CodeModeToolSchemaRequest,
+} from "@ptools/code-mode-api";
 
 describe("CodeMode stdio MCP integration", () => {
   it("discovers and executes MCP-backed provider calls through the local executor", async () => {
@@ -17,23 +22,23 @@ describe("CodeMode stdio MCP integration", () => {
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
         const providerResult = yield* codeMode.searchProviders();
-        const echoContext = yield* codeMode.search({ query: "echo" });
-        const echoSchema = yield* codeMode.toolSchema({
+        const echoContext = yield* codeMode.search(searchRequest("echo"));
+        const echoSchema = yield* codeMode.toolSchema(CodeModeToolSchemaRequest.make({
           toolIds: ["fixture.echo"],
-        });
-        const echoRun = yield* codeMode.execute({
-          code: `async () => {
+        }));
+        const echoRun = yield* codeMode.execute(executeRequest(`
+          async () => {
             console.log("calling echo");
             return await fixture.echo({ text: "hello from code mode" });
-          }`,
-        });
-        const addRun = yield* codeMode.execute({
-          code: `async () => {
+          }
+        `));
+        const addRun = yield* codeMode.execute(executeRequest(`
+          async () => {
             return await fixture.add({ a: 2, b: 3 });
-          }`,
-        });
-        const caughtProviderError = yield* codeMode.execute({
-          code: `async () => {
+          }
+        `));
+        const caughtProviderError = yield* codeMode.execute(executeRequest(`
+          async () => {
             try {
               await fixture.add({ a: "bad", b: 3 });
             } catch (error) {
@@ -42,14 +47,14 @@ describe("CodeMode stdio MCP integration", () => {
                 message: error.message,
               };
             }
-          }`,
-        });
+          }
+        `));
         const uncaughtProviderError = yield* Effect.either(
-          codeMode.execute({
-            code: `async () => {
+          codeMode.execute(executeRequest(`
+            async () => {
               return await fixture.add({ a: "bad", b: 3 });
-            }`,
-          }),
+            }
+          `)),
         );
 
         return {
@@ -90,6 +95,19 @@ describe("CodeMode stdio MCP integration", () => {
     }
   });
 });
+
+const searchRequest = (query: string): CodeModeSearchRequest =>
+  CodeModeSearchRequest.make({
+    query,
+    provider: Option.none(),
+    limit: Option.none(),
+  });
+
+const executeRequest = (code: string): CodeModeExecuteRequest =>
+  CodeModeExecuteRequest.make({
+    code,
+    timeoutMs: Option.none(),
+  });
 
 const makeIntegrationLive = () =>
   makeCodeModeLive().pipe(

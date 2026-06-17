@@ -2,6 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CodeModeClient,
+  CodeModeExecuteRequest,
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchRequest,
+  CodeModeToolSchemaRequest,
   type CodeModeSearchProvidersResult,
   type CodeModeSearchResult,
   type CodeModeAuthStatusResult,
@@ -10,7 +14,7 @@ import {
   type CodeModeRequest,
   type CodeModeResponse,
 } from "@ptools/code-mode-api";
-import { Effect, Scope } from "effect";
+import { Effect, Option, Scope } from "effect";
 import { z } from "zod";
 
 const SearchProvidersInputSchema = {
@@ -216,10 +220,10 @@ export const registerCodeModeTools = (
       outputSchema: SearchProvidersOutputSchema,
     },
     async ({ query, limit }) => {
-      const request = {
-        ...(query === undefined ? {} : { query }),
-        ...(limit === undefined ? {} : { limit }),
-      };
+      const request = CodeModeSearchProvidersRequest.make({
+        query: Option.fromNullable(query),
+        limit: Option.fromNullable(limit),
+      });
       const result = await callClient(client, {
         operation: "search_providers",
         input: request,
@@ -249,11 +253,11 @@ export const registerCodeModeTools = (
       outputSchema: SearchOutputSchema,
     },
     async ({ query, provider, limit }) => {
-      const request = {
+      const request = CodeModeSearchRequest.make({
         query,
-        ...(provider === undefined ? {} : { provider }),
-        ...(limit === undefined ? {} : { limit }),
-      };
+        provider: Option.fromNullable(provider),
+        limit: Option.fromNullable(limit),
+      });
       const result = await callClient(client, {
         operation: "search",
         input: request,
@@ -280,7 +284,7 @@ export const registerCodeModeTools = (
       outputSchema: ToolSchemaOutputSchema,
     },
     async ({ toolIds }) => {
-      const request = { toolIds };
+      const request = CodeModeToolSchemaRequest.make({ toolIds });
       const result = await callClient(client, {
         operation: "get_tool_schema",
         input: request,
@@ -309,7 +313,10 @@ export const registerCodeModeTools = (
       outputSchema: ExecuteOutputSchema,
     },
     async ({ code, timeoutMs }) => {
-      const request = timeoutMs === undefined ? { code } : { code, timeoutMs };
+      const request = CodeModeExecuteRequest.make({
+        code,
+        timeoutMs: Option.fromNullable(timeoutMs),
+      });
       const result = await callClient(client, {
         operation: "execute",
         input: request,

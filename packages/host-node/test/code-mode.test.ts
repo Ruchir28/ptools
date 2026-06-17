@@ -2,8 +2,14 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CodeModeClient, CodeModeServer } from "@ptools/code-mode-api";
-import { Effect } from "effect";
+import {
+  CodeModeClient,
+  CodeModeExecuteRequest,
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchRequest,
+  CodeModeServer,
+} from "@ptools/code-mode-api";
+import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   createNodeCodeModeClient,
@@ -35,7 +41,10 @@ describe("Node Code Mode host assembly", () => {
 
     try {
       await expect(
-        client.call({ operation: "search_providers", input: {} }),
+        client.call({
+          operation: "search_providers",
+          input: searchProvidersRequest(),
+        }),
       ).resolves.toMatchObject({
         operation: "search_providers",
         output: {
@@ -45,11 +54,13 @@ describe("Node Code Mode host assembly", () => {
       await expect(
         client.call({
           operation: "execute",
-          input: {
-            code: `async () => {
+          input: executeRequest(
+            `
+            async () => {
               return await fixture.echo({ text: "hello from host-node" });
-            }`,
-          },
+            }
+          `,
+          ),
         }),
       ).resolves.toEqual({
         operation: "execute",
@@ -69,7 +80,7 @@ describe("Node Code Mode host assembly", () => {
 
     try {
       await expect(
-        client.call({ operation: "search", input: { query: "echo" } }),
+        client.call({ operation: "search", input: searchRequest("echo") }),
       ).resolves.toMatchObject({
         operation: "search",
         output: {
@@ -91,7 +102,7 @@ describe("Node Code Mode host assembly", () => {
 
           return yield* server.handle({
             operation: "search_providers",
-            input: {},
+            input: searchProvidersRequest(),
           });
         }).pipe(
           Effect.provide(
@@ -114,7 +125,7 @@ describe("Node Code Mode host assembly", () => {
 
           return yield* client.call({
             operation: "search",
-            input: { query: "echo" },
+            input: searchRequest("echo"),
           });
         }).pipe(
           Effect.provide(
@@ -149,7 +160,7 @@ describe("Node Code Mode host assembly", () => {
 
           return yield* server.handle({
             operation: "search",
-            input: { query: "echo" },
+            input: searchRequest("echo"),
           });
         }).pipe(Effect.provide(NodeCodeModeServerLive(options)), Effect.scoped),
       ),
@@ -165,7 +176,7 @@ describe("Node Code Mode host assembly", () => {
 
           return yield* client.call({
             operation: "search_providers",
-            input: {},
+            input: searchProvidersRequest(),
           });
         }).pipe(Effect.provide(NodeCodeModeClientLive(options)), Effect.scoped),
       ),
@@ -175,6 +186,25 @@ describe("Node Code Mode host assembly", () => {
     });
   }, 30_000);
 });
+
+const searchProvidersRequest = (): CodeModeSearchProvidersRequest =>
+  CodeModeSearchProvidersRequest.make({
+    query: Option.none(),
+    limit: Option.none(),
+  });
+
+const searchRequest = (query: string): CodeModeSearchRequest =>
+  CodeModeSearchRequest.make({
+    query,
+    provider: Option.none(),
+    limit: Option.none(),
+  });
+
+const executeRequest = (code: string): CodeModeExecuteRequest =>
+  CodeModeExecuteRequest.make({
+    code,
+    timeoutMs: Option.none(),
+  });
 
 const writeFixtureConfig = async (name: string): Promise<string> => {
   const dir = await mkdtemp(join(tmpdir(), `ptools-host-node-${name}-`));

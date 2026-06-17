@@ -14,9 +14,13 @@ import type {
   UpstreamAuthRequired,
 } from "@ptools/mcp-registry";
 import { McpRegistry } from "@ptools/mcp-registry";
-import { Effect, Either, Layer } from "effect";
+import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/CodeMode.js";
+import {
+  CodeModeSearchProvidersRequest,
+  CodeModeSearchRequest,
+} from "@ptools/code-mode-api";
 import {
   buildExecutorProviders,
   groupDiscoveredMcpTools,
@@ -97,7 +101,7 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search({ query: "echo" });
+        return yield* codeMode.search(searchRequest({ query: "echo" }));
       }),
       [fixtureAddTool(), fixtureEchoTool()],
     );
@@ -118,7 +122,9 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.searchProviders({ limit: 1 });
+        return yield* codeMode.searchProviders(
+          searchProvidersRequest({ limit: 1 }),
+        );
       }),
       [
         fixtureAddTool(),
@@ -143,7 +149,9 @@ describe("Code Mode context and search", () => {
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
-            return yield* codeMode.searchProviders({ limit: 0 });
+            return yield* codeMode.searchProviders(
+              unsafeSearchProvidersRequest({ limit: 0 }),
+            );
           }),
           [fixtureAddTool()],
         ),
@@ -164,7 +172,7 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search({ query: "tool", limit: 1 });
+        return yield* codeMode.search(searchRequest({ query: "tool", limit: 1 }));
       }),
       [
         mcpTool({
@@ -189,7 +197,9 @@ describe("Code Mode context and search", () => {
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
-            return yield* codeMode.search({ query: "echo", limit: 0 });
+            return yield* codeMode.search(
+              unsafeSearchRequest({ query: "echo", limit: 0 }),
+            );
           }),
           [fixtureEchoTool()],
         ),
@@ -210,7 +220,7 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search({ query: "broken" });
+        return yield* codeMode.search(searchRequest({ query: "broken" }));
       }),
       [
         mcpTool({
@@ -512,7 +522,7 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search({ query: "fixture echo" });
+        return yield* codeMode.search(searchRequest({ query: "fixture echo" }));
       }),
       [fixtureAddTool(), fixtureEchoTool()],
     );
@@ -524,7 +534,9 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search({ provider: "fixture", query: "echo" });
+        return yield* codeMode.search(
+          searchRequest({ provider: "fixture", query: "echo" }),
+        );
       }),
       [
         fixtureEchoTool(),
@@ -548,10 +560,10 @@ describe("Code Mode context and search", () => {
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
-            return yield* codeMode.search({
+            return yield* codeMode.search(searchRequest({
               provider: "missing",
               query: "echo",
-            });
+            }));
           }),
           [fixtureEchoTool()],
         ),
@@ -570,7 +582,7 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search({ query: "fixture" });
+        return yield* codeMode.search(searchRequest({ query: "fixture" }));
       }),
       [fixtureAddTool(), fixtureEchoTool()],
     );
@@ -582,10 +594,10 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search({
+        return yield* codeMode.search(searchRequest({
           provider: "fixture",
           query: "fixture",
-        });
+        }));
       }),
       [fixtureAddTool(), fixtureEchoTool()],
     );
@@ -597,7 +609,9 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.searchProviders({ query: "numbers" });
+        return yield* codeMode.searchProviders(
+          searchProvidersRequest({ query: "numbers" }),
+        );
       }),
       [fixtureAddTool(), fixtureEchoTool()],
     );
@@ -636,7 +650,7 @@ describe("Code Mode context and search", () => {
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
 
-        return yield* codeMode.search({ query: "schema" });
+        return yield* codeMode.search(searchRequest({ query: "schema" }));
       }),
       [
         mcpTool({
@@ -1105,13 +1119,55 @@ const makeExecutorLayer = (
     request: ExecuteRequest,
   ) => Effect.Effect<ExecuteResult, ExecutorError> = (request) =>
     Effect.succeed({
-      value: request.providers?.map((provider) => provider.name) ?? [],
+      value: Option.getOrElse(request.providers, () => []).map(
+        (provider) => provider.name,
+      ),
       logs: [],
     }),
 ) =>
   Layer.succeed(CodeExecutor, {
     execute,
   });
+
+const searchProvidersRequest = (input: {
+  readonly query?: string;
+  readonly limit?: number;
+}): CodeModeSearchProvidersRequest =>
+  CodeModeSearchProvidersRequest.make({
+    query: Option.fromNullable(input.query),
+    limit: Option.fromNullable(input.limit),
+  });
+
+const searchRequest = (input: {
+  readonly query: string;
+  readonly provider?: string;
+  readonly limit?: number;
+}): CodeModeSearchRequest =>
+  CodeModeSearchRequest.make({
+    query: input.query,
+    provider: Option.fromNullable(input.provider),
+    limit: Option.fromNullable(input.limit),
+  });
+
+const unsafeSearchProvidersRequest = (input: {
+  readonly query?: string;
+  readonly limit?: number;
+}): CodeModeSearchProvidersRequest =>
+  ({
+    query: Option.fromNullable(input.query),
+    limit: Option.fromNullable(input.limit),
+  }) as CodeModeSearchProvidersRequest;
+
+const unsafeSearchRequest = (input: {
+  readonly query: string;
+  readonly provider?: string;
+  readonly limit?: number;
+}): CodeModeSearchRequest =>
+  ({
+    query: input.query,
+    provider: Option.fromNullable(input.provider),
+    limit: Option.fromNullable(input.limit),
+  }) as CodeModeSearchRequest;
 
 const fixtureAddTool = (): DiscoveredMcpTool =>
   mcpTool({
