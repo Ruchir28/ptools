@@ -17,7 +17,7 @@ const bannedSymbols = [
   "FileConfigSourceLive",
   "makeCodeModeLive",
   "makeMcpRegistryLive",
-  "makeLocalSandboxExecutorLive",
+  "LocalSandboxExecutorLayer",
 ];
 
 describe("agent-tools import boundary", () => {

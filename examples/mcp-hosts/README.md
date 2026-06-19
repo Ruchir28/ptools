@@ -213,4 +213,11 @@ then point OpenCode at the built CLI so the host keeps this example directory as
 script from `packages/cli`, so a relative `--config .ptools/config.json` resolves
 in the wrong directory.
 
+The checked-in OpenCode source config also sets `DENO_BIN` to the workspace's
+root dev dependency (`../../node_modules/.bin/deno`). This keeps the direct
+`node ../../packages/cli/dist/cli.js` command anchored in this example directory
+while giving the restricted local sandbox an explicit Deno executable. Installed
+package users should install Deno normally; ptools also detects the canonical
+`~/.deno/bin` installation and `deno` on `PATH`.
+
 For public docs and users, prefer the installed-package `npx` command.

@@ -1,3 +1,25 @@
+/**
+ * @file check-packed-artifacts.mjs
+ * 
+ * Pre-publish safety validation script for the monorepo.
+ * 
+ * Purpose:
+ * Simulates the exact npm/pnpm publishing process by running `pnpm pack` inside a
+ * temporary directory for each publishable package. This acts as a dry-run safety net
+ * to ensure we never publish broken, incomplete, or bloated packages to npm.
+ * 
+ * Key Validations:
+ * 1. Integrity: Verifies that critical files (README.md, LICENSE, package.json) are present.
+ * 2. Completeness: Ensures that the compiled `dist/` build outputs exist.
+ * 3. Export/Import Resolution: Recursively extracts and verifies that all local target files
+ *    referenced in the package's "exports" and "imports" fields (e.g., nested worker paths like
+ *    `dist/executor/sandbox-worker.js`) are actually bundled inside the packed tarball.
+ * 4. Dependency Safety: Confirms that no local "workspace:*" dependency references remain,
+ *    and that internal dependency versions match the published package version.
+ * 5. Cleanliness: Enforces a strict file allowlist (via `isAllowedFile`) to prevent leaking
+ *    private source code, test suites, or build cache metadata (like `.tsbuildinfo`).
+ */
+
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,7 +34,13 @@ const readSourceManifest = async (pkg) =>
   JSON.parse(await readFile(join(root, pkg.dir, "package.json"), "utf8"));
 
 const pack = (pkg) => {
-  const before = new Set(execFileSync("find", [packDir, "-type", "f"]).toString().trim().split("\n").filter(Boolean));
+  const before = new Set(
+    execFileSync("find", [packDir, "-type", "f"])
+      .toString()
+      .trim()
+      .split("\n")
+      .filter(Boolean),
+  );
 
   execFileSync(
     "pnpm",
@@ -44,6 +72,14 @@ const readPackedManifest = (tarball) =>
     execFileSync("tar", ["-xOf", tarball, "package/package.json"]).toString(),
   );
 
+const localPackageTargets = (value) => {
+  if (typeof value === "string") {
+    return value.startsWith("./") ? [value] : [];
+  }
+  if (value === null || typeof value !== "object") return [];
+  return Object.values(value).flatMap(localPackageTargets);
+};
+
 const isAllowedFile = (file) => {
   if (
     file === "package/package.json" ||
@@ -54,10 +90,6 @@ const isAllowedFile = (file) => {
   }
 
   if (!file.startsWith("package/dist/")) {
-    return false;
-  }
-
-  if (file.slice("package/dist/".length).includes("/")) {
     return false;
   }
 
@@ -92,6 +124,18 @@ try {
 
     if (!files.some((file) => file.startsWith("package/dist/"))) {
       errors.push(`${pkg.name}: packed artifact missing dist output`);
+    }
+
+    for (const target of localPackageTargets({
+      exports: sourceManifest.exports,
+      imports: sourceManifest.imports,
+    })) {
+      const expected = `package/${String(target).replace(/^\.\//, "")}`;
+      if (!files.includes(expected)) {
+        errors.push(
+          `${pkg.name}: packed artifact missing export target ${expected}`,
+        );
+      }
     }
 
     for (const file of files) {

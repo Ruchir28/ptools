@@ -8,7 +8,7 @@
     "prepare": "effect-language-service patch",
     "dev": "pnpm --filter @ptools/cli dev -- mcp serve --host node",
     "playground": "tsx apps/playground/src/playground.ts",
-    "build": "tsc -b",
+    "build": "tsc -b && pnpm --filter @ptools/host-node build:worker",
     "typecheck": "tsc -b --pretty && pnpm --recursive --if-present typecheck",
     "test": "vitest run --exclude \"**/dist/**\" --exclude \"packages/host-cloudflare/test/worker.test.ts\" && pnpm --filter @ptools/host-cloudflare test:worker",
     "check:publishable": "node scripts/check-publishable-packages.mjs && node scripts/check-packed-artifacts.mjs",
@@ -21,6 +21,7 @@
   "devDependencies": {
     "@effect/language-service": "^0.86.2",
     "@types/node": "25.9.1",
+    "deno": "2.8.3",
     "prettier": "3.8.3",
     "tsx": "4.22.3",
     "typescript": "6.0.3",

@@ -17,6 +17,10 @@
     "dist/*.js.map",
     "dist/*.d.ts",
     "dist/*.d.ts.map",
+    "dist/**/*.d.ts.map",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
     "README.md",
     "LICENSE"
   ],
@@ -29,10 +33,17 @@
       "default": "./dist/index.js"
     }
   },
+  "imports": {
+    "#sandbox-worker": "./dist/executor/sandbox-worker.js"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm --filter @ptools/executor build && tsc -p tsconfig.json && pnpm build:worker",
+    "build:worker": "node scripts/build-sandbox-worker.mjs",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
-    "test": "vitest run --exclude \"**/dist/**\""
+    "test": "pnpm --filter @ptools/executor build && pnpm build:worker && vitest run --exclude \"**/dist/**\""
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

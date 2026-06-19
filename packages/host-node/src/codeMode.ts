@@ -25,11 +25,7 @@ import {
   ResolvedStdioMcpConfig,
   ServerConfigError,
 } from "@ptools/config";
-import {
-  makeLocalSandboxExecutorLive,
-  type LocalSandboxExecutorOptions,
-} from "@ptools/executor/internal/local";
-import type { ExecutorError } from "@ptools/executor";
+import { ExecutorStartError, type ExecutorError } from "@ptools/executor";
 import {
   makeMcpRegistryLive,
   type NameCollisionError,
@@ -43,6 +39,10 @@ import {
 } from "./config.js";
 import { NodeAuthCoordinatorLive, NodeCredentialsStoreLive } from "./auth.js";
 import { NodeMcpConnectorLive } from "./mcpConnector.js";
+import {
+  LocalSandboxExecutorLayer,
+  type LocalSandboxExecutorOptions,
+} from "./executor/localExecutor.js";
 
 const DEFAULT_HOST_ID = "node-local";
 const DEFAULT_AUTH_SERVICE_NAME = "ptools-mcp-oauth";
@@ -122,6 +122,9 @@ export const NodeCodeModeServerLive = (
         }),
         env: options.env ?? process.env,
         cwd: options.cwd ?? process.cwd(),
+        ...(options.executor?.denoExecutable === undefined
+          ? {}
+          : { denoExecutable: options.executor.denoExecutable }),
         ...(options.auth === undefined ? {} : { auth: options.auth }),
       }),
     ),
@@ -212,6 +215,7 @@ const NodeCodeModeLiveFromResolvedConfig = (options: {
   readonly config: ResolvedPtoolsConfig;
   readonly env: NodeEnv;
   readonly cwd: string;
+  readonly denoExecutable?: string;
   readonly auth?: NodeAuthOptions;
 }): Layer.Layer<CodeMode, HostNodeError, never> =>
   makeCodeModeLive().pipe(
@@ -221,9 +225,9 @@ const NodeCodeModeLiveFromResolvedConfig = (options: {
           Layer.provide(NodeMcpConnectorLive),
           Layer.provide(makeNodeAuthCoordinatorLive(options)),
         ),
-        makeLocalSandboxExecutorLive(
-          Option.match(options.config.executor, {
-            onNone: () => undefined,
+        LocalSandboxExecutorLayer({
+          ...Option.match(options.config.executor, {
+            onNone: () => ({}),
             onSome: (executor) => ({
               ...Option.match(executor.defaultTimeoutMs, {
                 onNone: () => ({}),
@@ -231,11 +235,19 @@ const NodeCodeModeLiveFromResolvedConfig = (options: {
               }),
             }),
           }),
-        ),
+          ...(options.denoExecutable === undefined
+            ? {}
+            : { denoExecutable: options.denoExecutable }),
+        }),
       ),
     ),
     Layer.mapError((cause) =>
-      toHostNodeError("Failed to start local Node Code Mode.", cause),
+      toHostNodeError(
+        cause instanceof ExecutorStartError
+          ? `Failed to start local Node Code Mode. ${cause.message}`
+          : "Failed to start local Node Code Mode.",
+        cause,
+      ),
     ),
   );
 

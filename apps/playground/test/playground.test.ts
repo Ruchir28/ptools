@@ -1,10 +1,11 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeCodeModeLive } from "@ptools/code-mode";
 import { ConfigSource } from "@ptools/config";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor/internal/local";
+import { LocalSandboxExecutorLayer } from "@ptools/host-node";
 import {
   FileConfigSourceLive,
   NodeAuthCoordinatorLive,
@@ -35,7 +36,16 @@ const makeNodeAuthCoordinatorLive = () =>
     ),
   );
 
-describe("Code Mode playground", () => {
+const hasDeno = (() => {
+  try {
+    execFileSync("deno", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe.skipIf(!hasDeno)("Code Mode playground", () => {
   it("serves live context and executes through CodeMode", async () => {
     const configPath = await writeFixtureConfig();
     const config = await Effect.runPromise(
@@ -58,7 +68,7 @@ describe("Code Mode playground", () => {
             Layer.provide(NodeMcpConnectorLive),
             Layer.provide(makeNodeAuthCoordinatorLive()),
           ),
-          makeLocalSandboxExecutorLive(
+          LocalSandboxExecutorLayer(
             Option.match(config.executor, {
               onNone: () => undefined,
               onSome: (executor) =>

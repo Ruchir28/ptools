@@ -9,10 +9,7 @@
  */
 import { Data, Option } from "effect";
 import type { Effect } from "effect";
-import type {
-  CapturedLog,
-  SandboxProviderManifest,
-} from "./schema.js";
+import type { CapturedLog, SandboxProviderManifest } from "./schema.js";
 
 /**
  * Host-side callback table that lets sandbox code call MCP tools by provider
@@ -82,7 +79,7 @@ export class ExecuteRequest extends Data.Class<{
 }> {}
 
 /**
- * Fixed semantic input to a host `ExecutorBackend`, produced by
+ * Fixed execution input to a host `ExecutorBackend`, produced by
  * `prepareExecuteRequest`. A validated `Data.Class` runtime value (not a
  * schema) because `providers` contains non-serializable callback functions.
  * `providers` stays host-side and is NEVER serialized into sandbox payloads —
@@ -118,8 +115,4 @@ export const makeExecuteRequest = (options: {
 export interface ExecuteResult {
   readonly value: unknown;
   readonly logs: ReadonlyArray<CapturedLog>;
-}
-
-export interface LocalSandboxExecutorOptions {
-  readonly defaultTimeoutMs?: number;
 }

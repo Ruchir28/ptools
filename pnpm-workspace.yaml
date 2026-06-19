@@ -3,6 +3,7 @@ packages:
   - "packages/*"
   - "examples/*"
 allowBuilds:
+  deno: true
   esbuild: true
   sharp: false
   workerd: true

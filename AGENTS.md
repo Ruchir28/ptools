@@ -107,6 +107,12 @@ When adding Code Mode or executor behavior, add tests that prove the actual vert
 ## Search And Docs
 
 - Prefer local repo inspection before theorizing.
+- Before changing sandbox-kernel packaging, worker-path resolution, platform
+  entrypoint ownership, kernel source artifacts, or Dynamic Worker
+  source generation, read
+  `docs/sandbox-kernel-platform-artifacts.md`. It records which package owns
+  the shared kernel versus each host-specific runnable artifact and the
+  accepted Deno/Cloudflare build direction.
 - For MCP SDK usage, check installed SDK types/examples first.
 - If web research is needed, use configured search tools before built-in browsing.
 - For research-heavy comparisons or open-ended architecture questions, spawn

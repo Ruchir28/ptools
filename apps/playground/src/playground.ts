@@ -15,7 +15,7 @@ import {
   CodeModeToolSchemaRequest,
 } from "@ptools/code-mode-api";
 import { ConfigSource } from "@ptools/config";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor/internal/local";
+import { LocalSandboxExecutorLayer } from "@ptools/host-node";
 import {
   NodeAuthCoordinatorLive,
   NodeConfigSourceLive,
@@ -68,7 +68,7 @@ export const runPlayground = (
             Layer.provide(NodeMcpConnectorLive),
             Layer.provide(makeNodeAuthCoordinatorLive(env)),
           ),
-          makeLocalSandboxExecutorLive(
+          LocalSandboxExecutorLayer(
             Option.match(config.executor, {
               onNone: () => undefined,
               onSome: (executor) =>

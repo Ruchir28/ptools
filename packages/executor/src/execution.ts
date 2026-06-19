@@ -1,18 +1,18 @@
 /**
- * Host-neutral execution semantics shared by every backend.
+ * Host-neutral execution rules shared by every backend and sandbox runtime.
  *
  * These functions are plain functions returning `Effect`s, not layers and not a
- * service. The layer is {@link CodeExecutorLayer} (`./executor.ts`); the host
- * SPI is {@link ExecutorBackend} (`./backend.ts`). Both the Node/local backend
- * and the future Cloudflare backend route through these so that request
- * normalization, provider-call dispatch, and result interpretation stay
- * identical across hosts.
+ * service. The layers live beside their service boundaries: `CodeExecutorLayer`
+ * in `./executor.ts`, and the adapter from `ExecutorBackend` to the host's
+ * `SandboxRuntime` in `./backend.ts`. Every platform routes through these rules
+ * so request normalization, provider-call dispatch, and result interpretation
+ * stay identical across hosts.
  *
  * Execution flow:
  *
  *   prepareExecuteRequest(request, options)   normalize + validate -> PreparedExecuteRequest
- *   ExecutorBackend.executePrepared(prepared) host runs sandbox -> SandboxCompleteRequest
- *   decodeSandboxCompleteResult(envelope)     interpret -> ExecuteResult | ExecutorError
+ *   ExecutorBackend.executePrepared(prepared) adapts to SandboxRuntime -> SandboxCompletion
+ *   decodeSandboxCompletion(envelope)         interpret -> ExecuteResult | ExecutorError
  *
  * Provider-call flow:
  *
@@ -24,7 +24,7 @@
  * Notice the error-channel shape: provider-call failures are data envelopes
  * because they must cross a host transport back into sandbox JavaScript. Final
  * sandbox-completion failures are converted back into the Effect error channel
- * by `decodeSandboxCompleteResult`.
+ * by `decodeSandboxCompletion`.
  */
 import { Cause, Effect, Option } from "effect";
 import {
@@ -43,7 +43,7 @@ import type {
 } from "./types.js";
 import { PreparedExecuteRequest as PreparedExecuteRequestValue } from "./types.js";
 import type {
-  SandboxCompleteRequest,
+  SandboxCompletion,
   SandboxProviderCall,
   SandboxProviderCallResult,
   SerializedSandboxError,
@@ -85,10 +85,8 @@ export const prepareExecuteRequest = (
     try: () => {
       const globals = Option.getOrElse(request.globals, () => ({}));
       const providers = Option.getOrElse(request.providers, () => []);
-      const timeoutMs = Option.getOrElse(
-        request.timeoutMs,
-        () =>
-          Option.getOrElse(options.defaultTimeoutMs, () => DEFAULT_TIMEOUT_MS),
+      const timeoutMs = Option.getOrElse(request.timeoutMs, () =>
+        Option.getOrElse(options.defaultTimeoutMs, () => DEFAULT_TIMEOUT_MS),
       );
 
       validateGlobals(globals, providers);
@@ -114,7 +112,7 @@ export const prepareExecuteRequest = (
   });
 
 /**
- * Shared provider-call dispatch used by every host transport (local HTTP,
+ * Shared provider-call dispatch used by every host transport (Deno stdio,
  * Workers RPC, future in-memory).
  *
  * Given the host-side callback table (`providers`, built by Code Mode and
@@ -142,10 +140,12 @@ export const invokeProviderCall = (
           Effect.matchCause({
             onFailure: (cause) => ({
               ok: false,
+              callId: call.callId,
               error: serializeCause(cause, "ProviderToolError"),
             }),
             onSuccess: (value) => ({
               ok: true,
+              callId: call.callId,
               value,
             }),
           }),
@@ -157,13 +157,13 @@ export const invokeProviderCall = (
  * Interpret a sandbox completion envelope into an {@link ExecuteResult} or a
  * shared {@link ExecutorError}.
  *
- * Both Node and Cloudflare backends return the same `SandboxCompleteRequest`
+ * Both Node and Cloudflare backends return the same `SandboxCompletion`
  * envelope and share this interpretation: success -> `ExecuteResult`; failure
  * with `error.code === "InvalidExecutorCode"` -> `InvalidExecutorCode`; any
  * other failure -> `ExecutorRuntimeError`.
  */
-export const decodeSandboxCompleteResult = (
-  result: SandboxCompleteRequest,
+export const decodeSandboxCompletion = (
+  result: SandboxCompletion,
 ): Effect.Effect<ExecuteResult, ExecutorError> =>
   result.ok
     ? Effect.succeed(toExecuteResult(result))
@@ -209,9 +209,7 @@ export const serializeUnknownError = (
   };
 };
 
-const validateProviders = (
-  providers: ExecutorProviders,
-): ExecutorProviders => {
+const validateProviders = (providers: ExecutorProviders): ExecutorProviders => {
   const providerNames = new Set<string>();
 
   for (const provider of providers) {
@@ -272,6 +270,7 @@ const providerToolNotFound = (
   call: SandboxProviderCall,
 ): SandboxProviderCallResult => ({
   ok: false,
+  callId: call.callId,
   error: {
     name: "ProviderToolNotFound",
     message: `Provider tool not found: ${call.provider}.${call.tool}`,
@@ -285,7 +284,7 @@ const runProviderHandler = (
 ): Effect.Effect<unknown, unknown> => Effect.suspend(() => handler(input));
 
 const toExecuteResult = (
-  result: Extract<SandboxCompleteRequest, { readonly ok: true }>,
+  result: Extract<SandboxCompletion, { readonly ok: true }>,
 ): ExecuteResult => ({
   value: result.value,
   logs: result.logs,

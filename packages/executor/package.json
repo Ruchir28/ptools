@@ -17,6 +17,10 @@
     "dist/*.js.map",
     "dist/*.d.ts",
     "dist/*.d.ts.map",
+    "dist/**/*.d.ts.map",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
     "README.md",
     "LICENSE"
   ],
@@ -28,15 +32,15 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./internal/local": {
-      "types": "./dist/local.d.ts",
-      "default": "./dist/local.js"
+    "./sandbox": {
+      "types": "./dist/sandbox/index.d.ts",
+      "default": "./dist/sandbox/index.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
-    "test": "vitest run --exclude \"**/dist/**\""
+    "test": "pnpm build && vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
     "effect": "3.21.2"

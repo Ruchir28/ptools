@@ -1,4 +1,5 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +28,31 @@ const fixturePath = fileURLToPath(
   ),
 );
 
-describe("Node Code Mode host assembly", () => {
+const hasDeno = (() => {
+  try {
+    execFileSync("deno", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe("Node Code Mode executor startup", () => {
+  it("surfaces actionable Deno resolution failures", async () => {
+    await expect(
+      createNodeCodeModeClient({
+        mcpServers: {},
+        executor: {
+          denoExecutable: "/definitely/missing/ptools-deno",
+        },
+      }),
+    ).rejects.toThrow(
+      'Failed to start local Node Code Mode. Deno 2 or newer was not found using the configured denoExecutable ("/definitely/missing/ptools-deno"). Install Deno, set DENO_BIN, or pass denoExecutable.',
+    );
+  });
+});
+
+describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
   it("creates a client from in-memory resolved upstream config", async () => {
     const client = await createNodeCodeModeClient({
       mcpServers: {

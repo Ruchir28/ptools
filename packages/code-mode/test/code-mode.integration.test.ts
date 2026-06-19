@@ -1,5 +1,13 @@
 import { AuthCoordinator, AuthError } from "@ptools/auth";
-import { makeLocalSandboxExecutorLive } from "@ptools/executor/internal/local";
+import {
+  CodeExecutorLayer,
+  ExecutorBackendLayer,
+  SandboxRuntime,
+} from "@ptools/executor";
+import {
+  makeSandboxKernel,
+  type SandboxProgram,
+} from "@ptools/executor/sandbox";
 import { ResolvedStdioMcpConfig } from "@ptools/config";
 import {
   makeMcpRegistryLive,
@@ -23,21 +31,28 @@ describe("CodeMode stdio MCP integration", () => {
         const codeMode = yield* CodeMode;
         const providerResult = yield* codeMode.searchProviders();
         const echoContext = yield* codeMode.search(searchRequest("echo"));
-        const echoSchema = yield* codeMode.toolSchema(CodeModeToolSchemaRequest.make({
-          toolIds: ["fixture.echo"],
-        }));
-        const echoRun = yield* codeMode.execute(executeRequest(`
+        const echoSchema = yield* codeMode.toolSchema(
+          CodeModeToolSchemaRequest.make({
+            toolIds: ["fixture.echo"],
+          }),
+        );
+        const echoRun = yield* codeMode.execute(
+          executeRequest(`
           async () => {
             console.log("calling echo");
             return await fixture.echo({ text: "hello from code mode" });
           }
-        `));
-        const addRun = yield* codeMode.execute(executeRequest(`
+        `),
+        );
+        const addRun = yield* codeMode.execute(
+          executeRequest(`
           async () => {
             return await fixture.add({ a: 2, b: 3 });
           }
-        `));
-        const caughtProviderError = yield* codeMode.execute(executeRequest(`
+        `),
+        );
+        const caughtProviderError = yield* codeMode.execute(
+          executeRequest(`
           async () => {
             try {
               await fixture.add({ a: "bad", b: 3 });
@@ -48,13 +63,16 @@ describe("CodeMode stdio MCP integration", () => {
               };
             }
           }
-        `));
+        `),
+        );
         const uncaughtProviderError = yield* Effect.either(
-          codeMode.execute(executeRequest(`
+          codeMode.execute(
+            executeRequest(`
             async () => {
               return await fixture.add({ a: "bad", b: 3 });
             }
-          `)),
+          `),
+          ),
         );
 
         return {
@@ -124,10 +142,48 @@ const makeIntegrationLive = () =>
           Layer.provide(makeFakeMcpConnectorLive()),
           Layer.provide(makeTestAuthCoordinatorLive()),
         ),
-        makeLocalSandboxExecutorLive(),
+        makeInMemoryExecutorLive(),
       ),
     ),
   );
+
+const makeInMemoryExecutorLive = () =>
+  CodeExecutorLayer().pipe(
+    Layer.provide(
+      ExecutorBackendLayer.pipe(
+        Layer.provide(
+          Layer.succeed(SandboxRuntime, {
+            execute: (execution) =>
+              Effect.promise(() =>
+                makeSandboxKernel({
+                  invokeProvider: (call) =>
+                    Effect.runPromise(execution.handleProviderCall(call)),
+                }).execute({
+                  program: loadProgram(execution.payload.code, [
+                    ...Object.keys(execution.payload.globals),
+                    ...execution.payload.providers.map(
+                      (provider) => provider.name,
+                    ),
+                    "console",
+                  ]),
+                  globals: execution.payload.globals,
+                  providers: execution.payload.providers,
+                }),
+              ),
+          }),
+        ),
+      ),
+    ),
+  );
+
+const loadProgram = (
+  code: string,
+  names: ReadonlyArray<string>,
+): SandboxProgram =>
+  new Function(
+    "__bindings",
+    `const { ${names.join(", ")} } = __bindings; return (${code})();`,
+  ) as SandboxProgram;
 
 const makeFakeMcpConnectorLive = () =>
   Layer.succeed(McpConnector, {

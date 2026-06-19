@@ -2,10 +2,7 @@ import { Context, Effect, Layer, Option } from "effect";
 import { ExecutorBackend } from "./backend.js";
 import type { ExecutorError } from "./errors.js";
 import type { ExecuteRequest, ExecuteResult } from "./types.js";
-import {
-  decodeSandboxCompleteResult,
-  prepareExecuteRequest,
-} from "./semantic.js";
+import { decodeSandboxCompletion, prepareExecuteRequest } from "./execution.js";
 
 /**
  * The stable semantic execution service consumed by Code Mode.
@@ -42,17 +39,17 @@ export const defaultCodeExecutorLayerOptions: CodeExecutorLayerOptions = {
 
 /**
  * Shared implementation of {@link CodeExecutor} that composes host-neutral
- * semantics with a host-provided {@link ExecutorBackend}.
+ * execution rules with the shared {@link ExecutorBackend} adapter.
  *
  * Request flow inside `execute`:
  *
  *   prepareExecuteRequest(request, options)
  *     -> ExecutorBackend.executePrepared(prepared)
- *       -> decodeSandboxCompleteResult(envelope)
+ *       -> decodeSandboxCompletion(envelope)
  *
  * Dependencies: requires an `ExecutorBackend` in the environment and produces
- * a `CodeExecutor`. A host assembles the full capability by providing its own
- * backend layer:
+ * a `CodeExecutor`. A host assembles the full capability by providing the
+ * shared backend adapter after satisfying its `SandboxRuntime` requirement.
  *
  *   CodeExecutorLayer({ defaultTimeoutMs: Option.some(15_000) }).pipe(
  *     Layer.provide(myBackendLayer),
@@ -75,7 +72,7 @@ export const CodeExecutorLayer = (
             defaultTimeoutMs: options.defaultTimeoutMs,
           }).pipe(
             Effect.flatMap((prepared) => backend.executePrepared(prepared)),
-            Effect.flatMap(decodeSandboxCompleteResult),
+            Effect.flatMap(decodeSandboxCompletion),
           ),
       };
     }),

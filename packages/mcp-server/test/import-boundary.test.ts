@@ -19,7 +19,7 @@ const bannedSymbols = [
   "FileConfigSourceLive",
   "makeCodeModeLive",
   "makeMcpRegistryLive",
-  "makeLocalSandboxExecutorLive",
+  "LocalSandboxExecutorLayer",
 ];
 
 describe("mcp-server import boundary", () => {

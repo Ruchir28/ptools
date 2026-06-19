@@ -13,6 +13,9 @@
         "--config",
         ".ptools/config.json"
       ],
+      "environment": {
+        "DENO_BIN": "../../node_modules/.bin/deno"
+      },
       "enabled": true,
       "timeout": 30000
     }
