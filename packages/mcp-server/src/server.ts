@@ -58,6 +58,7 @@ const EXECUTE_CODE_CONTRACT = [
   "Do not send a script body, top-level await, top-level return, or a function declaration.",
   "A good pattern is to use search to find candidate actions, get_tool_schema with returned toolIds, then execute.",
   "Provider namespaces returned by search, such as exa, are injected as globals inside that function.",
+  "Await every provider call before returning. Calls still pending when the function returns are drained and reported as warnings because their result or failure was detached from the function.",
   "Use execute to keep intermediate provider results, filtering, joins, pagination, aggregation, and field extraction inside the code run; return only the compact result needed for the user.",
 ].join(" ");
 
@@ -80,9 +81,35 @@ const ExecuteInputSchema = {
     .describe("Optional per-run timeout override in milliseconds."),
 };
 
+const SerializedSandboxErrorSchema = z.object({
+  name: z.string().optional(),
+  message: z.string(),
+  stack: z.string().optional(),
+  code: z.string().optional(),
+});
+
+const ExecuteWarningSchema = z.union([
+  z.object({
+    code: z.literal("ProviderCallPendingAtReturn"),
+    callId: z.string(),
+    provider: z.string(),
+    tool: z.string(),
+    outcome: z.literal("succeeded"),
+  }),
+  z.object({
+    code: z.literal("ProviderCallPendingAtReturn"),
+    callId: z.string(),
+    provider: z.string(),
+    tool: z.string(),
+    outcome: z.literal("failed"),
+    error: SerializedSandboxErrorSchema,
+  }),
+]);
+
 const ExecuteOutputSchema = {
   value: z.unknown(),
   logs: z.array(z.unknown()),
+  warnings: z.array(ExecuteWarningSchema),
 };
 
 const AuthStatusOutputSchema = {

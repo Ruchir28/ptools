@@ -21,6 +21,7 @@
  */
 
 import {
+  injectableBindingKeys,
   makeSandboxKernel,
   type SandboxProgram,
   type SandboxProviderInvoker,
@@ -48,6 +49,11 @@ type DenoRuntime = {
 interface PendingProviderCall {
   readonly resolve: (result: SandboxProviderCallResult) => void;
   readonly reject: (error: Error) => void;
+}
+
+interface LoadedSandboxProgram {
+  readonly program: SandboxProgram;
+  readonly bindingKeys: ReadonlyArray<string>;
 }
 
 const deno = (globalThis as typeof globalThis & { readonly Deno: DenoRuntime })
@@ -171,17 +177,24 @@ const resultLoop = (async () => {
   }
 })();
 
-let program: SandboxProgram;
+let loadedProgram: LoadedSandboxProgram;
 try {
-  program = loadDenoSandboxProgram(executeMessage.payload);
+  loadedProgram = loadDenoSandboxProgram(executeMessage.payload);
 } catch (cause) {
-  program = () => {
-    throw cause;
+  loadedProgram = {
+    bindingKeys: injectableBindingKeys(
+      executeMessage.payload.globals,
+      executeMessage.payload.providers,
+    ),
+    program: () => {
+      throw cause;
+    },
   };
 }
 const kernel = makeSandboxKernel({ invokeProvider });
 const completion = await kernel.execute({
-  program,
+  program: loadedProgram.program,
+  bindingKeys: loadedProgram.bindingKeys,
   globals: executeMessage.payload.globals,
   providers: executeMessage.payload.providers,
 });
@@ -209,17 +222,13 @@ void resultLoop.catch(() => undefined);
  */
 function loadDenoSandboxProgram(
   payload: SandboxExecutionPayload,
-): SandboxProgram {
-  const names = [
-    ...Object.keys(payload.globals),
-    ...payload.providers.map((provider) => provider.name),
-    "console",
-  ];
+): LoadedSandboxProgram {
+  const bindingKeys = injectableBindingKeys(payload.globals, payload.providers);
   let execute: SandboxProgram;
   try {
     execute = new Function(
       "__bindings",
-      `const { ${names.join(", ")} } = __bindings; return (${payload.code})();`,
+      `const { ${bindingKeys.join(", ")} } = __bindings; return (${payload.code})();`,
     ) as SandboxProgram;
   } catch (cause) {
     throw markInvalidCode(cause);
@@ -234,7 +243,7 @@ function loadDenoSandboxProgram(
   } catch (cause) {
     throw markInvalidCode(cause);
   }
-  return execute;
+  return { program: execute, bindingKeys };
 }
 
 function markInvalidCode(cause: unknown): Error {

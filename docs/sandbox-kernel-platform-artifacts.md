@@ -3,7 +3,7 @@
 Status: accepted architecture direction. Executor and host-node migration
 implemented; host-cloudflare implementation remains future work.
 
-Last reviewed: 2026-06-19.
+Last reviewed: 2026-06-20.
 
 Related planning:
 
@@ -52,6 +52,159 @@ things:
 
 That division keeps the kernel reusable without pretending that process and
 isolate construction are identical across platforms.
+
+## How An Execution Runs: Loader Versus Kernel
+
+The boundaries table names the owners. It does not show the handoff between
+them, which is where most confusion arises. A sandbox execution has two distinct
+phases that happen in different packages, at different times, with a strict security boundary:
+
+1. **Phase 1: Compile-Time (Owned by the Platform Entrypoint / Loader)**
+   - **What it does:** The platform loader takes the raw generated code string and turns it into an executable, callable JavaScript function (`SandboxProgram`).
+   - **Scope configuration:** This is the only stage where "function compilation" occurs. The loader defines the parameter signature of this function, destructuring variables from a single input object (referred to internally as `__bindings` or argument list).
+   - **Key Constraint:** The loader owns the **compilation** and the **syntactic structure** of the namespace. It derives the lexical variable names from the shared binding plan and reports the exact keys it compiled with. However, it does not build or supply any of the actual values behind those names.
+2. **Phase 2: Run-Time (Owned by the Shared Kernel)**
+   - **What it does:** The kernel accepts the pre-compiled `SandboxProgram` and hydrates it with real runtime capabilities. It assembles the execution context, injects safe globals, creates custom tool/provider proxies, executes the program, monitors pending async promises, intercepts console logs, and outputs the final execution envelope (`SandboxCompletion`).
+   - **Key Constraint:** The kernel never compiles code. It solely **consumes** the compiled function produced in Phase 1, injects its own runtime values/proxies into it, tracks its execution state, and standardizes errors and results.
+
+### The Security & Design Boundary: "Names Only, No Implementations"
+
+Neither phase reaches into the other's domain. The wire payload crossing the host-to-sandbox transport is defined as:
+
+`SandboxExecutionPayload = { code, globals, providers }`
+
+Where `providers` is an array of `SandboxProviderManifest = { name, tools }`.
+
+This is a critical design constraint: **the sandbox is completely untrusted and has no direct network/file access. Therefore, no actual tool implementation code is sent to or loaded within the sandbox.**
+
+Instead, the payload contains **only the names of the providers and tools** (the "manifest").
+
+- **At Phase 1 (Compile-time):** The platform loader reads these names through the shared binding plan solely to compile the parameter list (e.g., creating a parameter named `sheets`) and records the `bindingKeys` it used.
+- **At Phase 2 (Run-time):** The kernel verifies those `bindingKeys` against the same plan, then reads these names to construct a local JavaScript `Proxy` (a mock object) matching that exact namespace structure. When the untrusted code calls `await sheets.read(...)` in the sandbox, the proxy intercepts the call and forwards a request over the `SandboxHostBridge` back to the trusted host. The host executes the actual tool code securely and replies with the result.
+
+```txt
+TRUSTED HOST                          UNTRUSTED SANDBOX (per-platform entrypoint)
+(effect runtime, provider dispatch)   (e.g. host-node sandbox-worker.ts in Deno)
+─────────────────────────────         ───────────────────────────────────────────
+
+prepare an execution:
+  globals   = { apiKey: "...", ... }
+  providers = [{ name: "sheets", tools: ["read"] }, ...]
+  code      = "async () => { sheets.read(...); ... }"
+        │
+        │  Execute { code, globals, providers }   (over transport: stdio / RPC)
+        ▼
+                                      ── PHASE 1: COMPILE  (platform loader) ──
+
+                                      plan = sandboxBindingPlan(globals, providers)
+                                      bindingKeys = plan.map(b => b.key)
+                                      program = new Function("__bindings",
+                                                `const { ${bindingKeys} } = __bindings;
+                                                 return (${code})();`)
+
+                                        ▸ output: a callable SandboxProgram + bindingKeys
+                                        ▸ owns: compilation only
+                                        ▸ does NOT build any runtime values
+
+                                      ── PHASE 2: RUN  (shared kernel) ──
+
+                                      kernel.execute({ program, bindingKeys, globals, providers })
+
+                                      plan = sandboxBindingPlan(globals, providers)
+                                      assert bindingKeys === plan.map(b => b.key)
+                                      materialize bindings from the plan:
+                                        global   → execution.globals[key]
+                                        provider → kernel-built provider proxy
+                                        kernel   → kernel-built fixed capability
+
+                                      await program(bindings)
+                                      tracks pending calls via bridge.invokeProvider
+                                      drains, serializes errors
+                                        ▸ SandboxCompletion
+        │
+        │  Complete { ok, value, logs, warnings }   (over transport)
+        ▼
+resumes Effect runtime, exposes result
+```
+
+### Who Supplies Each Binding The Program Receives
+
+The bindings object the kernel hands to `program(...)` is assembled from three
+distinct categories with **different ownership**. This is the key nuance behind the
+question "does the kernel own the values?" — it does not own them wholesale:
+
+| Binding key   | Value supplied by                                                                                              | Name (key) supplied by                             | What the kernel actually does                                                                                                            |
+| ------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `globals.*`   | **Host** (over the wire, in the payload)                                                                       | Host (`Object.keys` of the payload's `globals`)    | Pure passthrough: spreads `...execution.globals` unchanged — neither the values nor their keys are kernel-owned                          |
+| `providers.*` | **Kernel** builds callable proxies; host supplies only a manifest of `{ name, tools }` with no implementations | Host (the manifest names)                          | Builds an async proxy per tool that routes through `bridge.invokeProvider`, mints `callId`s, validates correlation, tracks pending calls |
+| `console`     | **Kernel** (`makeCapturedConsole`) built from scratch                                                          | Kernel (the host has no knowledge of this binding) | Constructs a captured-console proxy so sandbox logs do not corrupt the transport stream                                                  |
+
+To summarize the ownership model:
+
+- **The Platform Loader (Phase 1)** owns _none of the values_. It only decides the syntactic names that the generated code is allowed to reference and compiles the wrapper function.
+- **The Host** owns the actual raw input values of `globals` and the list of available `providers`. It never owns the callable execution behaviors or sandbox logging.
+- **The Shared Kernel (Phase 2)** owns the **assembly** of the final execution scope. It owns `console` outright (to capture logs safely), builds the dynamic provider proxies over the host-provided manifests, and forwards everything to the compiled program. This ensures that the untrusted sandbox contains only lightweight communication shells, keeping the real, secure tool logic on the host side.
+
+---
+
+### Architectural Deep Dive: Why Does the Kernel Materialize Instead of the Platform Loader?
+
+A common architectural question when looking at this division is: **"Why are we doing the extra work of generating a binding plan and verifying it, rather than simply having each platform loader materialize the bindings directly and pass them to the kernel?"**
+
+The answer is a deliberate trade-off designed to prioritize **extensibility**, **robust sandboxing**, and **DRY (Don't Repeat Yourself) code** as we scale to multiple platforms (Deno, Cloudflare Workers, Node, Browser isolates, etc.).
+
+#### 1. Preventing "Fat" Platform Loaders (Eliminating Code Duplication)
+Materializing a binding is not a simple value assignment. It requires substantial execution logic:
+- **Dynamic Proxies**: Generating nested JavaScript `Proxy` shells so that the sandboxed code can use natural function call syntax (e.g. `await sheets.read(...)`).
+- **RPC Call-Id Generation & Correlation**: Generating unique `callId`s for each tool execution, tracking correlation, and mapping results.
+- **Async Lifecycles & Isolate Eviction Prevention**: If the untrusted sandboxed code executes a tool call without `await`ing it (running in the background), the platform might prematurely terminate the isolate when the main thread resolves. The kernel must track every single floating background promise in a `pendingProviderCalls` Set, awaiting and draining them (`Promise.all`) before finalizing.
+- **Console Capture**: Intercepting `console.log` statements securely into memory without leaking or corrupting standard stdout.
+
+If the platform loaders materialized the bindings, **every single platform package (Deno, Cloudflare, etc.) would have to write, maintain, and test their own version of this complex proxy and lifecycle management logic.**
+By having the **Shared Kernel** handle materialization, platform loaders remain extremely "lean, stupid, and safe." They only have to compile the code string and handle raw byte transport (I/O).
+
+#### 2. Strict Sandboxing and Avoiding Leakage
+The platform loader operates directly on the boundary of the sandbox, meaning its execution scope has access to platform internals (e.g. standard I/O streams, the Deno subprocess global, or raw environment variables). 
+If the loader materialized the bindings object, it might accidentally close over or leak platform-specific variables into the untrusted user code's scope. 
+By delegating materialization to the Shared Kernel running entirely inside the sandboxed environment, we ensure that the objects passed to the compiled program are constructed in a completely sterile, isolated space with zero risk of leakages.
+
+#### 3. Guaranteed Lifecycle Consistency Across Platforms
+Because the Shared Kernel manages the entire lifecycle of the function execution—specifically catching errors, capturing console output, and draining background async tasks—it guarantees identical execution behaviors whether running in a local Deno subprocess on a developer's laptop, or inside a Cloudflare Workers isolate in production. We do not have to rely on individual platform loaders implementing these tricky asynchronous semantics correctly.
+
+---
+
+### The Name-Coordination Seam
+
+Phase 1 destructures a list of names at compile time. Phase 2 assembles an
+object whose keys must be exactly that list. The shared contract is therefore a
+plan, not a hand-written object spread.
+
+`packages/executor/src/sandbox/kernel/bindings.ts` owns
+`sandboxBindingPlan(globals, providers)`. The plan is execution-specific:
+
+```ts
+[
+  ...Object.keys(globals).map((key) => ({ key, source: "global" })),
+  ...providers.map((provider) => ({ key: provider.name, source: "provider" })),
+  { key: "console", source: "kernel" },
+];
+```
+
+The platform loader consumes the plan through
+`injectableBindingKeys(globals, providers)` and returns the exact `bindingKeys`
+it compiled into the wrapper. The shared kernel recomputes the same plan from
+`SandboxKernelExecution.globals` and `SandboxKernelExecution.providers`, fails
+fast if the loader-reported `bindingKeys` differ, and then materializes the
+runtime bindings from the plan:
+
+- `source: "global"` reads `execution.globals[key]`;
+- `source: "provider"` reads the kernel-created provider proxy for `key`;
+- `source: "kernel"` reads a fixed kernel capability such as captured
+  `console`.
+
+This keeps function creation platform-owned while removing the previous drift
+risk where the loader used one name list and the kernel manually assembled
+`{ ...globals, ...providers, console }` from another implicit list.
 
 ## Shared Kernel Ownership
 
@@ -117,13 +270,14 @@ from executor:
 ```ts
 function loadDenoSandboxProgram(
   payload: SandboxExecutionPayload,
-): SandboxProgram {
-  const names = injectableBindingKeys(payload.globals, payload.providers);
-
-  return new Function(
+): LoadedSandboxProgram {
+  const bindingKeys = injectableBindingKeys(payload.globals, payload.providers);
+  const program = new Function(
     "__bindings",
-    `const { ${names.join(", ")} } = __bindings; return (${payload.code})();`,
+    `const { ${bindingKeys.join(", ")} } = __bindings; return (${payload.code})();`,
   ) as SandboxProgram;
+
+  return { program, bindingKeys };
 }
 ```
 

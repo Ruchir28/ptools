@@ -172,7 +172,9 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search(searchRequest({ query: "tool", limit: 1 }));
+        return yield* codeMode.search(
+          searchRequest({ query: "tool", limit: 1 }),
+        );
       }),
       [
         mcpTool({
@@ -560,10 +562,12 @@ describe("Code Mode context and search", () => {
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
-            return yield* codeMode.search(searchRequest({
-              provider: "missing",
-              query: "echo",
-            }));
+            return yield* codeMode.search(
+              searchRequest({
+                provider: "missing",
+                query: "echo",
+              }),
+            );
           }),
           [fixtureEchoTool()],
         ),
@@ -594,10 +598,12 @@ describe("Code Mode context and search", () => {
     const result = await runWithCodeMode(
       Effect.gen(function* () {
         const codeMode = yield* CodeMode;
-        return yield* codeMode.search(searchRequest({
-          provider: "fixture",
-          query: "fixture",
-        }));
+        return yield* codeMode.search(
+          searchRequest({
+            provider: "fixture",
+            query: "fixture",
+          }),
+        );
       }),
       [fixtureAddTool(), fixtureEchoTool()],
     );
@@ -1123,6 +1129,7 @@ const makeExecutorLayer = (
         (provider) => provider.name,
       ),
       logs: [],
+      warnings: [],
     }),
 ) =>
   Layer.succeed(CodeExecutor, {

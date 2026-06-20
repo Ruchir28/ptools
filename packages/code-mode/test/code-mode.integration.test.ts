@@ -5,6 +5,7 @@ import {
   SandboxRuntime,
 } from "@ptools/executor";
 import {
+  injectableBindingKeys,
   makeSandboxKernel,
   type SandboxProgram,
 } from "@ptools/executor/sandbox";
@@ -154,22 +155,21 @@ const makeInMemoryExecutorLive = () =>
         Layer.provide(
           Layer.succeed(SandboxRuntime, {
             execute: (execution) =>
-              Effect.promise(() =>
-                makeSandboxKernel({
+              Effect.promise(() => {
+                const bindingKeys = injectableBindingKeys(
+                  execution.payload.globals,
+                  execution.payload.providers,
+                );
+                return makeSandboxKernel({
                   invokeProvider: (call) =>
                     Effect.runPromise(execution.handleProviderCall(call)),
                 }).execute({
-                  program: loadProgram(execution.payload.code, [
-                    ...Object.keys(execution.payload.globals),
-                    ...execution.payload.providers.map(
-                      (provider) => provider.name,
-                    ),
-                    "console",
-                  ]),
+                  program: loadProgram(execution.payload.code, bindingKeys),
+                  bindingKeys,
                   globals: execution.payload.globals,
                   providers: execution.payload.providers,
-                }),
-              ),
+                });
+              }),
           }),
         ),
       ),

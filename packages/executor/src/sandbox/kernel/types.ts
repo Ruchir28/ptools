@@ -49,6 +49,13 @@ export interface SandboxKernelExecution {
   /** The compiled or loaded user program function to execute. */
   readonly program: SandboxProgram;
 
+  /**
+   * Exact lexical binding keys the platform loader compiled into the program.
+   * The kernel validates these against its binding plan before execution so a
+   * loader/kernel drift cannot degrade into undefined variables inside user code.
+   */
+  readonly bindingKeys: ReadonlyArray<string>;
+
   /** Top-level global variables to inject into the program's execution scope. */
   readonly globals: Readonly<Record<string, unknown>>;
 

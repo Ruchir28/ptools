@@ -6,6 +6,7 @@ export type {
   CodeModeAuthStatusValue,
   CodeModeDiagnostic,
   CodeModeExecuteRequest,
+  CodeModeExecutionWarning,
   CodeModeOperation,
   CodeModeProviderSummary,
   CodeModeRequest,

@@ -92,6 +92,7 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
         output: {
           value: { text: "hello from host-node" },
           logs: [],
+          warnings: [],
         },
       });
     } finally {

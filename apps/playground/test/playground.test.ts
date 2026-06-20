@@ -164,6 +164,7 @@ describe.skipIf(!hasDeno)("Code Mode playground", () => {
     expect(result.execution).toEqual({
       value: { sum: 5 },
       logs: [],
+      warnings: [],
     });
   }, 30_000);
 });

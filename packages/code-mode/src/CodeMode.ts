@@ -1,8 +1,5 @@
 import { CodeExecutor, ExecuteRequest } from "@ptools/executor";
-import {
-  McpRegistry,
-  type DiscoveredMcpTool,
-} from "@ptools/mcp-registry";
+import { McpRegistry, type DiscoveredMcpTool } from "@ptools/mcp-registry";
 import { Context, Effect, Layer, Option } from "effect";
 import {
   buildCodeModeRuntime,
@@ -193,16 +190,19 @@ export const makeCodeModeLive = (
               // Provider callbacks close over the MCP registry here; the
               // sandbox only ever receives pure SandboxProviderManifest data.
               executor
-                .execute(new ExecuteRequest({
-                  code: request.code,
-                  globals: Option.none(),
-                  providers: Option.some(runtime.providers),
-                  timeoutMs: request.timeoutMs,
-                }))
+                .execute(
+                  new ExecuteRequest({
+                    code: request.code,
+                    globals: Option.none(),
+                    providers: Option.some(runtime.providers),
+                    timeoutMs: request.timeoutMs,
+                  }),
+                )
                 .pipe(
                   Effect.map((result) => ({
                     value: result.value,
                     logs: result.logs,
+                    warnings: result.warnings,
                   })),
                   Effect.mapError(
                     (cause) => new CodeModeExecuteError({ cause }),

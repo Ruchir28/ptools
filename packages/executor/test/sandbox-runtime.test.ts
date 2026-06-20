@@ -25,6 +25,7 @@ describe("SandboxRuntime composition", () => {
             ok: true as const,
             value: providerResult.ok ? providerResult.value : null,
             logs: [],
+            warnings: [],
           };
         }),
     });

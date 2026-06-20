@@ -45,7 +45,7 @@ describe("PtoolsSession", () => {
           case "execute":
             return {
               operation: "execute",
-              output: { value: request.input.code, logs: [] },
+              output: { value: request.input.code, logs: [], warnings: [] },
             };
         }
       }),
@@ -76,7 +76,7 @@ describe("PtoolsSession", () => {
         code: "async () => 1",
         timeoutMs: 1000,
       }),
-    ).resolves.toEqual({ value: "async () => 1", logs: [] });
+    ).resolves.toEqual({ value: "async () => 1", logs: [], warnings: [] });
 
     expect(calls).toEqual([
       { operation: "auth_status" },
@@ -170,7 +170,7 @@ describe("input parsing", () => {
           case "execute":
             return {
               operation: "execute",
-              output: { value: undefined, logs: [] },
+              output: { value: undefined, logs: [], warnings: [] },
             };
         }
       }),
@@ -332,7 +332,7 @@ describe("input parsing", () => {
     it("accepts code without timeoutMs", async () => {
       await expect(
         session().callCodeModeTool("execute", { code: "async () => 1" }),
-      ).resolves.toEqual({ value: undefined, logs: [] });
+      ).resolves.toEqual({ value: undefined, logs: [], warnings: [] });
     });
   });
 });

@@ -31,6 +31,13 @@ import type {
   LogLevel,
   SerializedSandboxError,
 } from "../protocol.js";
+import {
+  assertInjectableBindingKeys,
+  injectableBindingKeys,
+  materializeSandboxBindings,
+  sandboxBindingPlan,
+  type FixedKernelBindingKey,
+} from "./bindings.js";
 import type {
   SandboxHostBridge,
   SandboxKernel,
@@ -45,6 +52,20 @@ const logLevels: ReadonlyArray<LogLevel> = [
   "log",
   "warn",
 ];
+
+type ProviderCallOutcome =
+  | { readonly outcome: "succeeded" }
+  | {
+      readonly outcome: "failed";
+      readonly error: SerializedSandboxError;
+    };
+
+interface PendingProviderCall {
+  readonly callId: string;
+  readonly provider: string;
+  readonly tool: string;
+  readonly settled: Promise<ProviderCallOutcome>;
+}
 
 /**
  * Initializes the shared kernel with the platform bridge required to reach the
@@ -93,11 +114,16 @@ const runSandboxProgram = async (
   bridge: SandboxHostBridge,
 ): SandboxProgramResult => {
   const logs: Array<CapturedLog> = [];
-  const pendingProviderCalls = new Set<Promise<void>>();
+  const pendingProviderCalls = new Map<string, PendingProviderCall>();
   let nextCallId = 0;
 
-  // Map individual provider tool manifests into callable async function namespaces
-  const providers = Object.fromEntries(
+  const bindingPlan = sandboxBindingPlan(
+    execution.globals,
+    execution.providers,
+  );
+
+  // Map individual provider tool manifests into callable async function namespaces.
+  const providerBindings = Object.fromEntries(
     execution.providers.map((provider) => [
       provider.name,
       Object.fromEntries(
@@ -105,8 +131,15 @@ const runSandboxProgram = async (
           tool,
           (input: unknown): Promise<unknown> => {
             const callId = String(nextCallId++);
-            const invocation = bridge
-              .invokeProvider({ callId, provider: provider.name, tool, input })
+            const invocation = Promise.resolve()
+              .then(() =>
+                bridge.invokeProvider({
+                  callId,
+                  provider: provider.name,
+                  tool,
+                  input,
+                }),
+              )
               .then((result) => {
                 // Ensure the response matches this specific RPC request to prevent race conditions
                 if (result.callId !== callId) {
@@ -121,14 +154,24 @@ const runSandboxProgram = async (
                 return result.value;
               });
 
-            // Cast tracking promise to resolve cleanly (ignoring failure) so that the pending set
-            // can block VM termination without throwing unhandled rejections during global settlement.
-            const tracked = invocation.then(
-              () => undefined,
-              () => undefined,
+            const settled = invocation.then<
+              ProviderCallOutcome,
+              ProviderCallOutcome
+            >(
+              () => ({ outcome: "succeeded" }),
+              (cause) => ({
+                outcome: "failed",
+                error: serializeSandboxError(cause),
+              }),
             );
-            pendingProviderCalls.add(tracked);
-            void tracked.then(() => pendingProviderCalls.delete(tracked));
+            const pending = {
+              callId,
+              provider: provider.name,
+              tool,
+              settled,
+            };
+            pendingProviderCalls.set(callId, pending);
+            void settled.then(() => pendingProviderCalls.delete(callId));
             return invocation;
           },
         ]),
@@ -137,21 +180,52 @@ const runSandboxProgram = async (
   );
 
   try {
-    // Inject destructured globals, provider namespaces, and the shielded console proxy
-    const value = await execution.program({
-      ...execution.globals,
-      ...providers,
-      console: makeCapturedConsole(logs),
+    assertInjectableBindingKeys({
+      actual: execution.bindingKeys,
+      expected: injectableBindingKeys(execution.globals, execution.providers),
     });
-    // Let any remaining unawaited provider calls resolve before signaling completion
-    await Promise.all([...pendingProviderCalls]);
-    return { ok: true, value, logs };
+
+    const value = await execution.program(
+      materializeSandboxBindings(bindingPlan, {
+        globals: execution.globals,
+        providerBindings,
+        kernelBindings: makeFixedKernelBindings(logs),
+      }),
+    );
+    const pendingAtReturn = [...pendingProviderCalls.values()];
+    const outcomes = await Promise.all(
+      pendingAtReturn.map(async (call) => ({
+        call,
+        outcome: await call.settled,
+      })),
+    );
+    const warnings = outcomes.map(({ call, outcome }) => ({
+      code: "ProviderCallPendingAtReturn" as const,
+      callId: call.callId,
+      provider: call.provider,
+      tool: call.tool,
+      ...outcome,
+    }));
+    return { ok: true, value, logs, warnings };
   } catch (cause) {
     // Keep isolate alive until late-running background tools settle, then bubble up the error
-    await Promise.all([...pendingProviderCalls]);
-    return { ok: false, error: serializeSandboxError(cause), logs };
+    await Promise.all(
+      [...pendingProviderCalls.values()].map((call) => call.settled),
+    );
+    return {
+      ok: false,
+      error: serializeSandboxError(cause),
+      logs,
+      warnings: [],
+    };
   }
 };
+
+const makeFixedKernelBindings = (
+  logs: Array<CapturedLog>,
+): Record<FixedKernelBindingKey, unknown> => ({
+  console: makeCapturedConsole(logs),
+});
 
 /**
  * Creates a shielded, virtual console object that overrides the global console.

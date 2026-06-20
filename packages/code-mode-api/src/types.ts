@@ -91,9 +91,32 @@ export type CodeModeDiagnostic =
       readonly message: string;
     };
 
+export type CodeModeExecutionWarning =
+  | {
+      readonly code: "ProviderCallPendingAtReturn";
+      readonly callId: string;
+      readonly provider: string;
+      readonly tool: string;
+      readonly outcome: "succeeded";
+    }
+  | {
+      readonly code: "ProviderCallPendingAtReturn";
+      readonly callId: string;
+      readonly provider: string;
+      readonly tool: string;
+      readonly outcome: "failed";
+      readonly error: {
+        readonly name?: string;
+        readonly message: string;
+        readonly stack?: string;
+        readonly code?: string;
+      };
+    };
+
 export interface CodeModeRunResult {
   readonly value: unknown;
   readonly logs: ReadonlyArray<CapturedLog>;
+  readonly warnings: ReadonlyArray<CodeModeExecutionWarning>;
 }
 
 export interface CodeModeSearchProvidersResult {

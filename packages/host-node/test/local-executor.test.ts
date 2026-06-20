@@ -171,6 +171,36 @@ describe.skipIf(!hasDeno)("restricted Deno sandbox", () => {
     expect(result.value).toEqual(["slow", "fast"]);
   });
 
+  it("reports calls that were still pending when Deno code returned", async () => {
+    const result = await run({
+      code: `async () => {
+        void fixture.touch(null);
+        return "done";
+      }`,
+      providers: [
+        {
+          name: "fixture",
+          fns: {
+            touch: () =>
+              Effect.promise(
+                () => new Promise((resolve) => setTimeout(resolve, 10)),
+              ),
+          },
+        },
+      ],
+    });
+    expect(result.value).toBe("done");
+    expect(result.warnings).toEqual([
+      {
+        code: "ProviderCallPendingAtReturn",
+        callId: "0",
+        provider: "fixture",
+        tool: "touch",
+        outcome: "succeeded",
+      },
+    ]);
+  });
+
   it("returns provider failures to generated code", async () => {
     const result = await run({
       code: `async () => {

@@ -9,7 +9,11 @@
  */
 import { Data, Option } from "effect";
 import type { Effect } from "effect";
-import type { CapturedLog, SandboxProviderManifest } from "./schema.js";
+import type {
+  CapturedLog,
+  SandboxExecutionWarning,
+  SandboxProviderManifest,
+} from "./schema.js";
 
 /**
  * Host-side callback table that lets sandbox code call MCP tools by provider
@@ -115,4 +119,5 @@ export const makeExecuteRequest = (options: {
 export interface ExecuteResult {
   readonly value: unknown;
   readonly logs: ReadonlyArray<CapturedLog>;
+  readonly warnings: ReadonlyArray<SandboxExecutionWarning>;
 }

@@ -288,6 +288,7 @@ const toExecuteResult = (
 ): ExecuteResult => ({
   value: result.value,
   logs: result.logs,
+  warnings: result.warnings,
 });
 
 const toSandboxCompletionError = (

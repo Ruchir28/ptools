@@ -122,20 +122,53 @@ export type SandboxProviderCallResult = Schema.Schema.Type<
 >;
 
 /**
+ * A provider call that was still pending when the generated function returned.
+ * The kernel drains the call before completion and reports its real outcome so
+ * callers are informed without being encouraged to replay a possible mutation.
+ */
+export const ProviderCallPendingAtReturnWarning = Schema.Union(
+  Schema.Struct({
+    code: Schema.Literal("ProviderCallPendingAtReturn"),
+    callId: Schema.String,
+    provider: Schema.String,
+    tool: Schema.String,
+    outcome: Schema.Literal("succeeded"),
+  }),
+  Schema.Struct({
+    code: Schema.Literal("ProviderCallPendingAtReturn"),
+    callId: Schema.String,
+    provider: Schema.String,
+    tool: Schema.String,
+    outcome: Schema.Literal("failed"),
+    error: SerializedSandboxError,
+  }),
+);
+
+export type ProviderCallPendingAtReturnWarning = Schema.Schema.Type<
+  typeof ProviderCallPendingAtReturnWarning
+>;
+
+export const SandboxExecutionWarning = ProviderCallPendingAtReturnWarning;
+export type SandboxExecutionWarning = ProviderCallPendingAtReturnWarning;
+
+/**
  * Final sandbox completion envelope returned by a host backend and consumed by
- * `decodeSandboxCompletion`. Success carries `value` + captured `logs`;
- * failure carries a `SerializedSandboxError` + `logs`.
+ * `decodeSandboxCompletion`. Success carries `value` + captured `logs` +
+ * warnings; failure carries a `SerializedSandboxError` + `logs` and an empty
+ * warning list until failure metadata propagation is designed.
  */
 export const SandboxCompletion = Schema.Union(
   Schema.Struct({
     ok: Schema.Literal(true),
     value: Schema.optionalWith(Schema.Unknown, { exact: true }),
     logs: Schema.Array(CapturedLog),
+    warnings: Schema.Array(SandboxExecutionWarning),
   }),
   Schema.Struct({
     ok: Schema.Literal(false),
     error: SerializedSandboxError,
     logs: Schema.Array(CapturedLog),
+    warnings: Schema.Array(SandboxExecutionWarning),
   }),
 );
 

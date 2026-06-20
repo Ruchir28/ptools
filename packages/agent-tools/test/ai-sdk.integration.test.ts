@@ -96,6 +96,7 @@ describe("AI SDK adapter integration", () => {
             value: {
               value: { text: "hello from generateText" },
               logs: [],
+              warnings: [],
             },
           },
         }),
@@ -135,6 +136,7 @@ const fakeSession = (
         return {
           value: { text: "hello from generateText" },
           logs: [],
+          warnings: [],
         };
     }
   },

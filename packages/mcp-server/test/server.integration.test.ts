@@ -131,6 +131,7 @@ describe("combined Code Mode MCP server", () => {
     const result = execution.structuredContent as {
       readonly value: unknown;
       readonly logs: ReadonlyArray<unknown>;
+      readonly warnings: ReadonlyArray<unknown>;
     };
 
     expect(result).toEqual({
@@ -139,6 +140,7 @@ describe("combined Code Mode MCP server", () => {
         add: { sum: 5 },
       },
       logs: [],
+      warnings: [],
     });
   }, 30_000);
 
@@ -281,6 +283,7 @@ describe("combined Code Mode MCP server", () => {
     const result = execution.structuredContent as {
       readonly value: unknown;
       readonly logs: ReadonlyArray<unknown>;
+      readonly warnings: ReadonlyArray<unknown>;
     };
 
     expect(result).toEqual({
@@ -291,6 +294,7 @@ describe("combined Code Mode MCP server", () => {
         },
       },
       logs: [],
+      warnings: [],
     });
   }, 30_000);
 });

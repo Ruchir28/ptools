@@ -8,7 +8,11 @@ import {
   invokeProviderCall,
   SandboxToHostMessage,
 } from "../src/index.js";
-import { makeSandboxKernel } from "../src/sandbox/index.js";
+import {
+  injectableBindingKeys,
+  makeSandboxKernel,
+  type SandboxKernelExecution,
+} from "../src/sandbox/index.js";
 
 describe("sandbox protocol", () => {
   it("decodes both directional message variants", async () => {
@@ -47,6 +51,30 @@ describe("sandbox protocol", () => {
     ).rejects.toThrow();
   });
 
+  it("requires valid warning outcome shapes on completion", async () => {
+    await expect(
+      Effect.runPromise(
+        Schema.decodeUnknown(SandboxToHostMessage)({
+          _tag: "Complete",
+          completion: {
+            ok: true,
+            value: "done",
+            logs: [],
+            warnings: [
+              {
+                code: "ProviderCallPendingAtReturn",
+                callId: "0",
+                provider: "fixture",
+                tool: "touch",
+                outcome: "failed",
+              },
+            ],
+          },
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("preserves callId through host provider dispatch", async () => {
     const result = await Effect.runPromise(
       invokeProviderCall(
@@ -55,6 +83,17 @@ describe("sandbox protocol", () => {
       ),
     );
     expect(result).toEqual({ ok: true, callId: "call-7", value: "ok" });
+  });
+});
+
+describe("sandbox binding keys", () => {
+  it("returns globals, providers, and console in loader order", () => {
+    expect(
+      injectableBindingKeys({ alpha: 1, beta: 2 }, [
+        { name: "github", tools: ["createIssue"] },
+        { name: "linear", tools: ["createIssue"] },
+      ]),
+    ).toEqual(["alpha", "beta", "github", "linear", "console"]);
   });
 });
 
@@ -71,6 +110,7 @@ describe("shared sandbox kernel", () => {
       [
         "index.ts",
         "kernel/index.ts",
+        "kernel/bindings.ts",
         "kernel/kernel.ts",
         "kernel/types.ts",
       ].map((file) => readFile(resolve(root, "src/sandbox", file), "utf8")),
@@ -86,6 +126,31 @@ describe("shared sandbox kernel", () => {
     expect(executableSource).not.toMatch(/\b(?:Deno|Effect)\s*\./);
   });
 
+  it("fails fast when loader binding keys drift from the kernel plan", async () => {
+    const kernel = makeSandboxKernel({
+      invokeProvider: async (call) => ({
+        ok: true,
+        callId: call.callId,
+      }),
+    });
+
+    await expect(
+      kernel.execute({
+        program: () => "done",
+        bindingKeys: ["fixture"],
+        globals: {},
+        providers: [{ name: "fixture", tools: ["touch"] }],
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: {
+        message:
+          'Sandbox loader binding keys do not match kernel binding plan: expected ["fixture", "console"], received ["fixture"]',
+      },
+      warnings: [],
+    });
+  });
+
   it("correlates concurrent provider calls that finish out of order", async () => {
     const seen: Array<string> = [];
     const kernel = makeSandboxKernel({
@@ -98,19 +163,25 @@ describe("shared sandbox kernel", () => {
           );
         }),
     });
-    const result = await kernel.execute({
-      program: async (bindings) => {
-        const fixture = bindings.fixture as {
-          readonly echo: (input: string) => Promise<string>;
-        };
-        return Promise.all([fixture.echo("slow"), fixture.echo("fast")]);
-      },
-      globals: {},
-      providers: [{ name: "fixture", tools: ["echo"] }],
-    });
+    const result = await kernel.execute(
+      withBindingKeys({
+        program: async (bindings) => {
+          const fixture = bindings.fixture as {
+            readonly echo: (input: string) => Promise<string>;
+          };
+          return Promise.all([fixture.echo("slow"), fixture.echo("fast")]);
+        },
+        globals: {},
+        providers: [{ name: "fixture", tools: ["echo"] }],
+      }),
+    );
 
     expect(seen).toEqual(["0", "1"]);
-    expect(result).toMatchObject({ ok: true, value: ["slow", "fast"] });
+    expect(result).toMatchObject({
+      ok: true,
+      value: ["slow", "fast"],
+      warnings: [],
+    });
   });
 
   it("waits for unawaited calls and captures console output", async () => {
@@ -124,25 +195,81 @@ describe("shared sandbox kernel", () => {
           }, 10),
         ),
     });
-    const result = await kernel.execute({
-      program: (bindings) => {
-        const fixture = bindings.fixture as {
-          readonly touch: (input: null) => Promise<void>;
-        };
-        const console = bindings.console as Console;
-        void fixture.touch(null);
-        console.log("started", { count: 1 });
-        return "done";
-      },
-      globals: {},
-      providers: [{ name: "fixture", tools: ["touch"] }],
-    });
+    const result = await kernel.execute(
+      withBindingKeys({
+        program: (bindings) => {
+          const fixture = bindings.fixture as {
+            readonly touch: (input: null) => Promise<void>;
+          };
+          const console = bindings.console as Console;
+          void fixture.touch(null);
+          console.log("started", { count: 1 });
+          return "done";
+        },
+        globals: {},
+        providers: [{ name: "fixture", tools: ["touch"] }],
+      }),
+    );
 
     expect(settled).toBe(true);
     expect(result).toMatchObject({
       ok: true,
       value: "done",
       logs: [{ level: "log", message: 'started {"count":1}' }],
+      warnings: [
+        {
+          code: "ProviderCallPendingAtReturn",
+          callId: "0",
+          provider: "fixture",
+          tool: "touch",
+          outcome: "succeeded",
+        },
+      ],
+    });
+  });
+
+  it("reports failed calls that were pending when the program returned", async () => {
+    const kernel = makeSandboxKernel({
+      invokeProvider: (call) =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                ok: false,
+                callId: call.callId,
+                error: { name: "FixtureError", message: "late boom" },
+              }),
+            10,
+          ),
+        ),
+    });
+    const result = await kernel.execute(
+      withBindingKeys({
+        program: (bindings) => {
+          const fixture = bindings.fixture as {
+            readonly fail: (input: null) => Promise<void>;
+          };
+          void fixture.fail(null);
+          return "done";
+        },
+        globals: {},
+        providers: [{ name: "fixture", tools: ["fail"] }],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: "done",
+      warnings: [
+        {
+          code: "ProviderCallPendingAtReturn",
+          callId: "0",
+          provider: "fixture",
+          tool: "fail",
+          outcome: "failed",
+          error: { name: "FixtureError", message: "late boom" },
+        },
+      ],
     });
   });
 
@@ -154,19 +281,29 @@ describe("shared sandbox kernel", () => {
         error: { name: "FixtureError", message: "boom" },
       }),
     });
-    const result = await kernel.execute({
-      program: async (bindings) => {
-        const fixture = bindings.fixture as {
-          readonly fail: (input: null) => Promise<void>;
-        };
-        await fixture.fail(null);
-      },
-      globals: {},
-      providers: [{ name: "fixture", tools: ["fail"] }],
-    });
+    const result = await kernel.execute(
+      withBindingKeys({
+        program: async (bindings) => {
+          const fixture = bindings.fixture as {
+            readonly fail: (input: null) => Promise<void>;
+          };
+          await fixture.fail(null);
+        },
+        globals: {},
+        providers: [{ name: "fixture", tools: ["fail"] }],
+      }),
+    );
     expect(result).toMatchObject({
       ok: false,
       error: { name: "FixtureError", message: "boom" },
+      warnings: [],
     });
   });
+});
+
+const withBindingKeys = (
+  execution: Omit<SandboxKernelExecution, "bindingKeys">,
+): SandboxKernelExecution => ({
+  ...execution,
+  bindingKeys: injectableBindingKeys(execution.globals, execution.providers),
 });
