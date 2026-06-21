@@ -5,6 +5,7 @@
     { "path": "../auth" },
     { "path": "../code-mode-api" },
     { "path": "../config" },
+    { "path": "../executor" },
     { "path": "../mcp-registry" }
   ],
   "compilerOptions": {

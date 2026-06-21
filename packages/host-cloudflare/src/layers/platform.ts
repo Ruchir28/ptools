@@ -1,4 +1,8 @@
 import { Context, Data, Effect, Layer, Option } from "effect";
+import {
+  CodeModeObjectWorkerLoader,
+  type CodeModeObjectWorkerLoaderService,
+} from "./executor/workerLoaderService.js";
 
 export class CodeModeObjectStorageError extends Data.TaggedError(
   "CodeModeObjectStorageError",
@@ -54,21 +58,26 @@ export class CodeModeObjectRequestOrigin extends Context.Tag(
 /**
  * Supplies stable, object-lifetime platform values.
  *
- * `CodeModeObject` constructs the storage adapter once and reuses this
+ * `CodeModeObject` constructs stable adapters once and reuses this
  * Layer.succeed graph for platform-only workflows and the config-derived host
- * runtime. If platform services later acquire scoped resources or start
- * background fibers, move their acquisition into a managed layer and revisit
- * whether a dedicated runtime/shared MemoMap is required.
+ * runtime. Request-derived values such as public origin stay in separate
+ * request-scoped layers. If platform services later acquire scoped resources or
+ * start background fibers, move their acquisition into a managed layer and
+ * revisit whether a dedicated runtime/shared MemoMap is required.
  */
 export const CodeModeObjectPlatformLayer = (options: {
   readonly storage: CodeModeObjectStorageService;
   readonly hostId: string;
-}): Layer.Layer<CodeModeObjectStorage | CodeModeObjectIdentity> =>
+  readonly workerLoader: CodeModeObjectWorkerLoaderService;
+}): Layer.Layer<
+  CodeModeObjectStorage | CodeModeObjectIdentity | CodeModeObjectWorkerLoader
+> =>
   Layer.mergeAll(
     Layer.succeed(CodeModeObjectStorage, options.storage),
     Layer.succeed(CodeModeObjectIdentity, {
       hostId: options.hostId,
     }),
+    Layer.succeed(CodeModeObjectWorkerLoader, options.workerLoader),
   );
 
 export const CodeModeObjectRequestOriginLayer = (

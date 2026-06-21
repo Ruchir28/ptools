@@ -285,6 +285,9 @@ importers:
       '@ptools/config':
         specifier: workspace:*
         version: link:../config
+      '@ptools/executor':
+        specifier: workspace:*
+        version: link:../executor
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
@@ -298,6 +301,9 @@ importers:
       '@cloudflare/vitest-pool-workers':
         specifier: 0.16.6
         version: 0.16.6(@cloudflare/workers-types@4.20260607.1)(@vitest/runner@4.1.7)(@vitest/snapshot@4.1.7)(vitest@4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.0.13(@types/node@25.9.1)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.22.3)))
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
 
   packages/host-node:
     dependencies:

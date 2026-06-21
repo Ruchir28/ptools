@@ -19,6 +19,10 @@ import {
   DurableObjectSecretResolverLayer,
   makeCodeModeObjectStorage,
 } from "../layers/index.js";
+import {
+  makeCodeModeObjectWorkerLoader,
+  type CodeModeObjectWorkerLoader,
+} from "../layers/executor/workerLoaderService.js";
 import type { PtoolsWorkerEnv } from "../worker/ingress.js";
 import {
   ParsedCompleteMcpOAuthCallback,
@@ -88,7 +92,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    * fibers, or require runtime-specific configuration.
    */
   readonly #platformLayer: Layer.Layer<
-    CodeModeObjectStorage | CodeModeObjectIdentity
+    CodeModeObjectStorage | CodeModeObjectIdentity | CodeModeObjectWorkerLoader
   >;
 
   #hostRuntime: Option.Option<CachedHostRuntime> = Option.none();
@@ -99,6 +103,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     this.#platformLayer = CodeModeObjectPlatformLayer({
       storage: makeCodeModeObjectStorage(ctx.storage),
       hostId: requireHostId(ctx),
+      workerLoader: makeCodeModeObjectWorkerLoader(env.PTOOLS_EXECUTION_LOADER),
     });
   }
 
