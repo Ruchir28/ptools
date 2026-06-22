@@ -8,7 +8,11 @@ import {
   runJsonWorkerRoute,
   type CloudflareWorkerHonoEnv,
 } from "../http.js";
-import { readCodeModeRequest, requirePublicWorkerAuth } from "../request.js";
+import {
+  readCodeModeRequest,
+  requestOrigin,
+  requirePublicWorkerAuth,
+} from "../request.js";
 
 export const codeModeRoutes = new Hono<CloudflareWorkerHonoEnv>()
   .post("/hosts/:hostId/code-mode", (context) =>
@@ -37,5 +41,6 @@ const handleCodeModeRoute = (input: {
       namespace: input.env.PTOOLS_CODE_MODE,
       hostId: input.hostId,
       request,
+      origin: requestOrigin(input.request),
     });
   });

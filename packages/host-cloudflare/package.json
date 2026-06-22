@@ -45,7 +45,7 @@
     "build": "pnpm --filter @ptools/executor build && pnpm build:dynamic-worker-source && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "test": "pnpm run test:node && pnpm run test:worker",
-    "test:node": "vitest run test/import-boundary.test.ts test/mcpConnector.test.ts test/platform.test.ts test/provider.test.ts test/dynamicWorkerExecutor.test.ts",
+    "test:node": "vitest run test/import-boundary.test.ts test/mcpConnector.test.ts test/platform.test.ts test/provider.test.ts test/dynamicWorkerExecutor.test.ts test/codeModeServer.test.ts",
     "test:worker": "vitest run --config vitest.worker.config.ts",
     "build:dynamic-worker-source": "node scripts/build-dynamic-worker-source.mjs"
   },
@@ -53,6 +53,7 @@
     "@cloudflare/workers-types": "4.20260607.1",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@ptools/auth": "workspace:*",
+    "@ptools/code-mode": "workspace:*",
     "@ptools/code-mode-api": "workspace:*",
     "@ptools/config": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
@@ -62,6 +63,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.16.6",
-    "esbuild": "^0.28.0"
+    "esbuild": "^0.28.0",
+    "zod": "4.4.3"
   }
 }

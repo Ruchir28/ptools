@@ -7,6 +7,7 @@ declare global {
   namespace Cloudflare {
     interface Env {
       readonly PTOOLS_CODE_MODE: DurableObjectNamespace<TestCodeModeObject>;
+      readonly PTOOLS_EXECUTION_LOADER: WorkerLoader;
       readonly PTOOLS_PUBLIC_ACCESS_TOKEN: string;
     }
 

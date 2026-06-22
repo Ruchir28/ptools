@@ -1,6 +1,36 @@
+/// <reference path="./worker-env.d.ts" />
+
+/**
+ * Cloudflare Worker/workerd integration tests.
+ *
+ * These tests run through `@cloudflare/vitest-pool-workers` using
+ * `wrangler.test.jsonc`, so the environment includes real platform-shaped
+ * bindings: the Durable Object namespace and the `PTOOLS_EXECUTION_LOADER`
+ * WorkerLoader binding. The Dynamic Worker tests in this file therefore load
+ * and execute generated JavaScript in a real local Cloudflare Dynamic Worker,
+ * not in a fake sandbox.
+ *
+ * The high-level execute test follows the production-shaped path:
+ * Worker/Durable Object test stub -> real `CodeModeObject.call(...)` ->
+ * `CodeModeServer` -> `CodeMode` -> `CloudflareDynamicWorkerExecutorLayer` ->
+ * real `env.PTOOLS_EXECUTION_LOADER` -> generated code -> `ProviderBridge` ->
+ * local HTTP MCP fixture.
+ *
+ * Some route/RPC-shape tests still use the `TestCodeModeObject.call(...)`
+ * override to assert ingress behavior without starting the full Code Mode
+ * runtime. Tests that need the real runtime call the explicit
+ * `callRealCodeModeRuntime...ForTest(...)` helpers on that same object.
+ */
 import type { CodeModeResponse } from "@ptools/code-mode-api";
+import { CodeExecutor, ExecuteRequest } from "@ptools/executor";
 import { env } from "cloudflare:workers";
 import { exports } from "cloudflare:workers";
+import { Effect, Layer, Option } from "effect";
+import { CloudflareDynamicWorkerExecutorLayer } from "../src/layers/executor/dynamicWorkerRuntimeLayer.js";
+import {
+  CodeModeObjectWorkerLoader,
+  makeCodeModeObjectWorkerLoader,
+} from "../src/layers/executor/workerLoaderService.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   codeModeObjectTestCalls,
@@ -131,7 +161,11 @@ describe("Cloudflare Worker ingress", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual(responseBody);
     expect(codeModeObjectTestCalls()).toEqual([
-      { hostId, request: { operation: "search_providers" } },
+      {
+        hostId,
+        request: { operation: "search_providers" },
+        origin: "https://ptools.example",
+      },
     ]);
   });
 
@@ -146,7 +180,11 @@ describe("Cloudflare Worker ingress", () => {
 
     expect(response.status).toBe(200);
     expect(codeModeObjectTestCalls()).toEqual([
-      { hostId, request: { operation: "search_providers" } },
+      {
+        hostId,
+        request: { operation: "search_providers" },
+        origin: "https://ptools.example",
+      },
     ]);
   });
 
@@ -470,6 +508,232 @@ describe("Cloudflare Worker ingress", () => {
     expect(setup.headers.get("WWW-Authenticate")).toBe("Bearer");
     expect(start.status).toBe(401);
     expect(start.headers.get("WWW-Authenticate")).toBe("Bearer");
+  });
+
+  it("serves real Code Mode requests through CodeModeObject.call for configured hosts", async () => {
+    const hostId = uniqueHostId();
+
+    await configureHost(hostId, JSON.stringify({ mcpServers: {} }));
+
+    await expect(
+      configTestStub(hostId).callRealCodeModeRuntimeForTest({
+        origin: "https://ptools.example",
+        request: { operation: "search_providers" },
+      }),
+    ).resolves.toEqual({
+      operation: "search_providers",
+      output: { providers: [], diagnostics: [] },
+    });
+  });
+
+  it("can load a minimal Dynamic Worker through the test WorkerLoader binding", async () => {
+    const worker = env.PTOOLS_EXECUTION_LOADER.load({
+      compatibilityDate: "2026-05-22",
+      mainModule: "entry.js",
+      modules: {
+        "entry.js": `
+          import { WorkerEntrypoint } from "cloudflare:workers";
+          export class Ping extends WorkerEntrypoint {
+            ping() { return "pong"; }
+          }
+        `,
+      },
+    });
+    const ping = worker.getEntrypoint("Ping") as unknown as {
+      readonly ping: () => Promise<string>;
+    };
+
+    await expect(ping.ping()).resolves.toBe("pong");
+  });
+
+  it("runs generated code through CloudflareDynamicWorkerExecutorLayer", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* CodeExecutor;
+        return yield* executor.execute(
+          new ExecuteRequest({
+            code: `async () => 42`,
+            globals: Option.none(),
+            providers: Option.none(),
+            timeoutMs: Option.none(),
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          CloudflareDynamicWorkerExecutorLayer().pipe(
+            Layer.provide(
+              Layer.succeed(
+                CodeModeObjectWorkerLoader,
+                makeCodeModeObjectWorkerLoader(env.PTOOLS_EXECUTION_LOADER),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(result.value).toBe(42);
+  });
+
+  it("runs provider calls through the real Dynamic Worker ProviderBridge", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* CodeExecutor;
+        return yield* executor.execute(
+          new ExecuteRequest({
+            code: `async () => fixture.echo({ text: "hello provider" })`,
+            globals: Option.none(),
+            providers: Option.some([
+              {
+                name: "fixture",
+                fns: {
+                  echo: (input) => Effect.succeed(input),
+                },
+              },
+            ]),
+            timeoutMs: Option.none(),
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          CloudflareDynamicWorkerExecutorLayer().pipe(
+            Layer.provide(
+              Layer.succeed(
+                CodeModeObjectWorkerLoader,
+                makeCodeModeObjectWorkerLoader(env.PTOOLS_EXECUTION_LOADER),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(result.value).toEqual({ text: "hello provider" });
+  });
+
+  it("runs multi-tool generated code through the real Dynamic Worker ProviderBridge", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* CodeExecutor;
+        return yield* executor.execute(
+          new ExecuteRequest({
+            code: `async () => {
+              const echo = await fixture.echo({ text: "hello dynamic worker" });
+              const add = await fixture.add({ a: 2, b: 3 });
+
+              return { echo, add };
+            }`,
+            globals: Option.none(),
+            providers: Option.some([
+              {
+                name: "fixture",
+                fns: {
+                  echo: (input) => Effect.succeed(input),
+                  add: () => Effect.succeed({ sum: 5 }),
+                },
+              },
+            ]),
+            timeoutMs: Option.none(),
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          CloudflareDynamicWorkerExecutorLayer().pipe(
+            Layer.provide(
+              Layer.succeed(
+                CodeModeObjectWorkerLoader,
+                makeCodeModeObjectWorkerLoader(env.PTOOLS_EXECUTION_LOADER),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(result.value).toEqual({
+      echo: { text: "hello dynamic worker" },
+      add: { sum: 5 },
+    });
+  });
+
+  it("executes generated code in a real Dynamic Worker through CodeModeObject.call", async () => {
+    const hostId = uniqueHostId();
+
+    await configureHost(
+      hostId,
+      configBody({ url: "http://127.0.0.1:19719/mcp" }),
+    );
+
+    const stub = configTestStub(hostId);
+
+    await expect(
+      stub.callRealCodeModeRuntimeForTest({
+        origin: "https://ptools.example",
+        request: { operation: "refresh" },
+      }),
+    ).resolves.toEqual({
+      operation: "refresh",
+      output: { refreshed: true },
+    });
+
+    const search = await stub.callRealCodeModeRuntimeFromUnknownForTest({
+      origin: "https://ptools.example",
+      request: {
+        operation: "search",
+        input: { query: "echo", limit: 1 },
+      },
+    });
+
+    expect(search).toMatchObject({
+      operation: "search",
+      output: {
+        actions: [
+          {
+            toolId: "example.echo",
+            provider: "example",
+            action: "echo",
+          },
+        ],
+        diagnostics: [],
+      },
+    });
+    if (search.operation !== "search") {
+      throw new Error("Expected search response.");
+    }
+    const discoveredEcho = search.output.actions[0];
+    if (discoveredEcho === undefined) {
+      throw new Error("Expected search to discover an echo tool.");
+    }
+
+    const result = await stub.callRealCodeModeRuntimeResultForTest({
+      origin: "https://ptools.example",
+      request: {
+        operation: "execute",
+        input: {
+          code: `async () => {
+            const echo = await ${discoveredEcho.provider}.${discoveredEcho.action}({ text: "hello dynamic worker" });
+            const add = await example.add({ a: 2, b: 3 });
+
+            return { echo, add };
+          }`,
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        operation: "execute",
+        output: {
+          value: {
+            echo: { text: "hello dynamic worker" },
+            add: { sum: 5 },
+          },
+          logs: [],
+          warnings: [],
+        },
+      },
+    });
   });
 
   it("reports MCP auth status from the named Durable Object config", async () => {

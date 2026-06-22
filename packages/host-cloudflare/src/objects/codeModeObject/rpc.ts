@@ -115,6 +115,11 @@ export interface CompleteMcpOAuthCallbackResult {
   readonly body: string;
 }
 
+export interface CodeModeObjectCallInput {
+  readonly request: CodeModeRequest;
+  readonly origin: string;
+}
+
 export type CompleteMcpOAuthCallbackResponse =
   | {
       readonly ok: true;
@@ -133,7 +138,7 @@ export type CompleteMcpOAuthCallbackResponse =
  * `env.PTOOLS_CODE_MODE.getByName(hostId)` instead of `stub.fetch(...)`.
  */
 export interface CodeModeObjectRpc {
-  readonly call: (request: CodeModeRequest) => Promise<CodeModeResponse>;
+  readonly call: (input: CodeModeObjectCallInput) => Promise<CodeModeResponse>;
   readonly configure: (
     input: ConfigureCodeModeObjectInput,
   ) => Promise<ConfigureCodeModeObjectResponse>;

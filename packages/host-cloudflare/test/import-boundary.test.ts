@@ -165,13 +165,16 @@ describe("host-cloudflare import boundaries", () => {
       ].map((path) => readFile(join(packageRoot, path), "utf8")),
     );
     const testContents = workerTestContents.join("\n");
-    const workerConfig = await readFile(
-      join(packageRoot, "vitest.worker.config.ts"),
-      "utf8",
-    );
+    const [workerConfig, wranglerConfig] = await Promise.all([
+      readFile(join(packageRoot, "vitest.worker.config.ts"), "utf8"),
+      readFile(join(packageRoot, "wrangler.test.jsonc"), "utf8"),
+    ]);
 
-    expect(workerConfig).toContain('main: "./test/worker-entry.ts"');
-    expect(workerConfig).toContain('PTOOLS_CODE_MODE: "TestCodeModeObject"');
+    expect(workerConfig).toContain('configPath: "./wrangler.test.jsonc"');
+    expect(wranglerConfig).toContain('"main": "./test/worker-entry.ts"');
+    expect(wranglerConfig).toContain('"name": "PTOOLS_CODE_MODE"');
+    expect(wranglerConfig).toContain('"class_name": "TestCodeModeObject"');
+    expect(wranglerConfig).toContain('"binding": "PTOOLS_EXECUTION_LOADER"');
     expect(testContents).toContain('from "cloudflare:workers"');
     expect(testContents).not.toContain("as DurableObjectNamespace");
     expect(testContents).not.toContain("CodeModeObjectNamespace");

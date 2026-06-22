@@ -1,4 +1,4 @@
-import type { CodeModeRequest, CodeModeResponse } from "@ptools/code-mode-api";
+import { CodeModeServer, type CodeModeResponse } from "@ptools/code-mode-api";
 import { AuthCoordinator } from "@ptools/auth";
 import {
   ConfigSource,
@@ -7,18 +7,19 @@ import {
 } from "@ptools/config";
 import { DurableObject } from "cloudflare:workers";
 import { Effect, Layer, ManagedRuntime, Option } from "effect";
+import { CloudflareOAuthFlow } from "../layers/auth.js";
 import {
-  CloudflareOAuthFlow,
+  DurableObjectConfigSourceLayer,
+  DurableObjectSecretResolverLayer,
+} from "../layers/config.js";
+import { CloudflareCodeModeRuntimeLayer } from "../layers/codeModeRuntime.js";
+import {
   CodeModeObjectIdentity,
   CodeModeObjectPlatformLayer,
   CodeModeObjectRequestOriginLayer,
   CodeModeObjectStorage,
-  DurableObjectAuthLayer,
-  DurableObjectConfigSourceLayer,
-  DurableObjectCredentialsStoreLayer,
-  DurableObjectSecretResolverLayer,
   makeCodeModeObjectStorage,
-} from "../layers/index.js";
+} from "../layers/platform.js";
 import {
   makeCodeModeObjectWorkerLoader,
   type CodeModeObjectWorkerLoader,
@@ -39,6 +40,7 @@ import {
   configureCodeModeObjectSecrets,
 } from "./codeModeObject/config.js";
 import type {
+  CodeModeObjectCallInput,
   CodeModeObjectMcpAuthError,
   CompleteMcpOAuthCallbackInput,
   CompleteMcpOAuthCallbackResponse,
@@ -53,6 +55,7 @@ import type {
 } from "./codeModeObject/rpc.js";
 
 export type {
+  CodeModeObjectCallInput,
   CodeModeObjectMcpAuthError,
   CodeModeObjectRpc,
   CompleteMcpOAuthCallbackInput,
@@ -72,8 +75,8 @@ export type {
 } from "./codeModeObject/rpc.js";
 
 type HostRuntime = ManagedRuntime.ManagedRuntime<
-  AuthCoordinator | CloudflareOAuthFlow | ConfigSource,
-  never
+  CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ConfigSource,
+  unknown
 >;
 
 interface CachedHostRuntime {
@@ -85,11 +88,19 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
   /**
    * Platform services are passive values owned by this Durable Object instance.
    *
-   * The storage adapter is constructed once here and this same Layer.succeed
-   * graph is provided to pre-config workflows and the config-dependent host
-   * runtime. A separate platform ManagedRuntime or shared MemoMap would only be
-   * needed if these services later acquire scoped resources, start background
-   * fibers, or require runtime-specific configuration.
+   * The storage and Worker Loader adapters are constructed once in the
+   * constructor and wrapped with `Layer.succeed`. In Effect, `Layer.succeed`
+   * captures the already-created value; providing this layer into a later
+   * `ManagedRuntime` does not call the adapter constructors again. By contrast,
+   * `Layer.effect` / `Layer.scoped` services are built by the runtime and are
+   * memoized by that runtime's `MemoMap`.
+   *
+   * This means each origin-specific host runtime receives the same stable
+   * Durable Object platform values, while config/auth/MCP/Code Mode services
+   * built with effectful layers are rebuilt when the cached ManagedRuntime is
+   * replaced. A separate platform ManagedRuntime or shared MemoMap would only be
+   * needed if these platform services later acquire scoped resources, start
+   * background fibers, or require runtime-specific configuration.
    */
   readonly #platformLayer: Layer.Layer<
     CodeModeObjectStorage | CodeModeObjectIdentity | CodeModeObjectWorkerLoader
@@ -107,14 +118,45 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     });
   }
 
-  call(_request: CodeModeRequest): Promise<CodeModeResponse> {
-    return Effect.runPromise(
-      Effect.die(
-        new Error("CodeModeObject runtime is implemented in the next task"),
-      ),
+  /**
+   * Serves one schema-backed Code Mode request through the configured host
+   * runtime for this Durable Object and public request origin.
+   *
+   * The Worker already handled HTTP auth, JSON parsing, and origin derivation.
+   * This method crosses the Durable Object RPC boundary, selects the cached
+   * origin-aware ManagedRuntime, and delegates operation dispatch to
+   * CodeModeServer inside that runtime.
+   *
+   * Per request this only looks up services already registered in that runtime's
+   * Effect `Context`; it does not construct a new CodeModeServer, reload config,
+   * or rebuild MCP/executor layers. Those are created once when
+   * `#createHostRuntime` materializes `CloudflareCodeModeServerLayer` and cached
+   * until the origin changes or `configure` / `configureSecrets` disposes the
+   * runtime.
+   */
+  call(input: CodeModeObjectCallInput): Promise<CodeModeResponse> {
+    return this.runInHostRuntime(
+      input.origin,
+      Effect.gen(function* () {
+        // Context lookup for the service built by CloudflareCodeModeServerLayer
+        // during ManagedRuntime startup, not a per-request server initialization.
+        const server = yield* CodeModeServer;
+
+        return yield* server.handle(input.request);
+      }),
     );
   }
 
+  /**
+   * Stores a new unresolved host config using only stable platform services.
+   *
+   * This intentionally does not run inside `#hostRuntime`. The configured host
+   * runtime is built from the config stored by this method, so requiring that
+   * runtime here would create a circular dependency and would also risk using
+   * stale config. The workflow only needs Durable Object storage from
+   * `#platformLayer`, then disposes any cached runtime so the next runtime-backed
+   * operation rebuilds from the newly stored config.
+   */
   configure(
     input: ConfigureCodeModeObjectInput,
   ): Promise<ConfigureCodeModeObjectResponse> {
@@ -130,6 +172,17 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     );
   }
 
+  /**
+   * Stores per-host secrets using only stable platform services.
+   *
+   * Like `configure(...)`, this is a one-off `Effect.runPromise` workflow, not a
+   * call through the cached `ManagedRuntime`. It only needs
+   * `CodeModeObjectStorage` from `#platformLayer` to write `secrets/<name>`
+   * values. After the write, the cached runtime is disposed because its
+   * `ConfigSource` may already have resolved old secret values; the next
+   * Code Mode/auth operation will build a fresh runtime and resolve secrets from
+   * storage again.
+   */
   configureSecrets(
     input: ConfigureCodeModeObjectSecretsInput,
   ): Promise<ConfigureCodeModeObjectSecretsResponse> {
@@ -233,12 +286,27 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     );
   }
 
+  /**
+   * Runs operations that need the configured host graph.
+   *
+   * Use this path for behavior that depends on loaded config, resolved secrets,
+   * OAuth/auth state, MCP connections, or Code Mode runtime services. Unlike the
+   * setup methods above, this goes through the cached origin-aware
+   * `ManagedRuntime`, whose layer graph is built from persisted config plus the
+   * stable `#platformLayer` and request-derived origin.
+   *
+   * Effects passed here may `yield*` any of the runtime's exported services
+   * (`CodeModeServer`, `AuthCoordinator`, `CloudflareOAuthFlow`, `ConfigSource`).
+   * Those tags resolve against the runtime `Context` built in
+   * `#createHostRuntime`; `runtime.runPromise` does not re-run layer construction
+   * on each call unless the cached runtime was disposed and recreated.
+   */
   private async runInHostRuntime<A, E>(
     origin: string,
     effect: Effect.Effect<
       A,
       E,
-      AuthCoordinator | CloudflareOAuthFlow | ConfigSource
+      CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ConfigSource
     >,
   ): Promise<A> {
     const runtime = await this.getOrCreateHostRuntime(origin);
@@ -275,6 +343,14 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     });
   }
 
+  /**
+   * Materializes the configured host layer graph once and caches the resulting
+   * `ManagedRuntime` for this origin.
+   *
+   * `runtime.runtime()` is where Effect builds services such as `ConfigSource`,
+   * `AuthCoordinator`, internal `CodeMode`, and `CodeModeServer`. Later RPC
+   * handlers only look those services up from the runtime context.
+   */
   private async createHostRuntime(origin: string): Promise<HostRuntime> {
     const runtime = ManagedRuntime.make(this.hostRuntimeLayer(origin));
 
@@ -299,13 +375,22 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     return this.createHostRuntime(origin);
   }
 
+  /**
+   * Builds the configured host runtime layer for one public request origin.
+   *
+   * `#platformLayer` is not a separate runtime. It is a stable set of
+   * `Layer.succeed` services constructed once from Durable Object `ctx/env` and
+   * then provided into this runtime graph. `CodeModeObjectRequestOriginLayer` is
+   * rebuilt per origin because OAuth URLs and auth-provider behavior can depend
+   * on the public origin that reached the Worker.
+   */
   private hostRuntimeLayer(
     origin: string,
-  ): Layer.Layer<AuthCoordinator | CloudflareOAuthFlow | ConfigSource> {
+  ): Layer.Layer<
+    CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ConfigSource,
+    unknown
+  > {
     const requestOrigin = CodeModeObjectRequestOriginLayer(origin);
-    const credentials = DurableObjectCredentialsStoreLayer;
-    const auth = DurableObjectAuthLayer.pipe(Layer.provide(credentials));
-    const config = this.configLayer();
 
     // The host runtime is the only cached ManagedRuntime because these services
     // contain config-derived state. The stable platform values are supplied as
@@ -313,7 +398,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     // intrinsic Durable Object identity. The cache records the origin used to
     // construct these URL-producing services and is rebuilt before serving a
     // request from a different origin.
-    return Layer.merge(auth, config).pipe(
+    return CloudflareCodeModeRuntimeLayer.pipe(
       Layer.provide(this.#platformLayer),
       Layer.provide(requestOrigin),
     );
@@ -329,6 +414,16 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     );
   }
 
+  /**
+   * Clears and disposes the cached configured runtime after persisted inputs
+   * change.
+   *
+   * Config and secret setup methods run outside `#hostRuntime`, but they mutate
+   * storage read by that runtime's `ConfigSource`, `SecretResolver`, auth, and
+   * MCP services. Disposing here is what connects those one-off storage writes
+   * to the next runtime-backed request: the next call rebuilds the ManagedRuntime
+   * from current Durable Object storage instead of reusing stale services.
+   */
   private disposeHostRuntimeEffect(): Effect.Effect<void> {
     const runtime = this.#hostRuntime;
     this.#hostRuntime = Option.none();

@@ -37,9 +37,14 @@ export const callCodeModeObject = (input: {
   readonly namespace: CodeModeObjectNamespace;
   readonly hostId: string;
   readonly request: CodeModeRequest;
+  readonly origin: string;
 }): Effect.Effect<CodeModeResponse, HostCloudflareError> =>
   Effect.tryPromise({
-    try: () => input.namespace.getByName(input.hostId).call(input.request),
+    try: () =>
+      input.namespace.getByName(input.hostId).call({
+        request: input.request,
+        origin: input.origin,
+      }),
     catch: codeModeUnavailable,
   });
 

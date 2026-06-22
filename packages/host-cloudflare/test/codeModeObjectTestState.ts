@@ -3,6 +3,7 @@ import type { CodeModeRequest, CodeModeResponse } from "@ptools/code-mode-api";
 export interface CodeModeObjectTestCall {
   readonly hostId: string | undefined;
   readonly request: CodeModeRequest;
+  readonly origin: string;
 }
 
 interface CodeModeObjectTestState {

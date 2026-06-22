@@ -1,4 +1,5 @@
-import type { CodeModeRequest, CodeModeResponse } from "@ptools/code-mode-api";
+import { parseCodeModeRequest, type CodeModeResponse } from "@ptools/code-mode-api";
+import type { CodeModeObjectCallInput } from "../src/objects/codeModeObject/rpc.js";
 import { ResolvedPtoolsConfig } from "@ptools/config";
 import { Effect, Schema } from "effect";
 import {
@@ -20,10 +21,11 @@ import {
 } from "./codeModeObjectTestState.js";
 
 export class TestCodeModeObject extends CodeModeObject {
-  override call(request: CodeModeRequest): Promise<CodeModeResponse> {
+  override call(input: CodeModeObjectCallInput): Promise<CodeModeResponse> {
     recordCodeModeObjectCall({
       hostId: this.ctx.id.name,
-      request,
+      request: input.request,
+      origin: input.origin,
     });
 
     const failure = codeModeObjectTestFailure();
@@ -31,6 +33,45 @@ export class TestCodeModeObject extends CodeModeObject {
     return failure === undefined
       ? Promise.resolve(codeModeObjectTestResponse())
       : Promise.reject(failure);
+  }
+
+  callRealCodeModeRuntimeForTest(
+    input: CodeModeObjectCallInput,
+  ): Promise<CodeModeResponse> {
+    return super.call(input);
+  }
+
+  callRealCodeModeRuntimeFromUnknownForTest(input: {
+    readonly origin: string;
+    readonly request: unknown;
+  }): Promise<CodeModeResponse> {
+    return Effect.runPromise(
+      parseCodeModeRequest(input.request).pipe(
+        Effect.flatMap((request) =>
+          Effect.promise(() => super.call({ origin: input.origin, request })),
+        ),
+      ),
+    );
+  }
+
+  async callRealCodeModeRuntimeResultForTest(input: {
+    readonly origin: string;
+    readonly request: unknown;
+  }): Promise<
+    | { readonly ok: true; readonly result: CodeModeResponse }
+    | { readonly ok: false; readonly error: string }
+  > {
+    try {
+      return {
+        ok: true,
+        result: await this.callRealCodeModeRuntimeFromUnknownForTest(input),
+      };
+    } catch (cause) {
+      return {
+        ok: false,
+        error: cause instanceof Error ? (cause.stack ?? cause.message) : String(cause),
+      };
+    }
   }
 
   readConfigBlobForTest(): Promise<

@@ -279,6 +279,9 @@ importers:
       '@ptools/auth':
         specifier: workspace:*
         version: link:../auth
+      '@ptools/code-mode':
+        specifier: workspace:*
+        version: link:../code-mode
       '@ptools/code-mode-api':
         specifier: workspace:*
         version: link:../code-mode-api
@@ -304,6 +307,9 @@ importers:
       esbuild:
         specifier: ^0.28.0
         version: 0.28.0
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
   packages/host-node:
     dependencies:
