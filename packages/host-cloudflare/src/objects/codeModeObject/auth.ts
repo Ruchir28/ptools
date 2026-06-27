@@ -1,4 +1,5 @@
-import { AuthCoordinator, type McpAuthStatus } from "@ptools/auth";
+import { AuthCoordinator } from "@ptools/auth";
+import type { McpAuthStatus } from "@ptools/auth/contracts";
 import { ConfigSource, ServerConfigError } from "@ptools/config";
 import { Data, Effect, Option } from "effect";
 import {

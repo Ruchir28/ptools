@@ -1,39 +1,36 @@
+/**
+ * Validation helpers for Code Mode request boundaries.
+ *
+ * This file decodes unknown API and MCP-tool inputs into schema-backed Code Mode
+ * request DTOs. It owns parsing only; the request schemas live in
+ * `../contracts/codeModeRequest.ts`.
+ */
 import { Effect, Option, Schema } from "effect";
-import { CodeModeInvalidRequestError } from "./errors.js";
+import { CodeModeInvalidRequestError } from "../codeModeErrors.js";
 import {
   CodeModeExecuteRequest,
+  CodeModeRequest,
   CodeModeSearchProvidersRequest,
   CodeModeSearchRequest,
   CodeModeToolSchemaRequest,
-} from "./schema.js";
-import type {
-  CodeModeOperation,
-  CodeModeRequest,
-} from "./types.js";
+} from "../contracts/codeModeRequest.js";
 
 /**
- * Decode unknown API input into a typed {@link CodeModeRequest}, mapping
- * schema parse failures to {@link CodeModeInvalidRequestError}. A thin
- * schema-decode wrapper around the per-operation `parse*Input` helpers.
+ * Decode unknown API input into a typed {@link CodeModeRequest}. The schema is
+ * authoritative for the request envelope; per-tool helpers remain for MCP tool
+ * calls that receive `(operation, input)` separately.
  */
 export const parseCodeModeRequest = (
   value: unknown,
 ): Effect.Effect<CodeModeRequest, CodeModeInvalidRequestError> =>
-  Effect.gen(function* () {
-    const request = yield* expectRecord(value, "Code Mode request");
+  decode(CodeModeRequest, value, "Code Mode request");
 
-    if (typeof request.operation !== "string") {
-      return yield* invalid("Code Mode request.operation must be a string");
-    }
-
-    return yield* parseCodeModeToolCall(request.operation, request.input);
-  });
-
+/** Parse an MCP tool call represented as separate operation and input values. */
 export const parseCodeModeToolCall = (
   operation: string,
   input: unknown,
 ): Effect.Effect<CodeModeRequest, CodeModeInvalidRequestError> => {
-  switch (operation as CodeModeOperation | string) {
+  switch (operation) {
     case "auth_status":
       return expectAbsentInput(input, "auth_status").pipe(
         Effect.as({ operation: "auth_status" as const }),
@@ -52,7 +49,10 @@ export const parseCodeModeToolCall = (
       );
     case "search":
       return parseSearchInput(input).pipe(
-        Effect.map((parsed) => ({ operation: "search" as const, input: parsed })),
+        Effect.map((parsed) => ({
+          operation: "search" as const,
+          input: parsed,
+        })),
       );
     case "get_tool_schema":
       return parseToolSchemaInput(input).pipe(
@@ -73,9 +73,13 @@ export const parseCodeModeToolCall = (
   }
 };
 
+/** Parse input for the search_providers Code Mode operation. */
 export const parseSearchProvidersInput = (
   input: unknown,
-): Effect.Effect<CodeModeSearchProvidersRequest, CodeModeInvalidRequestError> =>
+): Effect.Effect<
+  CodeModeSearchProvidersRequest,
+  CodeModeInvalidRequestError
+> =>
   input === undefined
     ? Effect.succeed(
         CodeModeSearchProvidersRequest.make({
@@ -85,16 +89,19 @@ export const parseSearchProvidersInput = (
       )
     : decode(CodeModeSearchProvidersRequest, input, "search_providers input");
 
+/** Parse input for the search Code Mode operation. */
 export const parseSearchInput = (
   input: unknown,
 ): Effect.Effect<CodeModeSearchRequest, CodeModeInvalidRequestError> =>
   decode(CodeModeSearchRequest, input, "search input");
 
+/** Parse input for the get_tool_schema Code Mode operation. */
 export const parseToolSchemaInput = (
   input: unknown,
 ): Effect.Effect<CodeModeToolSchemaRequest, CodeModeInvalidRequestError> =>
   decode(CodeModeToolSchemaRequest, input, "get_tool_schema input");
 
+/** Parse input for the execute Code Mode operation. */
 export const parseExecuteInput = (
   input: unknown,
 ): Effect.Effect<CodeModeExecuteRequest, CodeModeInvalidRequestError> =>
@@ -114,14 +121,6 @@ const decode = <A, I, R>(
         }),
     ),
   );
-
-const expectRecord = (
-  value: unknown,
-  label: string,
-): Effect.Effect<Record<string, unknown>, CodeModeInvalidRequestError> =>
-  value === null || typeof value !== "object" || Array.isArray(value)
-    ? Effect.fail(invalid(`${label} must be an object`))
-    : Effect.succeed(value as Record<string, unknown>);
 
 const expectAbsentInput = (
   input: unknown,

@@ -1,19 +1,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { McpAuthStatus } from "@ptools/auth/contracts";
 import {
-  CodeModeClient,
   CodeModeExecuteRequest,
   CodeModeSearchProvidersRequest,
   CodeModeSearchRequest,
   CodeModeToolSchemaRequest,
   type CodeModeSearchProvidersResult,
   type CodeModeSearchResult,
-  type CodeModeAuthStatusResult,
   type CodeModeToolSchemaResult,
   type CodeModeClientHandle,
   type CodeModeRequest,
   type CodeModeResponse,
 } from "@ptools/code-mode-api";
+import { CodeModeClient } from "@ptools/code-mode-api/effect";
 import { Effect, Option, Scope } from "effect";
 import { z } from "zod";
 
@@ -463,7 +463,7 @@ const formatToolSchemaText = (result: CodeModeToolSchemaResult): string =>
     result,
   ).join("\n");
 
-const formatAuthStatusText = (result: CodeModeAuthStatusResult): string =>
+const formatAuthStatusText = (result: McpAuthStatus): string =>
   [
     "Upstream MCP auth status:",
     `Auth center: ${result.authUrl}`,

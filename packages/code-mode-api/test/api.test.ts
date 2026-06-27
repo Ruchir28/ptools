@@ -1,17 +1,18 @@
 import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  CodeModeClient,
   CodeModeExecuteRequest,
   CodeModeSearchProvidersRequest,
   CodeModeSearchRequest,
-  CodeModeServer,
   CodeModeToolSchemaRequest,
   parseCodeModeRequest,
+  parseCodeModeResponse,
+  parseCodeModeResponseForRequest,
   parseCodeModeToolCall,
   type CodeModeRequest,
   type CodeModeResponse,
 } from "../src/index.js";
+import { CodeModeClient, CodeModeServer } from "../src/services/index.js";
 
 describe("Code Mode API request validation", () => {
   it("parses all public operations", async () => {
@@ -121,7 +122,49 @@ describe("Code Mode API request validation", () => {
 
     if (Either.isLeft(result)) {
       expect(result.left._tag).toBe("CodeModeInvalidRequestError");
-      expect(result.left.message).toBe("Code Mode request must be an object");
+      expect(result.left.message).toBe("Invalid Code Mode request");
+    }
+  });
+});
+
+describe("Code Mode API response validation", () => {
+  it("decodes response envelopes", async () => {
+    await expect(
+      Effect.runPromise(
+        parseCodeModeResponse({
+          operation: "search",
+          output: { actions: [], diagnostics: [] },
+        }),
+      ),
+    ).resolves.toEqual({
+      operation: "search",
+      output: { actions: [], diagnostics: [] },
+    });
+  });
+
+  it("rejects responses for the wrong request operation", async () => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        parseCodeModeResponseForRequest(
+          {
+            operation: "search",
+            input: CodeModeSearchRequest.make({
+              query: "github",
+              provider: Option.none(),
+              limit: Option.none(),
+            }),
+          },
+          {
+            operation: "refresh",
+            output: { refreshed: true },
+          },
+        ),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left._tag).toBe("CodeModeInvalidResponseError");
     }
   });
 });

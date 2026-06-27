@@ -1,4 +1,3 @@
-import type { CodeModeInvalidRequestError } from "@ptools/code-mode-api";
 import type { ServerConfigError } from "@ptools/config";
 import * as Data from "effect/Data";
 
@@ -48,24 +47,6 @@ export const unauthorized = (): HostCloudflareError =>
     status: 401,
     message: "Unauthorized",
     headers: { "WWW-Authenticate": "Bearer" },
-  });
-
-export const invalidJson = (cause: unknown): HostCloudflareError =>
-  new HostCloudflareError({
-    code: "invalid_json",
-    status: 400,
-    message: "Invalid JSON body",
-    cause,
-  });
-
-export const invalidCodeModeRequest = (
-  cause: CodeModeInvalidRequestError,
-): HostCloudflareError =>
-  new HostCloudflareError({
-    code: "invalid_code_mode_request",
-    status: 400,
-    message: "Invalid Code Mode request",
-    cause,
   });
 
 export const invalidConfig = (cause: ServerConfigError): HostCloudflareError =>

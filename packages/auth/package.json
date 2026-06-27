@@ -17,6 +17,10 @@
     "dist/*.js.map",
     "dist/*.d.ts",
     "dist/*.d.ts.map",
+    "dist/contracts/*.js",
+    "dist/contracts/*.js.map",
+    "dist/contracts/*.d.ts",
+    "dist/contracts/*.d.ts.map",
     "README.md",
     "LICENSE"
   ],
@@ -27,6 +31,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "default": "./dist/contracts/index.js"
     }
   },
   "scripts": {

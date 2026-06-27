@@ -1,4 +1,5 @@
 import { parsePtoolsConfigJson, type PtoolsConfig } from "@ptools/config";
+import { PtoolsSecretValues } from "@ptools/config/contracts";
 import { Array as EffectArray, Effect, Option, Schema } from "effect";
 import {
   CODE_MODE_OBJECT_CONFIG_BLOB_KEY,
@@ -14,9 +15,7 @@ import type {
   ConfigureCodeModeObjectSecretsResult,
 } from "./rpc.js";
 
-const SecretsJson = Schema.parseJson(
-  Schema.Record({ key: Schema.String, value: Schema.String }),
-);
+const SecretsJson = Schema.parseJson(PtoolsSecretValues);
 
 export const configureCodeModeObject = (input: {
   readonly rawConfigJson: string;

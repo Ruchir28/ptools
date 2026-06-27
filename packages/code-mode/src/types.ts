@@ -1,9 +1,12 @@
 export type {
+  McpAuthServerStatus,
+  McpAuthStatus,
+  McpAuthStatusValue,
+} from "@ptools/auth/contracts";
+
+export type {
   CapturedLog,
   CodeModeActionCandidate,
-  CodeModeAuthServerStatus,
-  CodeModeAuthStatusResult,
-  CodeModeAuthStatusValue,
   CodeModeDiagnostic,
   CodeModeExecuteRequest,
   CodeModeExecutionWarning,

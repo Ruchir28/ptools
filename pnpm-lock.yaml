@@ -250,6 +250,9 @@ importers:
 
   packages/code-mode-api:
     dependencies:
+      '@ptools/auth':
+        specifier: workspace:*
+        version: link:../auth
       effect:
         specifier: 3.21.2
         version: 3.21.2
@@ -264,6 +267,21 @@ importers:
 
   packages/executor:
     dependencies:
+      effect:
+        specifier: 3.21.2
+        version: 3.21.2
+
+  packages/host-api:
+    dependencies:
+      '@ptools/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@ptools/code-mode-api':
+        specifier: workspace:*
+        version: link:../code-mode-api
+      '@ptools/config':
+        specifier: workspace:*
+        version: link:../config
       effect:
         specifier: 3.21.2
         version: 3.21.2
@@ -291,6 +309,9 @@ importers:
       '@ptools/executor':
         specifier: workspace:*
         version: link:../executor
+      '@ptools/host-api':
+        specifier: workspace:*
+        version: link:../host-api
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
@@ -334,6 +355,9 @@ importers:
       '@ptools/executor':
         specifier: workspace:*
         version: link:../executor
+      '@ptools/host-api':
+        specifier: workspace:*
+        version: link:../host-api
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
@@ -369,6 +393,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.4.3)
+      '@ptools/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@ptools/code-mode-api':
         specifier: workspace:*
         version: link:../code-mode-api

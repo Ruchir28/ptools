@@ -7,6 +7,7 @@ import type {
   ResolvedMcpServers,
 } from "@ptools/config";
 import { Context, Data, Effect } from "effect";
+import type { McpAuthStatus } from "./contracts/index.js";
 
 export class AuthError extends Data.TaggedError("AuthError")<{
   readonly message: string;
@@ -33,33 +34,11 @@ export interface OAuthStatePayload {
   readonly expiresAt: string;
 }
 
-export type McpAuthStatusValue =
-  | "connected"
-  | "requires_auth"
-  | "auth_in_progress"
-  | "auth_failed"
-  | "needs_config"
-  | "static_credentials"
-  | "unsupported_auth"
-  | "disabled";
-
-export interface McpAuthServerStatus {
-  readonly serverName: string;
-  readonly jsServerName: string;
-  readonly transport: UpstreamMcpConfig["transport"];
-  readonly status: McpAuthStatusValue;
-  readonly authUrl?: string;
-  readonly authorizeUrl?: string;
-  readonly reauthorizeUrl?: string;
-  readonly setupUrl?: string;
-  readonly message?: string;
-  readonly lastError?: string;
-}
-
-export interface McpAuthStatus {
-  readonly authUrl: string;
-  readonly servers: ReadonlyArray<McpAuthServerStatus>;
-}
+export {
+  McpAuthServerStatus,
+  McpAuthStatus,
+  McpAuthStatusValue,
+} from "./contracts/index.js";
 
 export class CredentialsStore extends Context.Tag("@ptools/CredentialsStore")<
   CredentialsStore,

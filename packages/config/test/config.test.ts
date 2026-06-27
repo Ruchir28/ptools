@@ -1,4 +1,6 @@
-import { join } from "node:path";
+import { access } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Effect, Either, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -15,6 +17,35 @@ import {
   ServerConfigError,
   SecretResolver,
 } from "../src/config.js";
+
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+describe("config source layout", () => {
+  it("keeps contracts and Effect services in semantic source folders", async () => {
+    for (const contractFile of [
+      "authoredPtoolsConfig.ts",
+      "normalizedPtoolsConfig.ts",
+      "ptoolsSecretValues.ts",
+      "resolvedPtoolsConfig.ts",
+      "index.ts",
+    ]) {
+      await expect(
+        fileExists(join(packageRoot, "src/contracts", contractFile)),
+      ).resolves.toBe(true);
+    }
+
+    await expect(
+      fileExists(join(packageRoot, "src/services/configServices.ts")),
+    ).resolves.toBe(true);
+
+    await expect(
+      fileExists(join(packageRoot, "src/contracts/ptoolsConfig.ts")),
+    ).resolves.toBe(false);
+    await expect(fileExists(join(packageRoot, "src/effect"))).resolves.toBe(
+      false,
+    );
+  });
+});
 
 describe("server config", () => {
   it("requires validated construction for the PtoolsConfig domain value", () => {
@@ -556,6 +587,12 @@ describe("server config", () => {
 
 const parseConfig = (value: unknown) =>
   Effect.runPromise(parsePtoolsConfigJson(JSON.stringify(value)));
+
+const fileExists = async (path: string): Promise<boolean> =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 
 const stdioServer = (
   config: ResolvedPtoolsConfig,

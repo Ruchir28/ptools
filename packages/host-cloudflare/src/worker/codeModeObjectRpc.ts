@@ -88,7 +88,7 @@ export const configureCodeModeObjectSecrets = (input: {
     ),
   );
 
-/** `GET /hosts/:hostId/auth/status` — list MCP auth state for configured servers. */
+/** Host MCP auth status — list MCP auth state for configured servers. */
 export const callCodeModeObjectMcpAuthStatus = (input: {
   readonly namespace: CodeModeObjectNamespace;
   readonly hostId: string;
@@ -108,7 +108,7 @@ export const callCodeModeObjectMcpAuthStatus = (input: {
     ),
   );
 
-/** `GET /hosts/:hostId/auth/:serverName` — begin OAuth and return authorize URL. */
+/** Host MCP auth start — begin OAuth and return the provider authorize URL. */
 export const callCodeModeObjectStartMcpAuth = (input: {
   readonly namespace: CodeModeObjectNamespace;
   readonly hostId: string;

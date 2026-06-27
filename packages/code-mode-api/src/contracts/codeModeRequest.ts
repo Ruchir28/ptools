@@ -1,6 +1,7 @@
 /**
- * Schema-backed Code Mode request DTOs (see `./types.ts` for response/metadata
- * contracts). These are runtime boundary values decoded from unknown
+ * Schema-backed Code Mode request DTOs.
+ *
+ * These are runtime boundary values decoded from unknown
  * JSON/HTTP/MCP/DO-RPC input and then consumed by Effect services, so they are
  * `Schema.Class` rather than hand-written unchecked interfaces.
  *
@@ -13,10 +14,7 @@
  */
 import { Schema } from "effect";
 
-const PositiveInteger = Schema.Number.pipe(
-  Schema.int(),
-  Schema.positive(),
-);
+const PositiveInteger = Schema.Number.pipe(Schema.int(), Schema.positive());
 
 const NonBlankString = Schema.String.pipe(
   Schema.filter((value) => value.trim() !== "", {
@@ -24,6 +22,7 @@ const NonBlankString = Schema.String.pipe(
   }),
 );
 
+/** Optional input for listing Code Mode providers. */
 export class CodeModeSearchProvidersRequest extends Schema.Class<CodeModeSearchProvidersRequest>(
   "ptools.code-mode-api/CodeModeSearchProvidersRequest",
 )({
@@ -31,6 +30,7 @@ export class CodeModeSearchProvidersRequest extends Schema.Class<CodeModeSearchP
   limit: Schema.optionalWith(PositiveInteger, { exact: true, as: "Option" }),
 }) {}
 
+/** Natural-language search input for discovering callable actions. */
 export class CodeModeSearchRequest extends Schema.Class<CodeModeSearchRequest>(
   "ptools.code-mode-api/CodeModeSearchRequest",
 )({
@@ -39,6 +39,7 @@ export class CodeModeSearchRequest extends Schema.Class<CodeModeSearchRequest>(
   limit: Schema.optionalWith(PositiveInteger, { exact: true, as: "Option" }),
 }) {}
 
+/** Input for requesting schemas and declarations for specific tools. */
 export class CodeModeToolSchemaRequest extends Schema.Class<CodeModeToolSchemaRequest>(
   "ptools.code-mode-api/CodeModeToolSchemaRequest",
 )({
@@ -60,3 +61,32 @@ export class CodeModeExecuteRequest extends Schema.Class<CodeModeExecuteRequest>
     as: "Option",
   }),
 }) {}
+
+/** Schema for the full Code Mode request envelope crossing API boundaries. */
+export const CodeModeRequest = Schema.Union(
+  Schema.Struct({
+    operation: Schema.Literal("auth_status"),
+    input: Schema.optional(Schema.Undefined),
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("refresh"),
+    input: Schema.optional(Schema.Undefined),
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("search_providers"),
+    input: Schema.optional(CodeModeSearchProvidersRequest),
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("search"),
+    input: CodeModeSearchRequest,
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("get_tool_schema"),
+    input: CodeModeToolSchemaRequest,
+  }),
+  Schema.Struct({
+    operation: Schema.Literal("execute"),
+    input: CodeModeExecuteRequest,
+  }),
+);
+export type CodeModeRequest = Schema.Schema.Type<typeof CodeModeRequest>;

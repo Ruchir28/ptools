@@ -78,6 +78,34 @@ present.
 - Name Effect services by the boundary they actually represent. Worker ingress
   services should use Worker-specific names and must not be confused with
   Durable Object runtime or Code Mode domain services.
+- Source files that own Effect `Context.Tag` service contracts should live under
+  `src/services/`. Reserve a package `./effect` export for the public
+  Effect-native SDK subpath; it can re-export from `src/services/index.ts` when
+  the package intentionally exposes those services to Effect users.
+- Keep platform carrier parsing separate from host protocol handling. Platform
+  adapters may extract method/path/query/body/header data from HTTP, stdio,
+  Workers RPC, or browser callbacks, but reusable host-owned work should be
+  represented as a validated `HostApiRequest` and dispatched through
+  `HostServer`. Routes should stay thin carrier adapters; do not duplicate
+  operation dispatch or result wrapping in route modules.
+- Reusable package contracts should live in semantically named files under an
+  owning package's `src/contracts/` folder, with a standard `./contracts`
+  subpath export for other packages. Keep each file focused on one semantic
+  group, e.g. `contracts/mcpAuthStatus.ts`,
+  `contracts/authoredPtoolsConfig.ts`, or `contracts/resolvedPtoolsConfig.ts`;
+  do not create package-per-DTO sprawl or dump unrelated concepts into one broad
+  file. When a package has multiple contract concepts, split them by lifecycle
+  or ownership boundary instead of creating one catch-all `contracts/<package>.ts`
+  file.
+- When refactoring a package surface, check for all three source roles before
+  stopping: reusable DTO/schema contracts belong in `src/contracts/`, Effect
+  `Context.Tag` services/layers belong in `src/services/`, and runtime behavior
+  such as parsing, codecs, hashing, storage, or platform adapters stays in
+  semantic behavior files outside those folders. Add or update import-boundary
+  tests so these folders and public subpaths do not regress.
+- Do not create alias names for the same DTO or concept across package
+  boundaries. Keep the owned name everywhere it is used. Add temporary
+  compatibility aliases only when explicitly approved.
 - If Effect is not viable for a host/runtime change, stop and confirm the
   non-Effect implementation direction with the user before proceeding.
 - Executor provider handlers are Effect-returning host capabilities. Wrap promise/value work with `Effect.promise` or `Effect.succeed` instead of widening executor APIs to raw promises.

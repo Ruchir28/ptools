@@ -6,17 +6,14 @@
  * forward requests to the Durable Object; this layer keeps operation dispatch
  * inside the configured Effect runtime next to the CodeMode service it calls.
  */
+import { CodeMode, type CodeModeError } from "@ptools/code-mode";
 import {
-  CodeMode,
-  type CodeModeError,
-} from "@ptools/code-mode";
-import {
-  CodeModeServer,
   CodeModeServerFailure,
   type CodeModeRequest,
   type CodeModeResponse,
   type CodeModeServerError,
 } from "@ptools/code-mode-api";
+import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import { Context, Effect, Layer } from "effect";
 
 /**

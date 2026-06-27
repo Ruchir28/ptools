@@ -36,6 +36,10 @@ export const CloudflareAuthPolicyLayer: Layer.Layer<
         `${requestOrigin.origin}/hosts/${encodeURIComponent(identity.hostId)}/oauth/callback/${encodeURIComponent(serverName)}`,
       setupUrl: (serverName) =>
         `${authUrl}/${encodeURIComponent(serverName)}/setup`,
+      // These URLs are browser/workflow GET links exposed in auth status. Keep
+      // them separate from the machine `start_mcp_auth` host-api POST route:
+      // users/legacy clients can open this link, while API clients can still
+      // start auth by POSTing a HostApiRequest to the same path.
       authorizeUrl: (serverName) =>
         `${authUrl}/${encodeURIComponent(serverName)}`,
       reauthorizeUrl: (serverName) =>

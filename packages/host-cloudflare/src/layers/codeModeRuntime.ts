@@ -13,7 +13,7 @@ import {
   makeCodeModeLive,
   type CodeModeError,
 } from "@ptools/code-mode";
-import { CodeModeServer } from "@ptools/code-mode-api";
+import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import { ConfigSource, ServerConfigError } from "@ptools/config";
 import { ExecutorStartError, type ExecutorError } from "@ptools/executor";
 import {
@@ -21,10 +21,7 @@ import {
   type NameCollisionError,
 } from "@ptools/mcp-registry";
 import { Data, Effect, Layer, Option } from "effect";
-import {
-  CloudflareOAuthFlow,
-  DurableObjectAuthLayer,
-} from "./auth/index.js";
+import { CloudflareOAuthFlow, DurableObjectAuthLayer } from "./auth/index.js";
 import { DurableObjectCredentialsStoreLayer } from "./auth/credentials.js";
 import { CloudflareCodeModeServerLayer } from "./codeModeServer.js";
 import {

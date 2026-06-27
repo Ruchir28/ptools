@@ -1,4 +1,5 @@
-import { CodeModeServer, type CodeModeResponse } from "@ptools/code-mode-api";
+import type { CodeModeResponse } from "@ptools/code-mode-api";
+import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import { AuthCoordinator } from "@ptools/auth";
 import {
   ConfigSource,

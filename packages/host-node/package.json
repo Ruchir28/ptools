@@ -53,6 +53,7 @@
     "@ptools/code-mode-api": "workspace:*",
     "@ptools/config": "workspace:*",
     "@ptools/executor": "workspace:*",
+    "@ptools/host-api": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
     "effect": "3.21.2"
   }

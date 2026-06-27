@@ -10,8 +10,8 @@
  * - Implementer: `CodeModeObject` exposes matching public methods and converts
  *   to/from internal Effect programs at that boundary.
  */
+import type { McpAuthStatus } from "@ptools/auth/contracts";
 import type { CodeModeRequest, CodeModeResponse } from "@ptools/code-mode-api";
-import type { McpAuthStatus } from "@ptools/auth";
 
 export interface ConfigureCodeModeObjectInput {
   readonly rawConfigJson: string;

@@ -2,9 +2,9 @@ import {
   CodeModeExecuteRequest,
   CodeModeSearchProvidersRequest,
   CodeModeSearchRequest,
-  CodeModeServer,
   CodeModeToolSchemaRequest,
 } from "@ptools/code-mode-api";
+import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import { CodeMode } from "@ptools/code-mode";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";

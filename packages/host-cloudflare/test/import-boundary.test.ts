@@ -111,9 +111,11 @@ describe("host-cloudflare import boundaries", () => {
     );
 
     expect(router).toContain('.route("/", healthRoutes)');
-    expect(router).toContain('.route("/", codeModeRoutes)');
-    expect(router).toContain('.route("/", configRoutes)');
-    expect(router).toContain('.route("/", mcpAuthRoutes)');
+    expect(router).toContain('.route("/", hostApiRoutes)');
+    expect(router).toContain('.route("/", oauthBrowserRoutes)');
+    expect(router).not.toContain("codeModeRoutes");
+    expect(router).not.toContain("configRoutes");
+    expect(router).not.toContain("mcpAuthRoutes");
     expect(router).not.toContain("context.env");
     expect(router).not.toContain("Effect.");
     expect(router).not.toContain("PTOOLS_CODE_MODE");

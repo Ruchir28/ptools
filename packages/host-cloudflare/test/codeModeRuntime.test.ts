@@ -23,9 +23,9 @@ import {
   CodeModeExecuteRequest,
   CodeModeSearchProvidersRequest,
   CodeModeSearchRequest,
-  CodeModeServer,
   CodeModeToolSchemaRequest,
 } from "@ptools/code-mode-api";
+import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import { PtoolsConfig } from "@ptools/config";
 import type { SandboxCompletion } from "@ptools/executor";
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
@@ -72,7 +72,10 @@ describe("CloudflareCodeModeRuntimeLayer", () => {
     const workerLoaderCalls: Array<{
       readonly code: WorkerLoaderWorkerCode;
       readonly payloadCode: string;
-      readonly providers: ReadonlyArray<{ readonly name: string; readonly tools: ReadonlyArray<string> }>;
+      readonly providers: ReadonlyArray<{
+        readonly name: string;
+        readonly tools: ReadonlyArray<string>;
+      }>;
     }> = [];
     const runtime = makeRuntime({
       storage,
@@ -183,9 +186,9 @@ describe("CloudflareCodeModeRuntimeLayer", () => {
     if (results.schema.operation !== "get_tool_schema") {
       throw new Error("Expected get_tool_schema response.");
     }
-    expect(results.schema.output.declarationsByServer[0]?.declaration).toContain(
-      "declare namespace fixture",
-    );
+    expect(
+      results.schema.output.declarationsByServer[0]?.declaration,
+    ).toContain("declare namespace fixture");
     expect(results.execute).toEqual({
       operation: "execute",
       output: {
@@ -239,7 +242,10 @@ const makeStoredConfigBlob = (options: {
 const makeRuntime = (options: {
   readonly storage: ReturnType<typeof makeMemoryStorage>;
   readonly workerLoader: CodeModeObjectWorkerLoaderService;
-}): ManagedRuntime.ManagedRuntime<CloudflareCodeModeRuntimeServices, unknown> => {
+}): ManagedRuntime.ManagedRuntime<
+  CloudflareCodeModeRuntimeServices,
+  unknown
+> => {
   const runtime = ManagedRuntime.make(
     CloudflareCodeModeRuntimeLayer.pipe(
       Layer.provide(
@@ -249,9 +255,7 @@ const makeRuntime = (options: {
           workerLoader: options.workerLoader,
         }),
       ),
-      Layer.provide(
-        CodeModeObjectRequestOriginLayer("https://ptools.example"),
-      ),
+      Layer.provide(CodeModeObjectRequestOriginLayer("https://ptools.example")),
     ),
   );
   runtimes.push(runtime);
@@ -287,7 +291,10 @@ const makeRecordingWorkerLoader = (
   calls: Array<{
     readonly code: WorkerLoaderWorkerCode;
     readonly payloadCode: string;
-    readonly providers: ReadonlyArray<{ readonly name: string; readonly tools: ReadonlyArray<string> }>;
+    readonly providers: ReadonlyArray<{
+      readonly name: string;
+      readonly tools: ReadonlyArray<string>;
+    }>;
   }>,
   completion: SandboxCompletion,
 ): CodeModeObjectWorkerLoaderService => ({

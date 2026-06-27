@@ -4,12 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CodeModeClient,
   CodeModeExecuteRequest,
   CodeModeSearchProvidersRequest,
   CodeModeSearchRequest,
-  CodeModeServer,
 } from "@ptools/code-mode-api";
+import { CodeModeClient, CodeModeServer } from "@ptools/code-mode-api/effect";
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {

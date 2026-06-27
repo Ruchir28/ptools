@@ -6,9 +6,7 @@ import {
   type CodeModeError,
 } from "@ptools/code-mode";
 import {
-  CodeModeClient,
   CodeModeRemoteError,
-  CodeModeServer,
   CodeModeServerFailure,
   type CodeModeClientError,
   type CodeModeClientHandle,
@@ -16,6 +14,20 @@ import {
   type CodeModeResponse,
   type CodeModeServerError,
 } from "@ptools/code-mode-api";
+import { CodeModeClient, CodeModeServer } from "@ptools/code-mode-api/effect";
+import {
+  makeHostApiProtocolFailureResponse,
+  type HostClientHandle,
+} from "@ptools/host-api";
+import {
+  HostClient,
+  HostClientLayer,
+  HostServer,
+  HostTransport,
+  HostTransportError,
+  HostTransportCodeModeClientLayer,
+} from "@ptools/host-api/effect";
+import type { HostApiRequest, HostApiResponse } from "@ptools/host-api";
 import {
   ConfigSource,
   ResolvedExecutorConfig,
@@ -182,33 +194,102 @@ export const NodeCodeModeServerFromConfigFileLive = (
     ),
   );
 
+export const NodeHostServerLive = (
+  options: CreateNodeCodeModeOptions,
+): Layer.Layer<HostServer, HostNodeError, never> =>
+  makeNodeHostServerLive.pipe(Layer.provide(NodeCodeModeServerLive(options)));
+
+export const NodeHostServerFromConfigFileLive = (
+  path?: string,
+  options: CreateNodeCodeModeFromConfigFileOptions = {},
+): Layer.Layer<HostServer, HostNodeError | ServerConfigError, never> =>
+  makeNodeHostServerLive.pipe(
+    Layer.provide(NodeCodeModeServerFromConfigFileLive(path, options)),
+  );
+
+export const NodeInProcessHostTransportLive: Layer.Layer<
+  HostTransport,
+  never,
+  HostServer
+> = Layer.effect(
+  HostTransport,
+  Effect.gen(function* () {
+    const server = yield* HostServer;
+
+    return {
+      call: (request: HostApiRequest) =>
+        server.handle(request).pipe(
+          Effect.mapError(
+            (cause) =>
+              new HostTransportError({
+                message: "Node in-process host server failed.",
+                cause,
+              }),
+          ),
+        ),
+    };
+  }),
+);
+
+export const NodeHostClientLive = (
+  options: CreateNodeCodeModeOptions,
+): Layer.Layer<HostClient | CodeModeClient, HostNodeError, never> =>
+  HostClientLayer.pipe(
+    Layer.provide(NodeInProcessHostTransportLive),
+    Layer.provide(NodeHostServerLive(options)),
+  );
+
+export const NodeHostClientFromConfigFileLive = (
+  path?: string,
+  options: CreateNodeCodeModeFromConfigFileOptions = {},
+): Layer.Layer<
+  HostClient | CodeModeClient,
+  HostNodeError | ServerConfigError,
+  never
+> =>
+  HostClientLayer.pipe(
+    Layer.provide(NodeInProcessHostTransportLive),
+    Layer.provide(NodeHostServerFromConfigFileLive(path, options)),
+  );
+
 export const NodeCodeModeClientLive = (
   options: CreateNodeCodeModeOptions,
 ): Layer.Layer<CodeModeClient, HostNodeError, never> =>
-  makeLocalCodeModeClientLive.pipe(
-    Layer.provide(NodeCodeModeServerLive(options)),
+  HostTransportCodeModeClientLayer.pipe(
+    Layer.provide(NodeInProcessHostTransportLive),
+    Layer.provide(NodeHostServerLive(options)),
   );
 
 export const NodeCodeModeClientFromConfigFileLive = (
   path?: string,
   options: CreateNodeCodeModeFromConfigFileOptions = {},
 ): Layer.Layer<CodeModeClient, HostNodeError | ServerConfigError, never> =>
-  makeLocalCodeModeClientLive.pipe(
-    Layer.provide(NodeCodeModeServerFromConfigFileLive(path, options)),
+  HostTransportCodeModeClientLayer.pipe(
+    Layer.provide(NodeInProcessHostTransportLive),
+    Layer.provide(NodeHostServerFromConfigFileLive(path, options)),
   );
+
+export const createNodeHostClient = async (
+  options: CreateNodeCodeModeOptions,
+): Promise<HostClientHandle> =>
+  makeNodeHostClientHandle(NodeHostClientLive(options));
+
+export const createNodeHostClientFromConfigFile = async (
+  path?: string,
+  options: CreateNodeCodeModeFromConfigFileOptions = {},
+): Promise<HostClientHandle> =>
+  makeNodeHostClientHandle(NodeHostClientFromConfigFileLive(path, options));
 
 export const createNodeCodeModeClient = async (
   options: CreateNodeCodeModeOptions,
 ): Promise<CodeModeClientHandle> =>
-  makeNodeCodeModeClientHandle(NodeCodeModeClientLive(options));
+  (await createNodeHostClient(options)).codeMode;
 
 export const createNodeCodeModeClientFromConfigFile = async (
   path?: string,
   options: CreateNodeCodeModeFromConfigFileOptions = {},
 ): Promise<CodeModeClientHandle> =>
-  makeNodeCodeModeClientHandle(
-    NodeCodeModeClientFromConfigFileLive(path, options),
-  );
+  (await createNodeHostClientFromConfigFile(path, options)).codeMode;
 
 const NodeCodeModeLiveFromResolvedConfig = (options: {
   readonly hostId: string;
@@ -282,21 +363,55 @@ const makeCodeModeServerLive: Layer.Layer<CodeModeServer, never, CodeMode> =
     }),
   );
 
-const makeLocalCodeModeClientLive: Layer.Layer<
-  CodeModeClient,
-  never,
-  CodeModeServer
-> = Layer.effect(
-  CodeModeClient,
-  Effect.gen(function* () {
-    const server = yield* CodeModeServer;
+const makeNodeHostServerLive: Layer.Layer<HostServer, never, CodeModeServer> =
+  Layer.effect(
+    HostServer,
+    Effect.gen(function* () {
+      const codeModeServer = yield* CodeModeServer;
 
-    return {
-      call: (request: CodeModeRequest) =>
-        server.handle(request).pipe(Effect.mapError(toCodeModeClientError)),
-    };
-  }),
-);
+      return {
+        handle: (request: HostApiRequest) =>
+          handleNodeHostRequest(codeModeServer, request),
+      };
+    }),
+  );
+
+const handleNodeHostRequest = (
+  codeModeServer: Context.Tag.Service<typeof CodeModeServer>,
+  request: HostApiRequest,
+): Effect.Effect<HostApiResponse, never> => {
+  switch (request.operation) {
+    case "code_mode":
+      return codeModeServer.handle(request.input).pipe(
+        Effect.map((response) => ({
+          operation: "code_mode" as const,
+          result: { ok: true as const, response },
+        })),
+        Effect.catchAll((cause) =>
+          Effect.succeed({
+            operation: "code_mode" as const,
+            result: {
+              ok: false as const,
+              error: {
+                code:
+                  cause._tag === "CodeModeInvalidRequestError"
+                    ? ("invalid_code_mode_request" as const)
+                    : ("code_mode_server_failure" as const),
+                message: cause.message,
+              },
+            },
+          }),
+        ),
+      );
+    default:
+      return Effect.succeed(
+        makeHostApiProtocolFailureResponse({
+          code: "unknown_operation",
+          message: `Node host does not implement ${request.operation}.`,
+        }),
+      );
+  }
+};
 
 const handleCodeModeRequest = (
   codeMode: Context.Tag.Service<typeof CodeMode>,
@@ -406,23 +521,36 @@ const makeConfigSourceLayer = (
   }).pipe(Layer.provide(ProcessEnvSecretResolverLive({ env })));
 };
 
-const makeNodeCodeModeClientHandle = async <E>(
-  layer: Layer.Layer<CodeModeClient, E, never>,
-): Promise<CodeModeClientHandle> => {
+const makeNodeHostClientHandle = async <E>(
+  layer: Layer.Layer<HostClient | CodeModeClient, E, never>,
+): Promise<HostClientHandle> => {
   const managedRuntime = ManagedRuntime.make(layer);
 
   try {
     await managedRuntime.runtime();
+    const close = () => managedRuntime.dispose();
+
     return {
-      call: (request: CodeModeRequest) =>
+      call: (request: HostApiRequest) =>
         managedRuntime.runPromise(
           Effect.gen(function* () {
-            const client = yield* CodeModeClient;
+            const client = yield* HostClient;
 
             return yield* client.call(request);
           }),
         ),
-      close: () => managedRuntime.dispose(),
+      codeMode: {
+        call: (request: CodeModeRequest) =>
+          managedRuntime.runPromise(
+            Effect.gen(function* () {
+              const client = yield* CodeModeClient;
+
+              return yield* client.call(request);
+            }),
+          ),
+        close,
+      },
+      close,
     };
   } catch (cause) {
     await managedRuntime.dispose();

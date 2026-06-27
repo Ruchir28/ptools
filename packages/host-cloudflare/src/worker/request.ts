@@ -1,12 +1,5 @@
-import type { CodeModeRequest } from "@ptools/code-mode-api";
-import { parseCodeModeRequest } from "@ptools/code-mode-api";
 import * as Effect from "effect/Effect";
-import {
-  HostCloudflareError,
-  invalidCodeModeRequest,
-  invalidJson,
-  misconfiguredWorker,
-} from "../errors.js";
+import { HostCloudflareError, misconfiguredWorker } from "../errors.js";
 import type { PtoolsWorkerEnv } from "./ingress.js";
 import { verifyPublicWorkerAuth } from "./publicAuth.js";
 
@@ -27,37 +20,8 @@ export const requirePublicWorkerAuth = (input: {
     });
   });
 
-export const readCodeModeRequest = (
-  request: Request,
-): Effect.Effect<CodeModeRequest, HostCloudflareError> =>
-  Effect.tryPromise({
-    try: () => request.json(),
-    catch: invalidJson,
-  }).pipe(
-    Effect.flatMap((value) =>
-      parseCodeModeRequest(value).pipe(Effect.mapError(invalidCodeModeRequest)),
-    ),
-  );
-
 export const requestOrigin = (request: Request): string =>
   new URL(request.url).origin;
-
-export const requestHasTruthyQuery = (
-  request: Request,
-  name: string,
-): boolean => {
-  const queryStart = request.url.indexOf("?");
-
-  if (queryStart === -1) {
-    return false;
-  }
-
-  const value = new URLSearchParams(request.url.slice(queryStart + 1)).get(
-    name,
-  );
-
-  return value === "1" || value === "true";
-};
 
 export const readMcpOAuthCallbackBody = (
   request: Request,

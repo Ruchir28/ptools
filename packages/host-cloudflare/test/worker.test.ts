@@ -35,6 +35,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   codeModeObjectTestCalls,
   resetCodeModeObjectTestState,
+  setCodeModeObjectTestFailure,
   setCodeModeObjectTestResponse,
 } from "./codeModeObjectTestState.js";
 
@@ -105,42 +106,45 @@ describe("Cloudflare Worker ingress", () => {
     });
   });
 
-  it("rejects invalid JSON", async () => {
+  it("returns host-api protocol failures for invalid JSON", async () => {
     const response = await handleRequest("/hosts/demo/code-mode", {
       method: "POST",
       headers: authHeaders(),
       body: "not json",
     });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "invalid_json" },
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
   });
 
-  it("rejects invalid Code Mode requests", async () => {
+  it("returns host-api protocol failures for invalid Code Mode envelopes", async () => {
     const response = await handleRequest("/hosts/demo/code-mode", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ input: {} }),
     });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "invalid_code_mode_request" },
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
   });
 
-  it("uses Code Mode API validation for operation input", async () => {
+  it("uses host-api validation for operation input", async () => {
     const response = await handleRequest("/hosts/demo/code-mode", {
       method: "POST",
       headers: authHeaders(),
       body: JSON.stringify({ operation: "search", input: {} }),
     });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "invalid_code_mode_request" },
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
   });
 
@@ -159,7 +163,10 @@ describe("Cloudflare Worker ingress", () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(responseBody);
+    await expect(response.json()).resolves.toEqual({
+      operation: "code_mode",
+      result: { ok: true, response: responseBody },
+    });
     expect(codeModeObjectTestCalls()).toEqual([
       {
         hostId,
@@ -167,6 +174,71 @@ describe("Cloudflare Worker ingress", () => {
         origin: "https://ptools.example",
       },
     ]);
+  });
+
+  it("wraps host-api Code Mode requests in host-api responses", async () => {
+    const hostId = uniqueHostId();
+    const responseBody: CodeModeResponse = {
+      operation: "search_providers",
+      output: { providers: [], diagnostics: [] },
+    };
+    setCodeModeObjectTestResponse(responseBody);
+
+    const response = await handleRequest(`/hosts/${hostId}/code-mode`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "code_mode",
+        input: { operation: "search_providers" },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      operation: "code_mode",
+      result: { ok: true, response: responseBody },
+    });
+  });
+
+  it("wraps host-api Code Mode operation failures in the operation result", async () => {
+    const hostId = uniqueHostId();
+    setCodeModeObjectTestFailure(new Error("boom"));
+
+    const response = await handleRequest(`/hosts/${hostId}/code-mode`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "code_mode",
+        input: { operation: "search_providers" },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      operation: "code_mode",
+      result: {
+        ok: false,
+        error: {
+          code: "code_mode_server_failure",
+          message: "Code Mode host is unavailable",
+        },
+      },
+    });
+  });
+
+  it("returns host-api protocol failures for invalid code_mode envelopes", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/code-mode`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ operation: "code_mode" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
+    });
   });
 
   it("decodes the route host ID before Durable Object lookup", async () => {
@@ -202,8 +274,8 @@ describe("Cloudflare Worker ingress", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      hostId,
-      serverCount: 1,
+      operation: "configure",
+      result: { ok: true, hostId, serverCount: 1 },
     });
 
     const stub = configTestStub(hostId);
@@ -222,6 +294,79 @@ describe("Cloudflare Worker ingress", () => {
     });
   });
 
+  it("wraps host-api configure requests in host-api responses", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "configure",
+        input: {
+          config: {
+            mcpServers: {
+              example: { url: "https://mcp.example" },
+            },
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      operation: "configure",
+      result: { ok: true, configured: true, hostId, serverCount: 1 },
+    });
+  });
+
+  it("wraps host-api configure operation failures in the operation result", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "configure",
+        input: {
+          config: {
+            mcpServers: {
+              local: { command: "node" },
+            },
+          },
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      operation: "configure",
+      result: {
+        ok: false,
+        error: {
+          code: "unsupported_config",
+          message:
+            'MCP server "local" uses stdio, which is not supported by the Cloudflare host first release. Cloudflare stdio MCP over Containers is deferred.',
+        },
+      },
+    });
+  });
+
+  it("returns host-api protocol failures for invalid configure envelopes", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/config`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "configure",
+        input: { config: { mcpServers: { bad: { url: 123 } } } },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
+    });
+  });
+
   it("configures per-host secrets as separate Durable Object keys", async () => {
     const hostId = uniqueHostId();
     const response = await handleRequest(`/hosts/${hostId}/secrets`, {
@@ -235,8 +380,8 @@ describe("Cloudflare Worker ingress", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      hostId,
-      secretCount: 2,
+      operation: "configure_secrets",
+      result: { ok: true, hostId, secretCount: 2 },
     });
 
     const secrets = await configTestStub(hostId).readSecretsForTest();
@@ -244,6 +389,42 @@ describe("Cloudflare Worker ingress", () => {
     expect(secrets).toEqual({
       TEST_MCP_TOKEN: "resolved-test-token",
       "path/like name": "another-secret",
+    });
+  });
+
+  it("wraps host-api configure_secrets requests in host-api responses", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/secrets`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "configure_secrets",
+        input: { secrets: { TEST_MCP_TOKEN: "resolved-test-token" } },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      operation: "configure_secrets",
+      result: { ok: true, configured: true, hostId, secretCount: 1 },
+    });
+  });
+
+  it("returns host-api protocol failures for invalid configure_secrets envelopes", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/secrets`, {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "configure_secrets",
+        input: { secrets: { TEST_MCP_TOKEN: 123 } },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
   });
 
@@ -267,7 +448,7 @@ describe("Cloudflare Worker ingress", () => {
     expect(response.headers.get("WWW-Authenticate")).toBe("Bearer");
   });
 
-  it("rejects malformed config and secrets JSON", async () => {
+  it("returns host-api protocol failures for malformed config and secrets JSON", async () => {
     const config = await handleRequest(`/hosts/${uniqueHostId()}/config`, {
       method: "PUT",
       headers: authHeaders(),
@@ -279,13 +460,15 @@ describe("Cloudflare Worker ingress", () => {
       body: "not json",
     });
 
-    expect(config.status).toBe(400);
+    expect(config.status).toBe(200);
     await expect(config.json()).resolves.toMatchObject({
-      error: { code: "invalid_config" },
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
-    expect(secrets.status).toBe(400);
+    expect(secrets.status).toBe(200);
     await expect(secrets.json()).resolves.toMatchObject({
-      error: { code: "invalid_secrets" },
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
   });
 
@@ -435,12 +618,16 @@ describe("Cloudflare Worker ingress", () => {
     const response = await handleRequest(`/hosts/${uniqueHostId()}/secrets`, {
       method: "PUT",
       headers: authHeaders(),
-      body: JSON.stringify({ TEST_MCP_TOKEN: 123 }),
+      body: JSON.stringify({
+        operation: "configure_secrets",
+        input: { secrets: { TEST_MCP_TOKEN: 123 } },
+      }),
     });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "invalid_secrets" },
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
   });
 
@@ -448,25 +635,35 @@ describe("Cloudflare Worker ingress", () => {
     const invalid = await handleRequest(`/hosts/${uniqueHostId()}/config`, {
       method: "PUT",
       headers: authHeaders(),
-      body: JSON.stringify({ mcpServers: [] }),
+      body: JSON.stringify({
+        operation: "configure",
+        input: { config: { mcpServers: [] } },
+      }),
     });
     const stdio = await handleRequest(`/hosts/${uniqueHostId()}/config`, {
       method: "PUT",
       headers: authHeaders(),
       body: JSON.stringify({
-        mcpServers: {
-          local: { command: "node" },
+        operation: "configure",
+        input: {
+          config: {
+            mcpServers: {
+              local: { command: "node" },
+            },
+          },
         },
       }),
     });
 
-    expect(invalid.status).toBe(400);
+    expect(invalid.status).toBe(200);
     await expect(invalid.json()).resolves.toMatchObject({
-      error: { code: "invalid_config" },
+      _tag: "HostApiProtocolFailureResponse",
+      error: { code: "invalid_host_api_request" },
     });
-    expect(stdio.status).toBe(400);
+    expect(stdio.status).toBe(200);
     await expect(stdio.json()).resolves.toMatchObject({
-      error: { code: "unsupported_config" },
+      operation: "configure",
+      result: { ok: false, error: { code: "unsupported_config" } },
     });
   });
 
@@ -498,9 +695,13 @@ describe("Cloudflare Worker ingress", () => {
 
   it("requires bearer auth for MCP auth status, setup, and start routes", async () => {
     const hostId = uniqueHostId();
-    const status = await handleRequest(`/hosts/${hostId}/auth/status`);
+    const status = await handleRequest(`/hosts/${hostId}/auth/status`, {
+      method: "POST",
+    });
     const setup = await handleRequest(`/hosts/${hostId}/auth/example/setup`);
-    const start = await handleRequest(`/hosts/${hostId}/auth/example`);
+    const start = await handleRequest(`/hosts/${hostId}/auth/example`, {
+      method: "POST",
+    });
 
     expect(status.status).toBe(401);
     expect(status.headers.get("WWW-Authenticate")).toBe("Bearer");
@@ -513,7 +714,7 @@ describe("Cloudflare Worker ingress", () => {
   it("serves real Code Mode requests through CodeModeObject.call for configured hosts", async () => {
     const hostId = uniqueHostId();
 
-    await configureHost(hostId, JSON.stringify({ mcpServers: {} }));
+    await configureHost(hostId, emptyConfigBody());
 
     await expect(
       configTestStub(hostId).callRealCodeModeRuntimeForTest({
@@ -747,22 +948,98 @@ describe("Cloudflare Worker ingress", () => {
     );
 
     const response = await handleRequest(`/hosts/${hostId}/auth/status`, {
+      method: "POST",
       headers: authHeaders(),
+      body: mcpAuthStatusBody(),
     });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      authUrl: `https://ptools.example/hosts/${hostId}/auth`,
-      servers: [
-        {
-          serverName: "example",
-          jsServerName: "example",
-          transport: "http",
-          status: "static_credentials",
+      operation: "mcp_auth_status",
+      result: {
+        ok: true,
+        status: {
           authUrl: `https://ptools.example/hosts/${hostId}/auth`,
+          servers: [
+            {
+              serverName: "example",
+              jsServerName: "example",
+              transport: "http",
+              status: "static_credentials",
+              authUrl: `https://ptools.example/hosts/${hostId}/auth`,
+            },
+          ],
         },
-      ],
+      },
     });
+  });
+
+  it("adapts MCP auth status to a host-api response", async () => {
+    const hostId = uniqueHostId();
+
+    await configureHost(
+      hostId,
+      configBody({
+        headers: { Authorization: "Bearer static-token" },
+      }),
+    );
+
+    const response = await handleRequest(`/hosts/${hostId}/auth/status`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "mcp_auth_status",
+        input: { origin: "https://ptools.example" },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      operation: "mcp_auth_status",
+      result: {
+        ok: true,
+        status: {
+          authUrl: `https://ptools.example/hosts/${hostId}/auth`,
+          servers: [{ serverName: "example", status: "static_credentials" }],
+        },
+      },
+    });
+  });
+
+  it("returns host-api protocol failures from auth operation routes", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/auth/example`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        operation: "start_mcp_auth",
+        input: {
+          origin: "https://ptools.example",
+          serverName: "different",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      _tag: "HostApiProtocolFailureResponse",
+      error: {
+        code: "invalid_host_api_request",
+        message:
+          "start_mcp_auth input.serverName must match the route serverName.",
+      },
+    });
+  });
+
+  it("keeps browser OAuth start links available as GET routes", async () => {
+    const hostId = uniqueHostId();
+    const response = await handleRequest(`/hosts/${hostId}/auth/example`, {
+      method: "GET",
+      headers: authHeaders(),
+    });
+
+    expect(response.status).not.toBe(405);
+    await expect(response.json()).resolves.toHaveProperty("error.code");
   });
 
   it("rebuilds the cached host runtime when the request origin changes", async () => {
@@ -776,20 +1053,32 @@ describe("Cloudflare Worker ingress", () => {
     );
 
     const first = await handleRequest(`/hosts/${hostId}/auth/status`, {
+      method: "POST",
       headers: authHeaders(),
+      body: mcpAuthStatusBody("https://ptools.example"),
     });
     const second = await handleRequest(
       `https://alternate.ptools.example/hosts/${hostId}/auth/status`,
-      { headers: authHeaders() },
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: mcpAuthStatusBody("https://alternate.ptools.example"),
+      },
     );
 
     expect(first.status).toBe(200);
     await expect(first.json()).resolves.toMatchObject({
-      authUrl: `https://ptools.example/hosts/${hostId}/auth`,
+      result: {
+        status: { authUrl: `https://ptools.example/hosts/${hostId}/auth` },
+      },
     });
     expect(second.status).toBe(200);
     await expect(second.json()).resolves.toMatchObject({
-      authUrl: `https://alternate.ptools.example/hosts/${hostId}/auth`,
+      result: {
+        status: {
+          authUrl: `https://alternate.ptools.example/hosts/${hostId}/auth`,
+        },
+      },
     });
   });
 
@@ -809,13 +1098,31 @@ describe("Cloudflare Worker ingress", () => {
       config: {
         method: "PUT",
         url: `https://ptools.example/hosts/${hostId}/config`,
+        contentType: "application/json",
         authObject: {
           root: "mcpServers",
           serverName: "example",
           field: "auth",
         },
         fields: ["clientId", "clientSecret"],
-        note: "Upload the complete host config after adding the OAuth client credentials.",
+        bodyTemplate: {
+          operation: "configure",
+          input: {
+            config: {
+              mcpServers: {
+                example: {
+                  url: "<existing MCP server URL>",
+                  auth: {
+                    type: "oauth",
+                    clientId: "<clientId>",
+                    clientSecret: "<clientSecret>",
+                  },
+                },
+              },
+            },
+          },
+        },
+        note: "PUT a HostApiRequest envelope. input.config must be the complete host config after adding the OAuth client credentials.",
       },
     });
   });
@@ -908,7 +1215,7 @@ describe("Cloudflare Worker ingress", () => {
       method: "POST",
     });
     const mcpAuthStatus = await handleRequest("/hosts/demo/auth/status", {
-      method: "POST",
+      method: "PUT",
     });
     const mcpAuthStart = await handleRequest("/hosts/demo/auth/example", {
       method: "PUT",
@@ -932,9 +1239,9 @@ describe("Cloudflare Worker ingress", () => {
     expect(secrets.status).toBe(405);
     expect(secrets.headers.get("Allow")).toBe("PUT");
     expect(mcpAuthStatus.status).toBe(405);
-    expect(mcpAuthStatus.headers.get("Allow")).toBe("GET");
+    expect(mcpAuthStatus.headers.get("Allow")).toBe("POST");
     expect(mcpAuthStart.status).toBe(405);
-    expect(mcpAuthStart.headers.get("Allow")).toBe("GET");
+    expect(mcpAuthStart.headers.get("Allow")).toBe("GET, POST");
     expect(mcpAuthSetup.status).toBe(405);
     expect(mcpAuthSetup.headers.get("Allow")).toBe("GET");
     expect(oauthCallback.status).toBe(405);
@@ -973,7 +1280,10 @@ const authHeaders = (): HeadersInit => ({
 });
 
 const validBody = (): string =>
-  JSON.stringify({ operation: "search_providers" });
+  JSON.stringify({
+    operation: "code_mode",
+    input: { operation: "search_providers" },
+  });
 
 const configBody = (
   server: {
@@ -982,12 +1292,25 @@ const configBody = (
   } = {},
 ): string =>
   JSON.stringify({
-    mcpServers: {
-      example: {
-        url: server.url ?? "https://mcp.example",
-        ...(server.headers === undefined ? {} : { headers: server.headers }),
+    operation: "configure",
+    input: {
+      config: {
+        mcpServers: {
+          example: {
+            url: server.url ?? "https://mcp.example",
+            ...(server.headers === undefined
+              ? {}
+              : { headers: server.headers }),
+          },
+        },
       },
     },
+  });
+
+const emptyConfigBody = (): string =>
+  JSON.stringify({
+    operation: "configure",
+    input: { config: { mcpServers: {} } },
   });
 
 const configureHost = async (hostId: string, body: string): Promise<void> => {
@@ -1001,7 +1324,10 @@ const configureHost = async (hostId: string, body: string): Promise<void> => {
 };
 
 const secretsBody = (secrets: Record<string, string>): string =>
-  JSON.stringify(secrets);
+  JSON.stringify({ operation: "configure_secrets", input: { secrets } });
+
+const mcpAuthStatusBody = (origin = "https://ptools.example"): string =>
+  JSON.stringify({ operation: "mcp_auth_status", input: { origin } });
 
 const configureSecrets = async (
   hostId: string,

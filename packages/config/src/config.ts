@@ -1,232 +1,30 @@
-import { Array as Arr, Context, Data, Effect, Option, Schema } from "effect";
-
-export class ServerConfigError extends Data.TaggedError("ServerConfigError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-const StringRecord = Schema.Record({
-  key: Schema.String,
-  value: Schema.String,
-});
-
-const ExecutorConfig = Schema.Struct({
-  defaultTimeoutMs: Schema.optionalWith(Schema.Number, {
-    exact: true,
-    as: "Option",
-  }),
-});
-
-const UnresolvedHttpMcpAuthConfig = Schema.Struct({
-  type: Schema.tag("oauth"),
-  scope: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  resourceMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientId: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  clientSecret: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  /**
-   * Override the OAuth redirect URI sent to the upstream IdP.
-   *
-   * By default, ptools uses its own origin to construct the callback URL
-   * (discovered from the host runtime). Set this field when the upstream
-   * IdP requires a specific redirect URI that differs from ptools' default,
-   * for example:
-   *
-   * - **Custom domain / proxy**: ptools is deployed behind a custom domain
-   *   (e.g. `https://mcp.my-company.com`) that routes to the same Worker.
-   *   The IdP must redirect to the custom domain, not the `.workers.dev`
-   *   origin.
-   *
-   * - **Pre-registered OAuth client**: the upstream MCP server does not
-   *   support Dynamic Client Registration, and the pre-registered client
-   *   has a fixed redirect URI that doesn't match ptools' default callback.
-   *   Common with Google-backed MCP servers and enterprise IdPs.
-   *
-   * The URL set here MUST route back to the ptools runtime (directly or
-   * through a proxy), otherwise the authorization code cannot be received.
-   */
-  redirectUri: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-});
-type UnresolvedHttpMcpAuthConfig = typeof UnresolvedHttpMcpAuthConfig.Type;
-
-export const ServerMcpConfig = Schema.Union(
-  Schema.Struct({
-    transport: Schema.Literal("stdio"),
-    command: Schema.String,
-    args: Schema.optionalWith(Schema.Array(Schema.String), {
-      exact: true,
-      as: "Option",
-    }),
-    cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-    env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  }),
-  Schema.Struct({
-    transport: Schema.Literal("http"),
-    url: Schema.String,
-    headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-    auth: Schema.optionalWith(UnresolvedHttpMcpAuthConfig, {
-      exact: true,
-      as: "Option",
-    }),
-  }),
-);
-export type ServerMcpConfig = typeof ServerMcpConfig.Type;
-
-const UserServerMcpConfig = Schema.Struct({
-  command: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  args: Schema.optionalWith(Schema.Array(Schema.String), {
-    exact: true,
-    as: "Option",
-  }),
-  cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  url: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  auth: Schema.optionalWith(UnresolvedHttpMcpAuthConfig, {
-    exact: true,
-    as: "Option",
-  }),
-  enabled: Schema.optionalWith(Schema.Boolean, { exact: true, as: "Option" }),
-  disabled: Schema.optionalWith(Schema.Boolean, { exact: true, as: "Option" }),
-});
-type UserServerMcpConfig = typeof UserServerMcpConfig.Type;
-
 /**
- * Schema for the JSON representation authored by users.
+ * Config parsing, normalization, secret resolution, and hashing helpers.
  *
- * This intentionally differs from `PtoolsConfig`: users select a transport by
- * providing `command` or `url` and may disable a server. Parsing normalizes
- * that representation into `PtoolsConfig`, whose servers have an explicit
- * `transport` discriminator and contain only enabled servers. Optional JSON
- * properties decode directly into `Option` values for functional processing.
+ * This module owns runtime behavior for turning user-authored config into the
+ * resolved domain config consumed by hosts. Reusable DTO schemas live in
+ * `src/contracts/`; Effect service tags live in `src/services/`.
  */
-const UserPtoolsConfig = Schema.Struct({
-  mcpServers: Schema.Record({
-    key: Schema.String,
-    value: UserServerMcpConfig,
-  }),
-  executor: Schema.optionalWith(ExecutorConfig, { exact: true, as: "Option" }),
-});
-type UserPtoolsConfig = typeof UserPtoolsConfig.Type;
+import { Array as Arr, Effect, Option, Schema } from "effect";
+import {
+  PtoolsConfig,
+  ResolvedExecutorConfig,
+  ResolvedHttpMcpAuthConfig,
+  ResolvedHttpMcpConfig,
+  ResolvedPtoolsConfig,
+  ResolvedStdioMcpConfig,
+  ServerMcpConfig,
+  UserPtoolsConfig,
+  type ResolvedMcpConfig,
+  type UserServerMcpConfig,
+} from "./contracts/index.js";
+import type { UnresolvedHttpMcpAuthConfig } from "./contracts/configSchemaFields.js";
+import { ServerConfigError } from "./configErrors.js";
+import { SecretResolver } from "./services/index.js";
 
-/**
- * Validated, normalized config used internally before secrets are resolved.
- *
- * Unlike `UserPtoolsConfig`, this domain value contains explicit transport
- * discriminators and does not contain disabled servers. Its optional domain
- * values remain `Option`s until resolution crosses into external contracts.
- */
-export class PtoolsConfig extends Schema.Class<PtoolsConfig>("PtoolsConfig")({
-  mcpServers: Schema.Record({
-    key: Schema.String,
-    value: ServerMcpConfig,
-  }),
-  executor: Schema.optionalWith(ExecutorConfig, { exact: true, as: "Option" }),
-}) {
-  declare private readonly _ptoolsConfigBrand: void;
-}
-
-export class ResolvedExecutorConfig extends Schema.Class<ResolvedExecutorConfig>(
-  "ResolvedExecutorConfig",
-)({
-  defaultTimeoutMs: Schema.optionalWith(Schema.Number, {
-    exact: true,
-    as: "Option",
-  }),
-}) {
-  declare private readonly _resolvedExecutorConfigBrand: void;
-}
-
-export class ResolvedHttpMcpAuthConfig extends Schema.Class<ResolvedHttpMcpAuthConfig>(
-  "ResolvedHttpMcpAuthConfig",
-)({
-  type: Schema.Literal("oauth"),
-  scope: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  resourceMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientId: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  clientSecret: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  redirectUri: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-}) {
-  declare private readonly _resolvedHttpMcpAuthConfigBrand: void;
-}
-
-export class ResolvedStdioMcpConfig extends Schema.Class<ResolvedStdioMcpConfig>(
-  "ResolvedStdioMcpConfig",
-)({
-  transport: Schema.Literal("stdio").pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => "stdio"),
-  ),
-  command: Schema.String,
-  args: Schema.optionalWith(Schema.Array(Schema.String), {
-    exact: true,
-    as: "Option",
-  }),
-  env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-}) {
-  declare private readonly _resolvedStdioMcpConfigBrand: void;
-}
-
-export class ResolvedHttpMcpConfig extends Schema.Class<ResolvedHttpMcpConfig>(
-  "ResolvedHttpMcpConfig",
-)({
-  transport: Schema.Literal("http").pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => "http"),
-  ),
-  url: Schema.String,
-  headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  auth: Schema.optionalWith(ResolvedHttpMcpAuthConfig, {
-    exact: true,
-    as: "Option",
-  }),
-}) {
-  declare private readonly _resolvedHttpMcpConfigBrand: void;
-}
-
-export type ResolvedMcpConfig = ResolvedStdioMcpConfig | ResolvedHttpMcpConfig;
-export type ResolvedMcpServers = Readonly<Record<string, ResolvedMcpConfig>>;
-
-export class ResolvedPtoolsConfig extends Schema.Class<ResolvedPtoolsConfig>(
-  "ResolvedPtoolsConfig",
-)({
-  mcpServers: Schema.Record({
-    key: Schema.String,
-    value: Schema.Union(ResolvedStdioMcpConfig, ResolvedHttpMcpConfig),
-  }),
-  executor: Schema.optionalWith(ResolvedExecutorConfig, {
-    exact: true,
-    as: "Option",
-  }),
-}) {
-  declare private readonly _resolvedPtoolsConfigBrand: void;
-}
+export * from "./contracts/index.js";
+export { ServerConfigError } from "./configErrors.js";
+export { ConfigSource, SecretResolver } from "./services/index.js";
 
 export interface LoadPtoolsConfigOptions {
   readonly baseDir?: string;
@@ -235,20 +33,6 @@ export interface LoadPtoolsConfigOptions {
 
 type ConfigEnv = Readonly<Record<string, string | undefined>>;
 type SecretLookup = (name: string) => Effect.Effect<string, ServerConfigError>;
-
-export class ConfigSource extends Context.Tag("@ptools/ConfigSource")<
-  ConfigSource,
-  {
-    readonly load: Effect.Effect<ResolvedPtoolsConfig, ServerConfigError>;
-  }
->() {}
-
-export class SecretResolver extends Context.Tag("@ptools/SecretResolver")<
-  SecretResolver,
-  {
-    readonly get: (name: string) => Effect.Effect<string, ServerConfigError>;
-  }
->() {}
 
 export const DEFAULT_CONFIG_PATHS = [
   ".ptools/config.json",
@@ -327,12 +111,7 @@ const resolvePtoolsConfigWithLookup = (
       Object.entries(config.mcpServers),
       ([serverName, serverConfig]) =>
         (serverConfig.transport === "stdio"
-          ? resolveStdioConfig(
-              serverName,
-              serverConfig,
-              lookupSecret,
-              options,
-            )
+          ? resolveStdioConfig(serverName, serverConfig, lookupSecret, options)
           : resolveHttpConfig(serverName, serverConfig, lookupSecret)
         ).pipe(Effect.map((resolved) => [serverName, resolved] as const)),
     );

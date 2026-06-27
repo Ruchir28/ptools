@@ -6,6 +6,7 @@
     { "path": "../code-mode-api" },
     { "path": "../config" },
     { "path": "../executor" },
+    { "path": "../host-api" },
     { "path": "../mcp-registry" }
   ],
   "compilerOptions": {

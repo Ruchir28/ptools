@@ -1,3 +1,4 @@
+import type { McpAuthStatus } from "@ptools/auth/contracts";
 import { CodeExecutor, ExecuteRequest } from "@ptools/executor";
 import { McpRegistry, type DiscoveredMcpTool } from "@ptools/mcp-registry";
 import { Context, Effect, Layer, Option } from "effect";
@@ -16,7 +17,6 @@ import {
 } from "./errors.js";
 import type {
   CodeModeDiagnostic,
-  CodeModeAuthStatusResult,
   CodeModeExecuteRequest,
   CodeModeRunResult,
   CodeModeSearchProvidersRequest,
@@ -46,7 +46,7 @@ export class CodeMode extends Context.Tag("@ptools/CodeMode")<
       ReadonlyArray<CodeModeDiagnostic>,
       CodeModeError
     >;
-    readonly authStatus: Effect.Effect<CodeModeAuthStatusResult>;
+    readonly authStatus: Effect.Effect<McpAuthStatus>;
     readonly refresh: Effect.Effect<void, CodeModeError>;
     readonly searchProviders: (
       request?: CodeModeSearchProvidersRequest,

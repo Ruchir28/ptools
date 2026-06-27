@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -6,6 +6,31 @@ import { describe, expect, it } from "vitest";
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 describe("code-mode-api import boundary", () => {
+  it("keeps public surfaces in semantic folders instead of generic root files", async () => {
+    await expect(fileExists(join(packageRoot, "src/contracts"))).resolves.toBe(
+      true,
+    );
+    await expect(fileExists(join(packageRoot, "src/services"))).resolves.toBe(
+      true,
+    );
+    await expect(fileExists(join(packageRoot, "src/validation"))).resolves.toBe(
+      true,
+    );
+
+    for (const genericFileName of [
+      "errors.ts",
+      "schema.ts",
+      "effect.ts",
+      "services.ts",
+      "types.ts",
+      "validation.ts",
+    ]) {
+      await expect(
+        fileExists(join(packageRoot, "src", genericFileName)),
+      ).resolves.toBe(false);
+    }
+  });
+
   it("does not import Code Mode, host, adapter, or platform internals", async () => {
     const sources = await Promise.all(
       (await sourceFiles(join(packageRoot, "src"))).map((path) =>
@@ -14,18 +39,28 @@ describe("code-mode-api import boundary", () => {
     );
     const combined = sources.join("\n");
 
-    expect(combined).not.toContain("@ptools/code-mode");
-    expect(combined).not.toContain("@ptools/host-node");
-    expect(combined).not.toContain("@ptools/mcp-server");
-    expect(combined).not.toContain("@ptools/agent-tools");
-    expect(combined).not.toContain("@ptools/executor");
-    expect(combined).not.toContain("@ptools/mcp-registry");
-    expect(combined).not.toContain("@ptools/auth");
+    expect(combined).not.toMatch(packageImport("@ptools/code-mode"));
+    expect(combined).not.toMatch(packageImport("@ptools/host-node"));
+    expect(combined).not.toMatch(packageImport("@ptools/mcp-server"));
+    expect(combined).not.toMatch(packageImport("@ptools/agent-tools"));
+    expect(combined).not.toMatch(packageImport("@ptools/executor"));
+    expect(combined).not.toMatch(packageImport("@ptools/mcp-registry"));
+    expect(combined).not.toContain('from "@ptools/auth"');
+    expect(combined).not.toContain("from '@ptools/auth'");
     expect(combined).not.toContain("@modelcontextprotocol");
     expect(combined).not.toContain("node:");
     expect(combined).not.toContain("@cloudflare");
   });
 });
+
+const fileExists = async (path: string): Promise<boolean> =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
+
+const packageImport = (packageName: string): RegExp =>
+  new RegExp(`from [\"']${packageName}(?:/[^\"']*)?[\"']`);
 
 const sourceFiles = async (
   directory: string,
