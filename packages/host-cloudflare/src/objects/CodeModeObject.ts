@@ -131,16 +131,16 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    * Per request this only looks up services already registered in that runtime's
    * Effect `Context`; it does not construct a new CodeModeServer, reload config,
    * or rebuild MCP/executor layers. Those are created once when
-   * `#createHostRuntime` materializes `CloudflareCodeModeServerLayer` and cached
-   * until the origin changes or `configure` / `configureSecrets` disposes the
-   * runtime.
+   * `#createHostRuntime` materializes the shared CodeModeServerLayer and caches
+   * it until the origin changes or `configure` / `configureSecrets` disposes
+   * the runtime.
    */
   call(input: CodeModeObjectCallInput): Promise<CodeModeResponse> {
     return this.runInHostRuntime(
       input.origin,
       Effect.gen(function* () {
-        // Context lookup for the service built by CloudflareCodeModeServerLayer
-        // during ManagedRuntime startup, not a per-request server initialization.
+        // Context lookup for the service built by CodeModeServerLayer during
+        // ManagedRuntime startup, not a per-request server initialization.
         const server = yield* CodeModeServer;
 
         return yield* server.handle(input.request);

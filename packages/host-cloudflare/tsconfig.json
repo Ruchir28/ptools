@@ -3,6 +3,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     { "path": "../auth" },
+    { "path": "../code-mode" },
     { "path": "../code-mode-api" },
     { "path": "../config" },
     { "path": "../executor" },

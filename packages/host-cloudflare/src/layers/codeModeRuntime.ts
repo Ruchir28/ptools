@@ -10,6 +10,7 @@
 import { AuthCoordinator, AuthError, CredentialError } from "@ptools/auth";
 import {
   CodeMode,
+  CodeModeServerLayer,
   makeCodeModeLive,
   type CodeModeError,
 } from "@ptools/code-mode";
@@ -23,7 +24,6 @@ import {
 import { Data, Effect, Layer, Option } from "effect";
 import { CloudflareOAuthFlow, DurableObjectAuthLayer } from "./auth/index.js";
 import { DurableObjectCredentialsStoreLayer } from "./auth/credentials.js";
-import { CloudflareCodeModeServerLayer } from "./codeModeServer.js";
 import {
   DurableObjectConfigSourceLayer,
   DurableObjectSecretResolverLayer,
@@ -112,7 +112,7 @@ export const CloudflareCodeModeRuntimeLayer: Layer.Layer<
     Layer.provide(configSourceLayer),
     Layer.provide(authLayer),
   );
-  const serverLayer = CloudflareCodeModeServerLayer.pipe(
+  const serverLayer = CodeModeServerLayer.pipe(
     Layer.provide(codeModeLayer),
   );
 

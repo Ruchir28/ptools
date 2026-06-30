@@ -1,4 +1,5 @@
 export * from "./CodeMode.js";
+export * from "./codeModeServer.js";
 export * from "./context.js";
 export * from "./declarations.js";
 export * from "./errors.js";

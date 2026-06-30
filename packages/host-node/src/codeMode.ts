@@ -2,16 +2,15 @@ import { resolve } from "node:path";
 import { AuthError, CredentialError } from "@ptools/auth";
 import {
   CodeMode,
+  CodeModeServerLayer,
   makeCodeModeLive,
   type CodeModeError,
 } from "@ptools/code-mode";
 import {
   CodeModeRemoteError,
-  CodeModeServerFailure,
   type CodeModeClientError,
   type CodeModeClientHandle,
   type CodeModeRequest,
-  type CodeModeResponse,
   type CodeModeServerError,
 } from "@ptools/code-mode-api";
 import { CodeModeClient, CodeModeServer } from "@ptools/code-mode-api/effect";
@@ -116,7 +115,7 @@ export type { CodeModeClientHandle };
 export const NodeCodeModeServerLive = (
   options: CreateNodeCodeModeOptions,
 ): Layer.Layer<CodeModeServer, HostNodeError, never> =>
-  makeCodeModeServerLive.pipe(
+  CodeModeServerLayer.pipe(
     Layer.provide(
       NodeCodeModeLiveFromResolvedConfig({
         hostId: options.hostId ?? DEFAULT_HOST_ID,
@@ -183,7 +182,7 @@ export const NodeCodeModeServerFromConfigFileLive = (
   path?: string,
   options: CreateNodeCodeModeFromConfigFileOptions = {},
 ): Layer.Layer<CodeModeServer, HostNodeError | ServerConfigError, never> =>
-  makeCodeModeServerLive.pipe(
+  CodeModeServerLayer.pipe(
     Layer.provide(
       NodeCodeModeLiveFromConfigSource({
         hostId: options.hostId ?? DEFAULT_HOST_ID,
@@ -350,19 +349,6 @@ const NodeCodeModeLiveFromConfigSource = (options: {
     }),
   );
 
-const makeCodeModeServerLive: Layer.Layer<CodeModeServer, never, CodeMode> =
-  Layer.effect(
-    CodeModeServer,
-    Effect.gen(function* () {
-      const codeMode = yield* CodeMode;
-
-      return {
-        handle: (request: CodeModeRequest) =>
-          handleCodeModeRequest(codeMode, request),
-      };
-    }),
-  );
-
 const makeNodeHostServerLive: Layer.Layer<HostServer, never, CodeModeServer> =
   Layer.effect(
     HostServer,
@@ -409,53 +395,6 @@ const handleNodeHostRequest = (
           code: "unknown_operation",
           message: `Node host does not implement ${request.operation}.`,
         }),
-      );
-  }
-};
-
-const handleCodeModeRequest = (
-  codeMode: Context.Tag.Service<typeof CodeMode>,
-  request: CodeModeRequest,
-): Effect.Effect<CodeModeResponse, CodeModeServerError> => {
-  switch (request.operation) {
-    case "auth_status":
-      return codeMode.authStatus.pipe(
-        Effect.map((output) => ({ operation: "auth_status" as const, output })),
-        Effect.mapError(toCodeModeServerFailure),
-      );
-    case "refresh":
-      return codeMode.refresh.pipe(
-        Effect.as({
-          operation: "refresh" as const,
-          output: { refreshed: true as const },
-        }),
-        Effect.mapError(toCodeModeServerFailure),
-      );
-    case "search_providers":
-      return codeMode.searchProviders(request.input).pipe(
-        Effect.map((output) => ({
-          operation: "search_providers" as const,
-          output,
-        })),
-        Effect.mapError(toCodeModeServerFailure),
-      );
-    case "search":
-      return codeMode.search(request.input).pipe(
-        Effect.map((output) => ({ operation: "search" as const, output })),
-        Effect.mapError(toCodeModeServerFailure),
-      );
-    case "get_tool_schema":
-      return codeMode.toolSchema(request.input).pipe(
-        Effect.map((output) => ({
-          operation: "get_tool_schema" as const,
-          output,
-        })),
-        Effect.mapError(toCodeModeServerFailure),
-      );
-    case "execute":
-      return codeMode.execute(request.input).pipe(
-        Effect.map((output) => ({ operation: "execute" as const, output })),
-        Effect.mapError(toCodeModeServerFailure),
       );
   }
 };
@@ -557,12 +496,6 @@ const makeNodeHostClientHandle = async <E>(
     throw cause;
   }
 };
-
-const toCodeModeServerFailure = (cause: CodeModeError): CodeModeServerFailure =>
-  new CodeModeServerFailure({
-    message: "Code Mode request failed.",
-    cause,
-  });
 
 const toCodeModeClientError = (
   cause: CodeModeServerError,
