@@ -25,6 +25,10 @@
     "dist/services/*.js.map",
     "dist/services/*.d.ts",
     "dist/services/*.d.ts.map",
+    "dist/http/**/*.js",
+    "dist/http/**/*.js.map",
+    "dist/http/**/*.d.ts",
+    "dist/http/**/*.d.ts.map",
     "README.md",
     "LICENSE"
   ],
@@ -43,6 +47,10 @@
     "./effect": {
       "types": "./dist/services/index.d.ts",
       "default": "./dist/services/index.js"
+    },
+    "./http": {
+      "types": "./dist/http/index.d.ts",
+      "default": "./dist/http/index.js"
     }
   },
   "scripts": {
@@ -51,9 +59,10 @@
     "test": "vitest run --dir test"
   },
   "dependencies": {
+    "@effect/platform": "0.96.1",
+    "@ptools/auth": "workspace:*",
     "@ptools/code-mode-api": "workspace:*",
     "@ptools/config": "workspace:*",
-    "@ptools/auth": "workspace:*",
     "effect": "3.21.2"
   }
 }

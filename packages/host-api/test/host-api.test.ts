@@ -1,18 +1,28 @@
-import { access } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CodeModeSearchRequest } from "@ptools/code-mode-api";
+import { HttpClient, HttpClientResponse } from "@effect/platform";
+import {
+  CodeModeInvalidRequestError,
+  CodeModeRemoteError,
+  CodeModeSearchRequest,
+} from "@ptools/code-mode-api";
+import { CodeModeClient } from "@ptools/code-mode-api/effect";
 import {
   HostClient,
   HostClientLayer,
+  HostHttpClient,
+  HostHttpClientLive,
+  CodeModeClientFromHostHttpClientLive,
   HostTransport,
 } from "../src/services/index.js";
 import {
   parseHostApiRequest,
   parseHostApiResponse,
   type HostApiResponse,
+  type HostCodeModeResponse,
 } from "../src/index.js";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Redacted } from "effect";
 import { describe, expect, it } from "vitest";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -23,6 +33,9 @@ describe("host-api source layout", () => {
       true,
     );
     await expect(fileExists(join(packageRoot, "src/services"))).resolves.toBe(
+      true,
+    );
+    await expect(fileExists(join(packageRoot, "src/http"))).resolves.toBe(
       true,
     );
     await expect(fileExists(join(packageRoot, "src/effect"))).resolves.toBe(
@@ -39,6 +52,21 @@ describe("host-api source layout", () => {
       await expect(
         fileExists(join(packageRoot, "src", forbiddenRootFile)),
       ).resolves.toBe(false);
+    }
+  });
+
+  it("keeps shared contracts, services, and HTTP code free of platform imports", async () => {
+    const files = [
+      ...(await tsFiles(join(packageRoot, "src/contracts"))),
+      ...(await tsFiles(join(packageRoot, "src/services"))),
+      ...(await tsFiles(join(packageRoot, "src/http"))),
+    ];
+
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      expect(source).not.toMatch(
+        /from\s+["'][^"']*(cloudflare|hono|host-cloudflare|host-node|cloudflare:workers|@cloudflare)[^"']*["']/,
+      );
     }
   });
 });
@@ -157,8 +185,187 @@ describe("HostClientLayer", () => {
   });
 });
 
+describe("HostHttpClientLive", () => {
+  it("requires a platform HttpClient layer instead of owning fetch directly", () => {
+    const layer: Layer.Layer<
+      HostHttpClient,
+      never,
+      HttpClient.HttpClient
+    > = HostHttpClientLive({
+      baseUrl: "https://ptools.example",
+      hostId: "demo",
+      accessToken: Redacted.make("token"),
+    });
+
+    expect(layer).toBeDefined();
+  });
+
+  it("builds codeMode HTTP requests with bearer auth and decodes the host envelope", async () => {
+    const response: HostCodeModeResponse = {
+      operation: "code_mode",
+      result: {
+        ok: true,
+        response: {
+          operation: "search",
+          output: { actions: [], diagnostics: [] },
+        },
+      },
+    };
+    const http = HttpClient.make((request) =>
+      Effect.sync(() => {
+        expect(request.method).toBe("POST");
+        expect(request.url).toBe(
+          "https://ptools.example/hosts/demo%20host/code-mode",
+        );
+        expect(request.headers.authorization).toBe("Bearer secret-token");
+
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(JSON.stringify(response), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* HostHttpClient;
+        return yield* client.codeMode(searchRequest());
+      }).pipe(
+        Effect.provide(
+          HostHttpClientLive({
+            baseUrl: "https://ptools.example",
+            hostId: "demo host",
+            accessToken: Redacted.make("secret-token"),
+          }).pipe(
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
+          ),
+        ),
+      ),
+    );
+
+    expect(result).toEqual(response);
+  });
+});
+
+describe("CodeModeClientFromHostHttpClientLive", () => {
+  it("unwraps the code_mode host operation envelope for focused CodeModeClient callers", async () => {
+    const host = Layer.succeed(
+      HostHttpClient,
+      makeHostHttpClient({
+        operation: "code_mode",
+        result: {
+          ok: true,
+          response: {
+            operation: "search",
+            output: { actions: [], diagnostics: [] },
+          },
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* CodeModeClient;
+        return yield* client.call(searchRequest());
+      }).pipe(
+        Effect.provide(
+          CodeModeClientFromHostHttpClientLive.pipe(Layer.provide(host)),
+        ),
+      ),
+    );
+
+    expect(result.operation).toBe("search");
+  });
+
+  it("maps invalid_code_mode_request into CodeModeInvalidRequestError", async () => {
+    const result = await runCodeModeClientWithHostResponse({
+      operation: "code_mode",
+      result: {
+        ok: false,
+        error: {
+          code: "invalid_code_mode_request",
+          message: "Invalid Code Mode request.",
+        },
+      },
+    });
+
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left).toBeInstanceOf(CodeModeInvalidRequestError);
+    }
+  });
+
+  it("maps code_mode_server_failure into CodeModeRemoteError", async () => {
+    const result = await runCodeModeClientWithHostResponse({
+      operation: "code_mode",
+      result: {
+        ok: false,
+        error: {
+          code: "code_mode_server_failure",
+          message: "Code Mode server failed.",
+        },
+      },
+    });
+
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left).toBeInstanceOf(CodeModeRemoteError);
+    }
+  });
+});
+
+const runCodeModeClientWithHostResponse = (response: HostCodeModeResponse) => {
+  const host = Layer.succeed(HostHttpClient, makeHostHttpClient(response));
+
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const client = yield* CodeModeClient;
+      return yield* client.call(searchRequest()).pipe(Effect.either);
+    }).pipe(
+      Effect.provide(
+        CodeModeClientFromHostHttpClientLive.pipe(Layer.provide(host)),
+      ),
+    ),
+  );
+};
+
+const searchRequest = () => ({
+  operation: "search" as const,
+  input: CodeModeSearchRequest.make({
+    query: "github",
+    provider: Option.none(),
+    limit: Option.none(),
+  }),
+});
+
+const makeHostHttpClient = (response: HostCodeModeResponse) => ({
+  codeMode: () => Effect.succeed(response),
+  configure: () => Effect.die("unused"),
+  configureSecrets: () => Effect.die("unused"),
+  mcpAuthStatus: () => Effect.die("unused"),
+  startMcpAuth: () => Effect.die("unused"),
+});
+
 const fileExists = async (path: string): Promise<boolean> =>
   access(path).then(
     () => true,
     () => false,
   );
+
+const tsFiles = async (dir: string): Promise<ReadonlyArray<string>> => {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return tsFiles(path);
+      }
+      return Promise.resolve(entry.name.endsWith(".ts") ? [path] : []);
+    }),
+  );
+
+  return nested.flat();
+};

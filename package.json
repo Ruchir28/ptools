@@ -29,7 +29,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "msgpackr-extract"
     ]
   },
   "engines": {
