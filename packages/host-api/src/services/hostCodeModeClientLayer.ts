@@ -14,8 +14,8 @@ import {
 } from "@ptools/code-mode-api";
 import { CodeModeClient } from "@ptools/code-mode-api/effect";
 import { Context, Effect, Layer } from "effect";
-import { isHostApiProtocolFailureResponse } from "../hostApiResponseHelpers.js";
-import type { HostApiResponse } from "../contracts/hostApiEnvelope.js";
+import { isHostOperationProtocolFailureResponse } from "../hostOperationResponseHelpers.js";
+import type { HostOperationResponse } from "../contracts/hostOperationEnvelope.js";
 import type { HostCodeModeResponse } from "../contracts/hostCodeMode.js";
 import { HostTransport, type HostTransportError } from "./hostTransport.js";
 
@@ -47,9 +47,9 @@ export const HostTransportCodeModeClientLayer: Layer.Layer<
 );
 
 const unwrapCodeModeResponse = (
-  response: HostApiResponse,
+  response: HostOperationResponse,
 ): Effect.Effect<CodeModeResponse, CodeModeClientError> => {
-  if (isHostApiProtocolFailureResponse(response)) {
+  if (isHostOperationProtocolFailureResponse(response)) {
     return Effect.fail(
       new CodeModeRemoteError({
         message: response.error.message,

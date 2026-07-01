@@ -13,19 +13,14 @@ import type {
   ConfigureHostSecretsInput,
   ConfigureHostSecretsResponse,
   CompleteHostMcpOAuthCallbackResponse,
-  HostApiProtocolFailureResponse,
-  HostApiRequest,
-  HostApiResponse,
+  HostOperationProtocolFailureResponse,
+  HostOperationRequest,
+  HostOperationResponse,
   HostCodeModeResponse,
   HostMcpAuthStatusResponse,
   StartHostMcpAuthResponse,
 } from "../contracts/index.js";
-import {
-  Context,
-  Effect,
-  Layer,
-  Option,
-} from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   HostOperationDispatchError,
   HostOperationDispatcher,
@@ -157,10 +152,15 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
   Effect.gen(function* () {
     const dispatcher = yield* HostOperationDispatcher;
 
-    const dispatchExpected = <Operation extends HostApiRequest["operation"]>(
+    const dispatchExpected = <
+      Operation extends HostOperationRequest["operation"],
+    >(
       operation: Operation,
       input: Omit<HostOperationDispatchInput, "request"> & {
-        readonly request: Extract<HostApiRequest, { readonly operation: Operation }>;
+        readonly request: Extract<
+          HostOperationRequest,
+          { readonly operation: Operation }
+        >;
       },
     ) =>
       dispatcher.dispatch(input).pipe(
@@ -264,11 +264,13 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
   }),
 );
 
-const unwrapExpectedResponse = <Operation extends HostApiRequest["operation"]>(
+const unwrapExpectedResponse = <
+  Operation extends HostOperationRequest["operation"],
+>(
   operation: Operation,
-  response: HostApiResponse,
+  response: HostOperationResponse,
 ): Effect.Effect<
-  Extract<HostApiResponse, { readonly operation: Operation }>,
+  Extract<HostOperationResponse, { readonly operation: Operation }>,
   HostHttpError
 > => {
   if ("_tag" in response) {
@@ -284,12 +286,15 @@ const unwrapExpectedResponse = <Operation extends HostApiRequest["operation"]>(
   }
 
   return Effect.succeed(
-    response as Extract<HostApiResponse, { readonly operation: Operation }>,
+    response as Extract<
+      HostOperationResponse,
+      { readonly operation: Operation }
+    >,
   );
 };
 
 const protocolFailureToHostHttpError = (
-  response: HostApiProtocolFailureResponse,
+  response: HostOperationProtocolFailureResponse,
 ): HostHttpError => {
   switch (response.error.code) {
     case "invalid_host_api_request":

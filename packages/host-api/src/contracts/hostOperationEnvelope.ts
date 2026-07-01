@@ -25,7 +25,7 @@ import {
 import { HostCodeModeRequest, HostCodeModeResponse } from "./hostCodeMode.js";
 
 /** Any host-api operation request a transport can carry. */
-export const HostApiRequest = Schema.Union(
+export const HostOperationRequest = Schema.Union(
   HostCodeModeRequest,
   ConfigureHostRequest,
   ConfigureHostSecretsRequest,
@@ -33,10 +33,12 @@ export const HostApiRequest = Schema.Union(
   StartHostMcpAuthRequest,
   CompleteHostMcpOAuthCallbackRequest,
 );
-export type HostApiRequest = Schema.Schema.Type<typeof HostApiRequest>;
+export type HostOperationRequest = Schema.Schema.Type<
+  typeof HostOperationRequest
+>;
 
 /** Any response for a successfully dispatched host-api operation. */
-export const HostApiOperationResponse = Schema.Union(
+export const HostOperationResultResponse = Schema.Union(
   HostCodeModeResponse,
   ConfigureHostResponse,
   ConfigureHostSecretsResponse,
@@ -44,16 +46,16 @@ export const HostApiOperationResponse = Schema.Union(
   StartHostMcpAuthResponse,
   CompleteHostMcpOAuthCallbackResponse,
 );
-export type HostApiOperationResponse = Schema.Schema.Type<
-  typeof HostApiOperationResponse
+export type HostOperationResultResponse = Schema.Schema.Type<
+  typeof HostOperationResultResponse
 >;
 
 /**
  * Failure before a specific host operation can own the result, such as invalid
  * envelope, unauthorized caller, unknown operation, or host unavailability.
  */
-export const HostApiProtocolFailureResponse = Schema.TaggedStruct(
-  "HostApiProtocolFailureResponse",
+export const HostOperationProtocolFailureResponse = Schema.TaggedStruct(
+  "HostOperationProtocolFailureResponse",
   {
     error: Schema.Struct({
       code: Schema.Literal(
@@ -66,13 +68,15 @@ export const HostApiProtocolFailureResponse = Schema.TaggedStruct(
     }),
   },
 );
-export type HostApiProtocolFailureResponse = Schema.Schema.Type<
-  typeof HostApiProtocolFailureResponse
+export type HostOperationProtocolFailureResponse = Schema.Schema.Type<
+  typeof HostOperationProtocolFailureResponse
 >;
 
 /** Top-level host-api response: operation response or protocol failure. */
-export const HostApiResponse = Schema.Union(
-  HostApiOperationResponse,
-  HostApiProtocolFailureResponse,
+export const HostOperationResponse = Schema.Union(
+  HostOperationResultResponse,
+  HostOperationProtocolFailureResponse,
 );
-export type HostApiResponse = Schema.Schema.Type<typeof HostApiResponse>;
+export type HostOperationResponse = Schema.Schema.Type<
+  typeof HostOperationResponse
+>;

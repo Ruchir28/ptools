@@ -5,20 +5,20 @@
  * own HTTP, stdio, RPC, or other carrier parsing and serialization.
  */
 import { Schema } from "effect";
-import { HostApiProtocolFailureResponse } from "./contracts/hostApiEnvelope.js";
+import { HostOperationProtocolFailureResponse } from "./contracts/hostOperationEnvelope.js";
 
 /** Create a top-level protocol failure for requests that cannot be dispatched. */
-export const makeHostApiProtocolFailureResponse = (input: {
-  readonly code: HostApiProtocolFailureResponse["error"]["code"];
+export const makeHostOperationProtocolFailureResponse = (input: {
+  readonly code: HostOperationProtocolFailureResponse["error"]["code"];
   readonly message: string;
-}): HostApiProtocolFailureResponse => ({
-  _tag: "HostApiProtocolFailureResponse",
+}): HostOperationProtocolFailureResponse => ({
+  _tag: "HostOperationProtocolFailureResponse",
   error: { code: input.code, message: input.message },
 });
 
 /** True when a host-api response failed before operation dispatch. */
-export const isHostApiProtocolFailureResponse: (
+export const isHostOperationProtocolFailureResponse: (
   value: unknown,
-) => value is HostApiProtocolFailureResponse = Schema.is(
-  HostApiProtocolFailureResponse,
+) => value is HostOperationProtocolFailureResponse = Schema.is(
+  HostOperationProtocolFailureResponse,
 );

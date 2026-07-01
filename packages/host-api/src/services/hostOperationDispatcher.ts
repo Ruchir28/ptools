@@ -7,9 +7,9 @@
  * operation execution; it does not parse HTTP requests or headers.
  */
 import type {
-  HostApiRequest,
-  HostApiResponse,
-} from "../contracts/hostApiEnvelope.js";
+  HostOperationRequest,
+  HostOperationResponse,
+} from "../contracts/hostOperationEnvelope.js";
 import { Context, Data, Effect, Option } from "effect";
 
 /** Normalized identity for callers accepted by Host API access middleware. */
@@ -26,7 +26,7 @@ export interface HostOperationDispatchInput {
   /** Verified API caller for credentialed routes; browser/OAuth routes omit it. */
   readonly caller: Option.Option<HostApiCaller>;
   /** Decoded host operation request. */
-  readonly request: HostApiRequest;
+  readonly request: HostOperationRequest;
 }
 
 /** Error raised when a platform cannot dispatch a decoded host operation. */
@@ -45,6 +45,6 @@ export class HostOperationDispatcher extends Context.Tag(
   {
     readonly dispatch: (
       input: HostOperationDispatchInput,
-    ) => Effect.Effect<HostApiResponse, HostOperationDispatchError>;
+    ) => Effect.Effect<HostOperationResponse, HostOperationDispatchError>;
   }
 >() {}

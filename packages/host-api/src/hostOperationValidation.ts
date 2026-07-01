@@ -7,54 +7,56 @@
  */
 import { Data, Effect, Schema } from "effect";
 import {
-  HostApiRequest,
-  HostApiResponse,
-} from "./contracts/hostApiEnvelope.js";
+  HostOperationRequest,
+  HostOperationResponse,
+} from "./contracts/hostOperationEnvelope.js";
 
 /** Invalid host-api request object at a transport or server boundary. */
-export class HostApiInvalidRequestError extends Data.TaggedError(
-  "HostApiInvalidRequestError",
+export class HostOperationInvalidRequestError extends Data.TaggedError(
+  "HostOperationInvalidRequestError",
 )<{ readonly message: string; readonly cause?: unknown }> {}
 
 /** Invalid host-api response object at a transport or client boundary. */
-export class HostApiInvalidResponseError extends Data.TaggedError(
-  "HostApiInvalidResponseError",
+export class HostOperationInvalidResponseError extends Data.TaggedError(
+  "HostOperationInvalidResponseError",
 )<{ readonly message: string; readonly cause?: unknown }> {}
 
 /** Failure while encoding a host-api value for a carrier. */
-export class HostApiEncodeError extends Data.TaggedError("HostApiEncodeError")<{
+export class HostOperationEncodeError extends Data.TaggedError(
+  "HostOperationEncodeError",
+)<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
-/** Decode an unknown JS value into a HostApiRequest. */
-export const parseHostApiRequest = (
+/** Decode an unknown JS value into a HostOperationRequest. */
+export const parseHostOperationRequest = (
   value: unknown,
-): Effect.Effect<HostApiRequest, HostApiInvalidRequestError> =>
-  Schema.decodeUnknown(HostApiRequest)(value, {
+): Effect.Effect<HostOperationRequest, HostOperationInvalidRequestError> =>
+  Schema.decodeUnknown(HostOperationRequest)(value, {
     errors: "all",
     onExcessProperty: "error",
   }).pipe(
     Effect.mapError(
       (cause) =>
-        new HostApiInvalidRequestError({
+        new HostOperationInvalidRequestError({
           message: "Invalid host-api request",
           cause,
         }),
     ),
   );
 
-/** Decode an unknown JS value into a HostApiResponse. */
-export const parseHostApiResponse = (
+/** Decode an unknown JS value into a HostOperationResponse. */
+export const parseHostOperationResponse = (
   value: unknown,
-): Effect.Effect<HostApiResponse, HostApiInvalidResponseError> =>
-  Schema.decodeUnknown(HostApiResponse)(value, {
+): Effect.Effect<HostOperationResponse, HostOperationInvalidResponseError> =>
+  Schema.decodeUnknown(HostOperationResponse)(value, {
     errors: "all",
     onExcessProperty: "error",
   }).pipe(
     Effect.mapError(
       (cause) =>
-        new HostApiInvalidResponseError({
+        new HostOperationInvalidResponseError({
           message: "Invalid host-api response",
           cause,
         }),

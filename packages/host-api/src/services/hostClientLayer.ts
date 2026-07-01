@@ -8,9 +8,9 @@
 import { CodeModeClient } from "@ptools/code-mode-api/effect";
 import { Context, Data, Effect, Layer } from "effect";
 import type {
-  HostApiRequest,
-  HostApiResponse,
-} from "../contracts/hostApiEnvelope.js";
+  HostOperationRequest,
+  HostOperationResponse,
+} from "../contracts/hostOperationEnvelope.js";
 import { HostTransport, type HostTransportError } from "./hostTransport.js";
 import {
   HostTransportCodeModeClientLayer,
@@ -29,8 +29,8 @@ export class HostClient extends Context.Tag("@ptools/HostClient")<
   {
     /** Low-level escape hatch for any host-api operation. */
     readonly call: (
-      request: HostApiRequest,
-    ) => Effect.Effect<HostApiResponse, HostClientError>;
+      request: HostOperationRequest,
+    ) => Effect.Effect<HostOperationResponse, HostClientError>;
 
     /** Focused Code Mode capability derived from the same HostTransport. */
     readonly codeMode: Context.Tag.Service<typeof CodeModeClient>;
@@ -50,7 +50,7 @@ export const HostClientLayer: Layer.Layer<
       const codeMode = makeCodeModeClientFromHostTransport(transport);
 
       return {
-        call: (request: HostApiRequest) =>
+        call: (request: HostOperationRequest) =>
           transport.call(request).pipe(Effect.mapError(toHostClientError)),
         codeMode,
       };

@@ -2,7 +2,7 @@
 
 Transport-agnostic host protocol contracts and client shapes.
 
-- `@ptools/host-api` exposes HostApi DTO schemas, validation helpers, codecs, protocol response helpers, and the Promise `HostClientHandle`.
+- `@ptools/host-api` exposes Host operation DTO schemas, validation helpers, codecs, protocol response helpers, and the Promise `HostClientHandle`.
 - `@ptools/host-api/contracts` exposes only the reusable host protocol DTO schemas.
 - `@ptools/host-api/effect` is the public Effect-native subpath for service tags and shared layers.
 

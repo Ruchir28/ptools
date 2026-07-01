@@ -7,7 +7,7 @@
  * Object RPC method and mapping platform failures into operation envelopes.
  */
 import { UserPtoolsConfig } from "@ptools/config/contracts";
-import type { HostApiRequest, HostApiResponse } from "@ptools/host-api";
+import type { HostOperationRequest, HostOperationResponse } from "@ptools/host-api";
 import { Effect, Schema } from "effect";
 import type { HostCloudflareError } from "../errors.js";
 import {
@@ -33,8 +33,8 @@ export interface CloudflareHostOperationDispatchOptions {
 /** Dispatches one decoded host operation to the selected CodeModeObject RPC surface. */
 export const handleCloudflareHostRequest = (
   options: CloudflareHostOperationDispatchOptions,
-  request: HostApiRequest,
-): Effect.Effect<HostApiResponse> => {
+  request: HostOperationRequest,
+): Effect.Effect<HostOperationResponse> => {
   switch (request.operation) {
     case "code_mode":
       return callCodeModeObject({
@@ -44,7 +44,7 @@ export const handleCloudflareHostRequest = (
         request: request.input,
       }).pipe(
         Effect.map(
-          (response): HostApiResponse => ({
+          (response): HostOperationResponse => ({
             operation: "code_mode",
             result: { ok: true, response },
           }),
@@ -78,7 +78,7 @@ export const handleCloudflareHostRequest = (
           }),
         ),
         Effect.map(
-          (result): HostApiResponse => ({
+          (result): HostOperationResponse => ({
             operation: "configure",
             result: {
               ok: true,
@@ -107,7 +107,7 @@ export const handleCloudflareHostRequest = (
         rawSecretsJson: JSON.stringify(request.input.secrets),
       }).pipe(
         Effect.map(
-          (result): HostApiResponse => ({
+          (result): HostOperationResponse => ({
             operation: "configure_secrets",
             result: {
               ok: true,
@@ -136,7 +136,7 @@ export const handleCloudflareHostRequest = (
         origin: request.input.origin,
       }).pipe(
         Effect.map(
-          (status): HostApiResponse => ({
+          (status): HostOperationResponse => ({
             operation: "mcp_auth_status",
             result: { ok: true, status },
           }),
@@ -158,7 +158,7 @@ export const handleCloudflareHostRequest = (
         force: request.input.force === true,
       }).pipe(
         Effect.map(
-          (result): HostApiResponse => ({
+          (result): HostOperationResponse => ({
             operation: "start_mcp_auth",
             result: { ok: true, authorizeUrl: result.authorizeUrl },
           }),
@@ -184,7 +184,7 @@ export const handleCloudflareHostRequest = (
           : { bodyText: request.input.bodyText }),
       }).pipe(
         Effect.map(
-          (response): HostApiResponse => ({
+          (response): HostOperationResponse => ({
             operation: "complete_mcp_oauth_callback",
             result: { ok: true, response },
           }),

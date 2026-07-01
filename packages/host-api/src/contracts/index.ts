@@ -7,7 +7,7 @@
  * validation helpers, Promise handles, or Effect service tags.
  */
 export * from "./configureHost.js";
-export * from "./hostApiEnvelope.js";
+export * from "./hostOperationEnvelope.js";
 export * from "./hostCodeMode.js";
 export * from "./hostMcpAuth.js";
 export * from "./hostSecrets.js";

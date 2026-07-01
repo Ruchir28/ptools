@@ -17,9 +17,9 @@ import {
   HostTransport,
 } from "../src/services/index.js";
 import {
-  parseHostApiRequest,
-  parseHostApiResponse,
-  type HostApiResponse,
+  parseHostOperationRequest,
+  parseHostOperationResponse,
+  type HostOperationResponse,
   type HostCodeModeResponse,
 } from "../src/index.js";
 import { Effect, Layer, Option, Redacted } from "effect";
@@ -48,11 +48,21 @@ describe("host-api source layout", () => {
       "hostAuthSchema.ts",
       "hostCodeModeSchema.ts",
       "hostSecretsSchema.ts",
+      "hostApiCodec.ts",
+      "hostApiResponseHelpers.ts",
+      "hostApiValidation.ts",
     ]) {
       await expect(
         fileExists(join(packageRoot, "src", forbiddenRootFile)),
       ).resolves.toBe(false);
     }
+
+    await expect(
+      fileExists(join(packageRoot, "src/contracts/hostApiEnvelope.ts")),
+    ).resolves.toBe(false);
+    await expect(
+      fileExists(join(packageRoot, "src/contracts/hostOperationEnvelope.ts")),
+    ).resolves.toBe(true);
   });
 
   it("keeps shared contracts, services, and HTTP code free of platform imports", async () => {
@@ -74,7 +84,7 @@ describe("host-api source layout", () => {
 describe("host-api schemas", () => {
   it("decodes code_mode requests and responses", async () => {
     const request = await Effect.runPromise(
-      parseHostApiRequest({
+      parseHostOperationRequest({
         operation: "code_mode",
         input: {
           operation: "search",
@@ -85,7 +95,7 @@ describe("host-api schemas", () => {
 
     expect(request.operation).toBe("code_mode");
 
-    const response: HostApiResponse = {
+    const response: HostOperationResponse = {
       operation: "code_mode",
       result: {
         ok: true,
@@ -97,13 +107,13 @@ describe("host-api schemas", () => {
     };
 
     await expect(
-      Effect.runPromise(parseHostApiResponse(response)),
+      Effect.runPromise(parseHostOperationResponse(response)),
     ).resolves.toEqual(response);
   });
 
   it("decodes structured configure input", async () => {
     const request = await Effect.runPromise(
-      parseHostApiRequest({
+      parseHostOperationRequest({
         operation: "configure",
         input: {
           config: {
@@ -120,7 +130,7 @@ describe("host-api schemas", () => {
 
   it("decodes OAuth callback completion request and browser response payload", async () => {
     const request = await Effect.runPromise(
-      parseHostApiRequest({
+      parseHostOperationRequest({
         operation: "complete_mcp_oauth_callback",
         input: {
           origin: "https://ptools.example",
@@ -133,7 +143,7 @@ describe("host-api schemas", () => {
 
     expect(request.operation).toBe("complete_mcp_oauth_callback");
 
-    const response: HostApiResponse = {
+    const response: HostOperationResponse = {
       operation: "complete_mcp_oauth_callback",
       result: {
         ok: true,
@@ -146,14 +156,14 @@ describe("host-api schemas", () => {
     };
 
     await expect(
-      Effect.runPromise(parseHostApiResponse(response)),
+      Effect.runPromise(parseHostOperationResponse(response)),
     ).resolves.toEqual(response);
   });
 });
 
 describe("HostClientLayer", () => {
   it("builds host.codeMode from HostTransport", async () => {
-    const response: HostApiResponse = {
+    const response: HostOperationResponse = {
       operation: "code_mode",
       result: {
         ok: true,

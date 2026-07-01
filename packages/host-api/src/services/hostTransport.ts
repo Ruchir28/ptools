@@ -6,9 +6,9 @@
  * owns none of those carrier details itself.
  */
 import type {
-  HostApiRequest,
-  HostApiResponse,
-} from "../contracts/hostApiEnvelope.js";
+  HostOperationRequest,
+  HostOperationResponse,
+} from "../contracts/hostOperationEnvelope.js";
 import { Context, Data, Effect } from "effect";
 
 /** Error raised when the carrier cannot move a host-api request/response. */
@@ -17,12 +17,12 @@ export class HostTransportError extends Data.TaggedError("HostTransportError")<{
   readonly cause?: unknown;
 }> {}
 
-/** Platform-provided pipe for one HostApiRequest to one HostApiResponse. */
+/** Platform-provided pipe for one HostOperationRequest to one HostOperationResponse. */
 export class HostTransport extends Context.Tag("@ptools/HostTransport")<
   HostTransport,
   {
     readonly call: (
-      request: HostApiRequest,
-    ) => Effect.Effect<HostApiResponse, HostTransportError>;
+      request: HostOperationRequest,
+    ) => Effect.Effect<HostOperationResponse, HostTransportError>;
   }
 >() {}

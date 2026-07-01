@@ -15,7 +15,7 @@ import {
 } from "@ptools/code-mode-api";
 import { CodeModeClient, CodeModeServer } from "@ptools/code-mode-api/effect";
 import {
-  makeHostApiProtocolFailureResponse,
+  makeHostOperationProtocolFailureResponse,
   type HostClientHandle,
 } from "@ptools/host-api";
 import {
@@ -26,7 +26,10 @@ import {
   HostTransportError,
   HostTransportCodeModeClientLayer,
 } from "@ptools/host-api/effect";
-import type { HostApiRequest, HostApiResponse } from "@ptools/host-api";
+import type {
+  HostOperationRequest,
+  HostOperationResponse,
+} from "@ptools/host-api";
 import {
   ConfigSource,
   ResolvedExecutorConfig,
@@ -216,7 +219,7 @@ export const NodeInProcessHostTransportLive: Layer.Layer<
     const server = yield* HostServer;
 
     return {
-      call: (request: HostApiRequest) =>
+      call: (request: HostOperationRequest) =>
         server.handle(request).pipe(
           Effect.mapError(
             (cause) =>
@@ -356,7 +359,7 @@ const makeNodeHostServerLive: Layer.Layer<HostServer, never, CodeModeServer> =
       const codeModeServer = yield* CodeModeServer;
 
       return {
-        handle: (request: HostApiRequest) =>
+        handle: (request: HostOperationRequest) =>
           handleNodeHostRequest(codeModeServer, request),
       };
     }),
@@ -364,8 +367,8 @@ const makeNodeHostServerLive: Layer.Layer<HostServer, never, CodeModeServer> =
 
 const handleNodeHostRequest = (
   codeModeServer: Context.Tag.Service<typeof CodeModeServer>,
-  request: HostApiRequest,
-): Effect.Effect<HostApiResponse, never> => {
+  request: HostOperationRequest,
+): Effect.Effect<HostOperationResponse, never> => {
   switch (request.operation) {
     case "code_mode":
       return codeModeServer.handle(request.input).pipe(
@@ -391,7 +394,7 @@ const handleNodeHostRequest = (
       );
     default:
       return Effect.succeed(
-        makeHostApiProtocolFailureResponse({
+        makeHostOperationProtocolFailureResponse({
           code: "unknown_operation",
           message: `Node host does not implement ${request.operation}.`,
         }),
@@ -470,7 +473,7 @@ const makeNodeHostClientHandle = async <E>(
     const close = () => managedRuntime.dispose();
 
     return {
-      call: (request: HostApiRequest) =>
+      call: (request: HostOperationRequest) =>
         managedRuntime.runPromise(
           Effect.gen(function* () {
             const client = yield* HostClient;

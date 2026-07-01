@@ -85,8 +85,8 @@ present.
 - Keep platform carrier parsing separate from host protocol handling. Platform
   adapters may extract method/path/query/body/header data from HTTP, stdio,
   Workers RPC, or browser callbacks, but reusable host-owned work should be
-  represented as a validated `HostApiRequest` and dispatched through
-  `HostServer`. Routes should stay thin carrier adapters; do not duplicate
+  represented as a validated `HostOperationRequest` and dispatched through
+  `HostOperationDispatcher`. Routes should stay thin carrier adapters; do not duplicate
   operation dispatch or result wrapping in route modules.
 - Reusable package contracts should live in semantically named files under an
   owning package's `src/contracts/` folder, with a standard `./contracts`
