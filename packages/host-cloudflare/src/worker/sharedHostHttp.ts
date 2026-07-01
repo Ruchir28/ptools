@@ -25,7 +25,7 @@ import {
 } from "@ptools/host-api/effect";
 import { Context, Effect, Layer, Redacted } from "effect";
 import type { PtoolsWorkerEnv } from "./ingress.js";
-import { handleCloudflareHostRequest } from "./hostServer.js";
+import { handleCloudflareHostRequest } from "./hostOperationRpcDispatcher.js";
 import { verifyBearerToken } from "./publicAuth.js";
 
 /** Request/platform context supplied by the Worker entrypoint per fetch call. */

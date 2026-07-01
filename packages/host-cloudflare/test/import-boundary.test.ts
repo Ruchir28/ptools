@@ -105,6 +105,15 @@ describe("host-cloudflare import boundaries", () => {
     expect(packageJson).not.toContain('"itty-router"');
   });
 
+  it("does not keep old generic Host API compatibility modules", async () => {
+    const workerFiles = (await sourceFiles(join(packageRoot, "src/worker"))).map(
+      (path) => path.slice(packageRoot.length + 1),
+    );
+
+    expect(workerFiles).not.toContain("src/worker/hostApiHttpAdapter.ts");
+    expect(workerFiles).not.toContain("src/worker/hostServer.ts");
+  });
+
   it("uses request-time Worker bindings through shared HttpApi context", async () => {
     const ingress = await readFile(
       join(packageRoot, "src/worker/ingress.ts"),

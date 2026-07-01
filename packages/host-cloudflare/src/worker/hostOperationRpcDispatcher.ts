@@ -1,15 +1,14 @@
 /**
- * Cloudflare Worker-side HostServer implementation.
+ * Cloudflare operation dispatcher for the shared Host HttpApi path.
  *
- * The Worker HostServer owns dispatching already-decoded host-api requests to
- * the per-host Durable Object RPC surface. HTTP routes own carrier concerns
- * such as auth, body parsing, and operation/path validation before calling this
- * service.
+ * Shared HTTP handlers decode routes, payloads, auth, and request origin before
+ * calling `HostOperationDispatcher`. This module owns the final Cloudflare step:
+ * forwarding each decoded host operation to the selected CodeModeObject Durable
+ * Object RPC method and mapping platform failures into operation envelopes.
  */
 import { UserPtoolsConfig } from "@ptools/config/contracts";
-import { HostServer } from "@ptools/host-api/effect";
 import type { HostApiRequest, HostApiResponse } from "@ptools/host-api";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import type { HostCloudflareError } from "../errors.js";
 import {
   callCodeModeObject,
@@ -21,8 +20,8 @@ import {
   type CodeModeObjectNamespace,
 } from "./codeModeObjectRpc.js";
 
-/** Request-scoped inputs needed to dispatch host-api operations on Cloudflare. */
-export interface CloudflareHostServerOptions {
+/** Inputs needed to dispatch a decoded host operation on Cloudflare. */
+export interface CloudflareHostOperationDispatchOptions {
   /** Durable Object namespace that owns per-host runtime state. */
   readonly namespace: CodeModeObjectNamespace;
   /** Host ID selected from the Worker route. */
@@ -31,31 +30,9 @@ export interface CloudflareHostServerOptions {
   readonly origin: string;
 }
 
-/**
- * Creates a request-scoped Cloudflare HostServer service value.
- *
- * This intentionally only closes over route/request context (`namespace`,
- * `hostId`, and `origin`). It does not acquire resources, build a runtime, load
- * config, or create the Code Mode server. The expensive configured runtime is
- * owned and cached by `CodeModeObject`; this Worker-side value is just a small
- * forwarding closure. If this service later starts acquiring resources or
- * building expensive state, revisit this per-request construction and introduce
- * an owning cache/runtime at the correct lifecycle boundary.
- */
-export const makeCloudflareHostServer = (
-  options: CloudflareHostServerOptions,
-): Context.Tag.Service<typeof HostServer> => ({
-  handle: (request) => handleCloudflareHostRequest(options, request),
-});
-
-/** Provides HostServer by adapting host-api operations to CodeModeObject RPC. */
-export const CloudflareHostServerLive = (
-  options: CloudflareHostServerOptions,
-): Layer.Layer<HostServer> =>
-  Layer.succeed(HostServer, makeCloudflareHostServer(options));
-
+/** Dispatches one decoded host operation to the selected CodeModeObject RPC surface. */
 export const handleCloudflareHostRequest = (
-  options: CloudflareHostServerOptions,
+  options: CloudflareHostOperationDispatchOptions,
   request: HostApiRequest,
 ): Effect.Effect<HostApiResponse> => {
   switch (request.operation) {
