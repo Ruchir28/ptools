@@ -12,6 +12,11 @@
  * Keeping implementations out of `@ptools/host-api` prevents shared API code
  * from importing Worker bindings, Node server config, or an accidental
  * `TrustedLocal` credential that external clients could spoof.
+ *
+ * Public-origin derivation is also platform-owned. The shared API declares
+ * `ProvideHostHttpIngress` so route handlers receive `HostHttpIngress` per
+ * request, but Cloudflare/Node decide whether that origin comes from the
+ * incoming request URL or explicit host configuration.
  */
 import {
   HttpApiMiddleware,
@@ -83,3 +88,18 @@ export class HostHttpIngress extends Context.Tag("@ptools/HostHttpIngress")<
     readonly publicOrigin: string;
   }
 >() {}
+
+/**
+ * Middleware contract that provides normalized HTTP ingress facts per request.
+ *
+ * This keeps request-derived values such as public origin out of the cached
+ * application runtime. Platform live layers read their carrier request
+ * (`HttpServerRequest` for Web/Node handlers, or an explicit configured origin)
+ * and provide `HostHttpIngress` only to the current handler fiber.
+ */
+export class ProvideHostHttpIngress extends HttpApiMiddleware.Tag<ProvideHostHttpIngress>()(
+  "@ptools/ProvideHostHttpIngress",
+  {
+    provides: HostHttpIngress,
+  },
+) {}

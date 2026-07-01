@@ -11,8 +11,7 @@ export type HostCloudflareErrorCode =
   | "invalid_secrets"
   | "invalid_oauth_callback"
   | "unsupported_config"
-  | "code_mode_unavailable"
-  | "misconfigured_worker";
+  | "code_mode_unavailable";
 
 export class HostCloudflareError extends Data.TaggedError(
   "HostCloudflareError",
@@ -70,11 +69,4 @@ export const codeModeUnavailable = (cause: unknown): HostCloudflareError =>
     status: 502,
     message: "Code Mode host is unavailable",
     cause,
-  });
-
-export const misconfiguredWorker = (message: string): HostCloudflareError =>
-  new HostCloudflareError({
-    code: "misconfigured_worker",
-    status: 500,
-    message,
   });

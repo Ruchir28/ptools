@@ -54,7 +54,7 @@ export const CloudflareHostServerLive = (
 ): Layer.Layer<HostServer> =>
   Layer.succeed(HostServer, makeCloudflareHostServer(options));
 
-const handleCloudflareHostRequest = (
+export const handleCloudflareHostRequest = (
   options: CloudflareHostServerOptions,
   request: HostApiRequest,
 ): Effect.Effect<HostApiResponse> => {
@@ -282,7 +282,6 @@ const toHostMcpAuthError = (
     case "invalid_oauth_callback":
       return { code: "invalid_oauth_callback", message: error.message };
     case "code_mode_unavailable":
-    case "misconfigured_worker":
     default:
       return { code: "auth_unavailable", message: error.message };
   }

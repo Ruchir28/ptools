@@ -85,43 +85,27 @@ describe("host-cloudflare import boundaries", () => {
     );
 
     expect(packageJson).toContain('"effect": "3.21.2"');
-    expect(packageJson).not.toContain('"@effect/platform"');
+    expect(packageJson).toContain('"@effect/platform": "0.96.1"');
     expect(packageJson).not.toContain('"alchemy"');
     expect(packageJson).not.toContain("4.0.0-beta");
   });
 
-  it("uses Hono as the Worker ingress HTTP adapter", async () => {
+  it("uses shared Effect HttpApi for Host API routes without Hono", async () => {
     const workerContents = await readSources(join(packageRoot, "src/worker"));
     const packageJson = await readFile(
       join(packageRoot, "package.json"),
       "utf8",
     );
 
-    expect(workerContents).toContain('from "hono"');
-    expect(packageJson).toContain('"hono"');
-    expect(workerContents).not.toContain("@effect/platform/HttpApi");
-    expect(workerContents).not.toContain("@effect/platform/HttpApiBuilder");
+    expect(workerContents).toContain('from "@effect/platform"');
+    expect(workerContents).toContain('from "@ptools/host-api/http"');
+    expect(workerContents).not.toContain('from "hono"');
+    expect(packageJson).toContain('"@effect/platform": "0.96.1"');
+    expect(packageJson).not.toContain('"hono"');
     expect(packageJson).not.toContain('"itty-router"');
   });
 
-  it("keeps the Worker router as a feature-route composition root", async () => {
-    const router = await readFile(
-      join(packageRoot, "src/worker/router.ts"),
-      "utf8",
-    );
-
-    expect(router).toContain('.route("/", healthRoutes)');
-    expect(router).toContain('.route("/", hostApiRoutes)');
-    expect(router).toContain('.route("/", oauthBrowserRoutes)');
-    expect(router).not.toContain("codeModeRoutes");
-    expect(router).not.toContain("configRoutes");
-    expect(router).not.toContain("mcpAuthRoutes");
-    expect(router).not.toContain("context.env");
-    expect(router).not.toContain("Effect.");
-    expect(router).not.toContain("PTOOLS_CODE_MODE");
-  });
-
-  it("uses request-time Worker bindings from Hono env", async () => {
+  it("uses request-time Worker bindings through shared HttpApi context", async () => {
     const ingress = await readFile(
       join(packageRoot, "src/worker/ingress.ts"),
       "utf8",
@@ -130,12 +114,12 @@ describe("host-cloudflare import boundaries", () => {
 
     expect(ingress).toContain("PTOOLS_CODE_MODE");
     expect(ingress).toContain("PTOOLS_PUBLIC_ACCESS_TOKEN");
-    expect(workerContents).toContain("context.env");
-    expect(workerContents).toContain("input.env.PTOOLS_CODE_MODE");
-    expect(workerContents).toContain("input.env.PTOOLS_PUBLIC_ACCESS_TOKEN");
+    expect(workerContents).toContain("env.PTOOLS_CODE_MODE");
+    expect(workerContents).toContain("env.PTOOLS_PUBLIC_ACCESS_TOKEN");
+    expect(workerContents).toContain("WorkerIngressEnv");
+    expect(workerContents).toContain("CloudflareProvideHostHttpIngressLive");
+    expect(workerContents).not.toContain("Layer.succeed(HostHttpIngress");
     expect(workerContents).not.toContain("WorkerIngressLayer");
-    expect(workerContents).not.toContain("yield* WorkerIngress");
-    expect(workerContents).not.toContain("Layer.succeed");
   });
 
   it("keeps Worker ingress routing static and request state local", async () => {
@@ -147,15 +131,16 @@ describe("host-cloudflare import boundaries", () => {
 
     expect(entry).not.toContain("WeakMap");
     expect(entry).not.toContain("handlers.set");
-    expect(entry).toContain("cloudflareWorkerApp.fetch(request, env, ctx)");
-    expect(workerContents).toContain("Effect.runPromise");
+    expect(entry).not.toContain("cloudflareWorkerApp");
+    expect(entry).toContain("getHostHttpHandler");
+    expect(entry).toContain("handleHealthRequest");
     expect(workerContents).toContain("new URL(request.url).origin");
     expect(workerContents).not.toContain("Effect.acquireUseRelease");
     expect(workerContents).not.toContain("dispose()");
     expect(workerContents).not.toContain("RegExp");
     expect(workerContents).not.toContain("try {");
     expect(workerContents).not.toContain("finally");
-    expect(workerContents).not.toContain(").handler");
+    expect(workerContents).not.toContain('from "hono"');
   });
 
   it("uses Workers-pool bindings instead of fake Durable Object namespaces in tests", async () => {

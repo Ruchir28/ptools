@@ -34,10 +34,21 @@ import {
   HostHttpHostUnavailable,
   HostHttpInternalError,
 } from "../../contracts/hostHttpErrors.js";
-import { RequireHostApiAccess } from "../../services/hostHttpMiddleware.js";
+import {
+  ProvideHostHttpIngress,
+  RequireHostApiAccess,
+} from "../../services/hostHttpMiddleware.js";
 
-/** Credentialed JSON API routes for normal Host API clients. */
+/**
+ * Credentialed JSON API routes for normal Host API clients.
+ *
+ * `ProvideHostHttpIngress` is group-scoped rather than API-scoped so Effect's
+ * route machinery has installed the per-request `HttpServerRequest` before the
+ * platform middleware derives `HostHttpIngress`.
+ */
 export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
+  .middleware(ProvideHostHttpIngress)
+  .middleware(RequireHostApiAccess)
   .add(
     HttpApiEndpoint.post("codeMode", "/hosts/:hostId/code-mode")
       .setPath(HostPath)
@@ -87,8 +98,7 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
       .addError(HostHttpUnauthorized)
       .addError(HostHttpHostUnavailable)
       .addError(HostHttpInternalError),
-  )
-  .middleware(RequireHostApiAccess) {}
+  ) {}
 
 /**
  * Browser/OAuth callback routes; these do not use Host API bearer auth.
@@ -98,6 +108,7 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
  * middleware used by credentialed API routes.
  */
 export class OAuthBrowserGroup extends HttpApiGroup.make("host.oauth")
+  .middleware(ProvideHostHttpIngress)
   .add(
     HttpApiEndpoint.get(
       "completeOAuthCallbackGet",

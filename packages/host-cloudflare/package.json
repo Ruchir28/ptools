@@ -51,6 +51,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-types": "4.20260607.1",
+    "@effect/platform": "0.96.1",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@ptools/auth": "workspace:*",
     "@ptools/code-mode": "workspace:*",
@@ -59,7 +60,6 @@
     "@ptools/host-api": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
     "effect": "3.21.2",
-    "hono": "^4.12.23",
     "@ptools/executor": "workspace:*"
   },
   "devDependencies": {
