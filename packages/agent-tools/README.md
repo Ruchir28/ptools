@@ -50,12 +50,12 @@ Environment variables can be referenced explicitly:
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { createNodeCodeModeClient } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
 const ptools = makePtoolsSession(
-  await createNodeCodeModeClientFromConfigFile(),
+  await createNodeCodeModeClient(),
 );
 
 try {
@@ -76,7 +76,7 @@ Pass an explicit config path when the file is not named `ptools.config.json`:
 
 ```ts
 const ptools = makePtoolsSession(
-  await createNodeCodeModeClientFromConfigFile("./config/ptools.config.json"),
+  await createNodeCodeModeClient("./config/ptools.config.json"),
 );
 ```
 
@@ -87,7 +87,7 @@ it for model calls, and always close it when that work is finished:
 
 ```ts
 const ptools = makePtoolsSession(
-  await createNodeCodeModeClientFromConfigFile(),
+  await createNodeCodeModeClient(),
 );
 
 try {
@@ -136,7 +136,7 @@ those calls back to the original MCP servers.
 ## Troubleshooting
 
 `ptools.config.json` not found: create the file in your app working directory,
-or pass an explicit path to `createNodeCodeModeClientFromConfigFile()`.
+or pass an explicit path to `createNodeCodeModeClient()`.
 
 `${env:NAME}` missing: export the environment variable before starting your app.
 ptools fails fast when an explicit env reference cannot be resolved.

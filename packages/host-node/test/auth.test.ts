@@ -3,7 +3,12 @@ import { AuthCoordinator, CredentialsStore } from "@ptools/auth";
 import { ResolvedHttpMcpConfig } from "@ptools/config";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { NodeAuthCoordinatorLive } from "../src/auth.js";
+import { NodeAuthCoordinatorLive, NodeMcpAuthFlow } from "../src/auth.js";
+import {
+  NodeConfigDiscoveryContextLive,
+  NodeHostIdentityLive,
+  NodeHostSettingsLive,
+} from "../src/layers/platform/index.js";
 
 vi.mock("@modelcontextprotocol/sdk/client/auth.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -34,7 +39,7 @@ describe("NodeAuthCoordinatorLive", () => {
         serverName: "notion",
         status: "connected",
         reauthorizeUrl: expect.stringMatching(
-          /^http:\/\/127\.0\.0\.1:\d+\/auth\/notion\?force=1$/,
+          /^http:\/\/127\.0\.0\.1:18080\/hosts\/test\/auth\/notion\?force=1$/,
         ),
       }),
     );
@@ -70,7 +75,7 @@ describe("NodeAuthCoordinatorLive", () => {
     expect(status.servers[0]?.reauthorizeUrl).toBeUndefined();
   });
 
-  it("starts reauthorization from a connected HTTP server", async () => {
+  it("starts reauthorization through the Node auth flow service", async () => {
     vi.mocked(sdkAuth).mockImplementationOnce(async (provider) => {
       provider.redirectToAuthorization(
         new URL("https://accounts.example/authorize?client_id=ptools"),
@@ -82,6 +87,7 @@ describe("NodeAuthCoordinatorLive", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const auth = yield* AuthCoordinator;
+          const flow = yield* NodeMcpAuthFlow;
 
           yield* auth.noteConfigured(
             "sheets",
@@ -89,23 +95,21 @@ describe("NodeAuthCoordinatorLive", () => {
             httpConfig("https://mcp.example/sheets"),
           );
 
-          const origin = yield* auth.origin;
-
-          return yield* Effect.promise(() =>
-            fetch(`${origin}/auth/sheets?force=1`, { redirect: "manual" }),
-          );
+          return yield* flow.beginAuthorization({
+            serverName: "sheets",
+            force: true,
+          });
         }),
       ).pipe(Effect.provide(makeTestNodeAuthCoordinatorLive())),
     );
 
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe(
-      "https://accounts.example/authorize?client_id=ptools",
-    );
+    expect(response).toEqual({
+      authorizeUrl: "https://accounts.example/authorize?client_id=ptools",
+    });
   });
 
-  it("serves the auth status from the local callback server", async () => {
-    const responseStatus = await Effect.runPromise(
+  it("builds OAuth callback URLs on the shared Host API route", async () => {
+    const callbackUrl = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const auth = yield* AuthCoordinator;
@@ -116,63 +120,43 @@ describe("NodeAuthCoordinatorLive", () => {
             httpConfig("https://mcp.notion.com/mcp"),
           );
 
-          const origin = yield* auth.origin;
-
-          return yield* Effect.promise(async () => {
-            const response = await fetch(`${origin}/status.json`);
-            return (await response.json()) as unknown;
-          });
+          return yield* auth.callbackUrl("notion");
         }),
       ).pipe(Effect.provide(makeTestNodeAuthCoordinatorLive())),
     );
 
-    expect(responseStatus).toEqual(
-      expect.objectContaining({
-        servers: [
-          expect.objectContaining({
-            serverName: "notion",
-            status: "connected",
-          }),
-        ],
-      }),
+    expect(callbackUrl).toBe(
+      "http://127.0.0.1:18080/hosts/test/oauth/callback/notion",
     );
   });
 
-  it("runs manual per-server refresh from the auth center", async () => {
-    const refreshedServers: Array<string> = [];
-    const responseText = await Effect.runPromise(
+  it("uses the configured Host API origin", async () => {
+    const origin = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const auth = yield* AuthCoordinator;
-
-          if (auth.setRefreshHandler === undefined) {
-            throw new Error("Node auth coordinator does not expose refresh");
-          }
-
-          yield* auth.setRefreshHandler((serverName) => {
-            refreshedServers.push(serverName);
-            return Promise.resolve();
-          });
-
-          const origin = yield* auth.origin;
-
-          return yield* Effect.promise(async () => {
-            const response = await fetch(`${origin}/refresh/notion`);
-            return response.text();
-          });
+          return yield* auth.origin;
         }),
       ).pipe(Effect.provide(makeTestNodeAuthCoordinatorLive())),
     );
 
-    expect(responseText).toContain("Refresh complete");
-    expect(refreshedServers).toEqual(["notion"]);
+    expect(origin).toBe("http://127.0.0.1:18080");
   });
 });
 
-const makeTestNodeAuthCoordinatorLive = () =>
-  NodeAuthCoordinatorLive({ runtimeId: "test", autoOpen: false }).pipe(
+const makeTestNodeAuthCoordinatorLive = () => {
+  const discoveryLayer = NodeConfigDiscoveryContextLive({ env: {} });
+  const settingsLayer = NodeHostSettingsLive({
+    publicOrigin: "http://127.0.0.1:18080",
+    auth: { autoOpen: false },
+  }).pipe(Layer.provide(discoveryLayer));
+  const identityLayer = NodeHostIdentityLive("test");
+
+  return NodeAuthCoordinatorLive().pipe(
     Layer.provide(makeMemoryCredentialsStoreLive()),
+    Layer.provide(Layer.merge(settingsLayer, identityLayer)),
   );
+};
 
 const makeMemoryCredentialsStoreLive = () => {
   const values = new Map<string, string>();

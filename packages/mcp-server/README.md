@@ -188,10 +188,10 @@ the upstream MCP servers listed in `.ptools/config.json`.
 
 ```ts
 import { Effect } from "effect";
-import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { createNodeCodeModeClient } from "@ptools/host-node";
 import { serveMcpWithCodeModeClient } from "@ptools/mcp-server";
 
-const client = await createNodeCodeModeClientFromConfigFile(undefined, {
+const client = await createNodeCodeModeClient(undefined, {
   argv: process.argv.slice(2),
   cwd: process.cwd(),
   env: process.env,

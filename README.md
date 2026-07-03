@@ -101,12 +101,12 @@ npm install @ptools/agent-tools @ptools/host-node
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { createNodeCodeModeClient } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
 const ptools = makePtoolsSession(
-  await createNodeCodeModeClientFromConfigFile(),
+  await createNodeCodeModeClient(),
 );
 
 try {

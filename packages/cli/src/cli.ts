@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { createNodeCodeModeClient } from "@ptools/host-node";
 import { serveMcpWithCodeModeClient } from "@ptools/mcp-server";
 import { Effect } from "effect";
 
@@ -42,7 +42,7 @@ const main = async (): Promise<void> => {
       process.stdout.write(usage);
       return;
     case "mcp-serve": {
-      const client = await createNodeCodeModeClientFromConfigFile(
+      const client = await createNodeCodeModeClient(
         command.configPath,
         {
           cwd: process.cwd(),

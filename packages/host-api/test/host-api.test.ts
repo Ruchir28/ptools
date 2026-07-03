@@ -9,12 +9,9 @@ import {
 } from "@ptools/code-mode-api";
 import { CodeModeClient } from "@ptools/code-mode-api/effect";
 import {
-  HostClient,
-  HostClientLayer,
   HostHttpClient,
   HostHttpClientLive,
   CodeModeClientFromHostHttpClientLive,
-  HostTransport,
 } from "../src/services/index.js";
 import {
   parseHostOperationRequest,
@@ -161,40 +158,6 @@ describe("host-api schemas", () => {
   });
 });
 
-describe("HostClientLayer", () => {
-  it("builds host.codeMode from HostTransport", async () => {
-    const response: HostOperationResponse = {
-      operation: "code_mode",
-      result: {
-        ok: true,
-        response: {
-          operation: "search",
-          output: { actions: [], diagnostics: [] },
-        },
-      },
-    };
-    const transport = Layer.succeed(HostTransport, {
-      call: () => Effect.succeed(response),
-    });
-
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const host = yield* HostClient;
-        return yield* host.codeMode.call({
-          operation: "search",
-          input: CodeModeSearchRequest.make({
-            query: "github",
-            provider: Option.none(),
-            limit: Option.none(),
-          }),
-        });
-      }).pipe(Effect.provide(HostClientLayer.pipe(Layer.provide(transport)))),
-    );
-
-    expect(result.operation).toBe("search");
-  });
-});
-
 describe("HostHttpClientLive", () => {
   it("requires a platform HttpClient layer instead of owning fetch directly", () => {
     const layer: Layer.Layer<
@@ -228,6 +191,14 @@ describe("HostHttpClientLive", () => {
           "https://ptools.example/hosts/demo%20host/code-mode",
         );
         expect(request.headers.authorization).toBe("Bearer secret-token");
+        expect(request.body._tag).toBe("Uint8Array");
+        const bodyText = new TextDecoder().decode(
+          request.body._tag === "Uint8Array" ? request.body.body : undefined,
+        );
+        expect(JSON.parse(bodyText)).toEqual({
+          operation: "search",
+          input: { query: "github" },
+        });
 
         return HttpClientResponse.fromWeb(
           request,

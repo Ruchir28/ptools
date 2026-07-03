@@ -34,9 +34,9 @@ keyring-backed OAuth credentials, local MCP registry construction, local code
 execution, and Code Mode client/server assembly.
 
 ```ts
-import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { createNodeCodeModeClient } from "@ptools/host-node";
 
-const client = await createNodeCodeModeClientFromConfigFile(
+const client = await createNodeCodeModeClient(
   "./ptools.config.json",
 );
 

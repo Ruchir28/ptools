@@ -13,10 +13,8 @@ import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   createNodeCodeModeClient,
-  createNodeCodeModeClientFromConfigFile,
-  NodeCodeModeClientFromConfigFileLive,
+  createNodeHostClient,
   NodeCodeModeClientLive,
-  NodeCodeModeServerFromConfigFileLive,
   NodeCodeModeServerLive,
 } from "../src/index.js";
 
@@ -39,8 +37,9 @@ const hasDeno = (() => {
 describe("Node Code Mode executor startup", () => {
   it("surfaces actionable Deno resolution failures", async () => {
     await expect(
-      createNodeCodeModeClient({
+      createNodeCodeModeClient(await writeConfig("missing-deno", {
         mcpServers: {},
+      }), {
         executor: {
           denoExecutable: "/definitely/missing/ptools-deno",
         },
@@ -52,56 +51,9 @@ describe("Node Code Mode executor startup", () => {
 });
 
 describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
-  it("creates a client from in-memory resolved upstream config", async () => {
-    const client = await createNodeCodeModeClient({
-      mcpServers: {
-        fixture: {
-          transport: "stdio",
-          command: process.execPath,
-          args: ["--import", "tsx", fixturePath],
-        },
-      },
-    });
-
-    try {
-      await expect(
-        client.call({
-          operation: "search_providers",
-          input: searchProvidersRequest(),
-        }),
-      ).resolves.toMatchObject({
-        operation: "search_providers",
-        output: {
-          providers: [{ provider: "fixture" }],
-        },
-      });
-      await expect(
-        client.call({
-          operation: "execute",
-          input: executeRequest(
-            `
-            async () => {
-              return await fixture.echo({ text: "hello from host-node" });
-            }
-          `,
-          ),
-        }),
-      ).resolves.toEqual({
-        operation: "execute",
-        output: {
-          value: { text: "hello from host-node" },
-          logs: [],
-          warnings: [],
-        },
-      });
-    } finally {
-      await client.close();
-    }
-  }, 30_000);
-
   it("creates a client from an explicit config file through ConfigSource", async () => {
     const configPath = await writeFixtureConfig("config-file");
-    const client = await createNodeCodeModeClientFromConfigFile(configPath);
+    const client = await createNodeCodeModeClient(configPath);
 
     try {
       await expect(
@@ -114,6 +66,39 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
       });
     } finally {
       await client.close();
+    }
+  }, 30_000);
+
+  it("exposes MCP auth status through the Node Host API for file-backed config", async () => {
+    const configPath = await writeConfig("mcp-auth-status", {
+      mcpServers: {
+        remote: {
+          url: "https://example.invalid/mcp",
+          auth: { type: "oauth" },
+        },
+      },
+    });
+    const host = await createNodeHostClient(configPath, { env: {} });
+
+    try {
+      const response = await host.call({ operation: "mcp_auth_status", input: { origin: "http://127.0.0.1" } });
+
+      expect(response).toMatchObject({
+        operation: "mcp_auth_status",
+        result: {
+          ok: true,
+          status: {
+            servers: [
+              {
+                serverName: "remote",
+                transport: "http",
+              },
+            ],
+          },
+        },
+      });
+    } finally {
+      await host.close();
     }
   }, 30_000);
 
@@ -131,7 +116,7 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
           });
         }).pipe(
           Effect.provide(
-            NodeCodeModeServerFromConfigFileLive(configPath, {
+            NodeCodeModeServerLive(configPath, {
               env: {},
             }),
           ),
@@ -154,7 +139,7 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
           });
         }).pipe(
           Effect.provide(
-            NodeCodeModeClientFromConfigFileLive(configPath, {
+            NodeCodeModeClientLive(configPath, {
               env: {},
             }),
           ),
@@ -167,49 +152,6 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
     });
   }, 30_000);
 
-  it("provides direct CodeModeServer and CodeModeClient layers from options", async () => {
-    const options = {
-      mcpServers: {
-        fixture: {
-          transport: "stdio" as const,
-          command: process.execPath,
-          args: ["--import", "tsx", fixturePath],
-        },
-      },
-    };
-
-    await expect(
-      Effect.runPromise(
-        Effect.gen(function* () {
-          const server = yield* CodeModeServer;
-
-          return yield* server.handle({
-            operation: "search",
-            input: searchRequest("echo"),
-          });
-        }).pipe(Effect.provide(NodeCodeModeServerLive(options)), Effect.scoped),
-      ),
-    ).resolves.toMatchObject({
-      operation: "search",
-      output: { actions: [{ toolId: "fixture.echo" }] },
-    });
-
-    await expect(
-      Effect.runPromise(
-        Effect.gen(function* () {
-          const client = yield* CodeModeClient;
-
-          return yield* client.call({
-            operation: "search_providers",
-            input: searchProvidersRequest(),
-          });
-        }).pipe(Effect.provide(NodeCodeModeClientLive(options)), Effect.scoped),
-      ),
-    ).resolves.toMatchObject({
-      operation: "search_providers",
-      output: { providers: [{ provider: "fixture" }] },
-    });
-  }, 30_000);
 });
 
 const searchProvidersRequest = (): CodeModeSearchProvidersRequest =>
@@ -231,25 +173,24 @@ const executeRequest = (code: string): CodeModeExecuteRequest =>
     timeoutMs: Option.none(),
   });
 
-const writeFixtureConfig = async (name: string): Promise<string> => {
+const writeFixtureConfig = async (name: string): Promise<string> =>
+  writeConfig(name, {
+    mcpServers: {
+      fixture: {
+        command: process.execPath,
+        args: ["--import", "tsx", fixturePath],
+      },
+    },
+  });
+
+const writeConfig = async (
+  name: string,
+  config: unknown,
+): Promise<string> => {
   const dir = await mkdtemp(join(tmpdir(), `ptools-host-node-${name}-`));
   const configPath = join(dir, "ptools.config.json");
 
-  await writeFile(
-    configPath,
-    JSON.stringify(
-      {
-        mcpServers: {
-          fixture: {
-            command: process.execPath,
-            args: ["--import", "tsx", fixturePath],
-          },
-        },
-      },
-      null,
-      2,
-    ),
-  );
+  await writeFile(configPath, JSON.stringify(config, null, 2));
 
   return configPath;
 };

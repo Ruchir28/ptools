@@ -1,5 +1,6 @@
 /** Effect-native HTTP client for named Host HTTP API endpoints. */
 import {
+  FetchHttpClient,
   HttpClient,
   HttpClientRequest,
   HttpClientResponse,
@@ -25,6 +26,10 @@ import {
   HostMcpAuthStatusResponse,
   StartHostMcpAuthResponse,
 } from "../contracts/index.js";
+import {
+  EmptyHttpPayload,
+  StartMcpAuthHttpPayload,
+} from "../contracts/hostHttpRoutes.js";
 
 export interface HostHttpClientOptions {
   readonly baseUrl: string;
@@ -84,29 +89,42 @@ export const HostHttpClientLive = (
       const http = yield* HttpClient.HttpClient;
       const baseUrl = new URL(options.baseUrl);
 
-      const requestJson = <A>(input: {
+      const requestJson = <
+        Payload,
+        PayloadEncoded,
+        Response,
+        ResponseEncoded,
+      >(input: {
         readonly method: "POST" | "PUT";
         readonly path: string;
-        readonly payload: unknown;
-        // The response schemas have heterogeneous encoded/input types. The
-        // client only decodes response bodies, so this helper intentionally
-        // accepts any encoded input shape while preserving the decoded `A`.
-        readonly response: Schema.Schema<A, any, never>;
-      }): Effect.Effect<A, HostHttpClientError> => {
-        const request = HttpClientRequest.make(input.method)(
-          new URL(input.path, baseUrl).toString(),
-        ).pipe(
-          HttpClientRequest.bearerToken(options.accessToken),
-          HttpClientRequest.acceptJson,
-        );
-
-        return HttpClientRequest.bodyJson(request, input.payload).pipe(
-          Effect.flatMap((requestWithBody) => http.execute(requestWithBody)),
-          Effect.flatMap(HttpClientResponse.filterStatusOk),
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(input.response)),
+        readonly payload: Payload;
+        // Request schemas are the outbound half of the HTTP contract: encode
+        // internal domain values such as Schema.Class/Option fields into the
+        // plain JSON shape declared by the matching server route. Response
+        // schemas perform the inbound decode back into the typed domain shape.
+        readonly payloadSchema: Schema.Schema<Payload, PayloadEncoded, never>;
+        readonly response: Schema.Schema<Response, ResponseEncoded, never>;
+      }): Effect.Effect<Response, HostHttpClientError> =>
+        Schema.encode(input.payloadSchema)(input.payload).pipe(
           Effect.mapError(toHostHttpClientError),
+          Effect.flatMap((payload) => {
+            const request = HttpClientRequest.make(input.method)(
+              new URL(input.path, baseUrl).toString(),
+            ).pipe(
+              HttpClientRequest.bearerToken(options.accessToken),
+              HttpClientRequest.acceptJson,
+            );
+
+            return HttpClientRequest.bodyJson(request, payload).pipe(
+              Effect.flatMap((requestWithBody) =>
+                http.execute(requestWithBody),
+              ),
+              Effect.flatMap(HttpClientResponse.filterStatusOk),
+              Effect.flatMap(HttpClientResponse.schemaBodyJson(input.response)),
+              Effect.mapError(toHostHttpClientError),
+            );
+          }),
         );
-      };
 
       const hostPath = (suffix: string) =>
         `/hosts/${encodeURIComponent(options.hostId)}${suffix}`;
@@ -117,6 +135,10 @@ export const HostHttpClientLive = (
             method: "POST",
             path: hostPath("/code-mode"),
             payload,
+            // Mirrors the server route's .setPayload(CodeModeRequest), so
+            // Code Mode's internal Option fields are omitted/encoded as JSON
+            // before the request crosses HTTP.
+            payloadSchema: CodeModeRequest,
             response: HostCodeModeResponse,
           }),
 
@@ -125,6 +147,7 @@ export const HostHttpClientLive = (
             method: "PUT",
             path: hostPath("/config"),
             payload,
+            payloadSchema: ConfigureHostInput,
             response: ConfigureHostResponse,
           }),
 
@@ -133,6 +156,7 @@ export const HostHttpClientLive = (
             method: "PUT",
             path: hostPath("/secrets"),
             payload,
+            payloadSchema: ConfigureHostSecretsInput,
             response: ConfigureHostSecretsResponse,
           }),
 
@@ -141,6 +165,7 @@ export const HostHttpClientLive = (
             method: "POST",
             path: hostPath("/auth/status"),
             payload: {},
+            payloadSchema: EmptyHttpPayload,
             response: HostMcpAuthStatusResponse,
           }),
 
@@ -149,11 +174,24 @@ export const HostHttpClientLive = (
             method: "POST",
             path: hostPath(`/auth/${encodeURIComponent(serverName)}`),
             payload: { force },
+            payloadSchema: StartMcpAuthHttpPayload,
             response: StartHostMcpAuthResponse,
           }),
       };
     }),
   );
+
+/**
+ * Shared fetch-backed Host HTTP client.
+ *
+ * This is the common network client for runtimes with `globalThis.fetch`. It
+ * keeps Host API route/schema behavior in `HostHttpClientLive` and only chooses
+ * Effect Platform's fetch-based HTTP engine as the transport implementation.
+ */
+export const HostHttpClientFetchLive = (
+  options: HostHttpClientOptions,
+): Layer.Layer<HostHttpClient, never, never> =>
+  HostHttpClientLive(options).pipe(Layer.provide(FetchHttpClient.layer));
 
 /**
  * Derive the focused CodeModeClient consumed by agent-facing packages.

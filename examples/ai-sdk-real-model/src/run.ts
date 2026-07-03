@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { createNodeCodeModeClientFromConfigFile } from "@ptools/host-node";
+import { createNodeCodeModeClient } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 import { generateText, stepCountIs } from "ai";
@@ -36,7 +36,7 @@ const main = async (): Promise<void> => {
     ? readFileSync(readFlag("--prompt-file")!, "utf8")
     : "What drove the most revenue this period — which product and which seller led it, and how did performance vary across regions?";
   const ptools = makePtoolsSession(
-    await createNodeCodeModeClientFromConfigFile(configPath),
+    await createNodeCodeModeClient(configPath),
   );
 
   try {
