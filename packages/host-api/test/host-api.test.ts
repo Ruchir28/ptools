@@ -12,6 +12,11 @@ import {
   HostHttpClient,
   HostHttpClientLive,
   CodeModeClientFromHostHttpClientLive,
+  HostInstanceDiscovery,
+  HostOperationDispatcher,
+  HostOperationDispatcherFromInstanceDiscoveryLive,
+  type HostInstanceHandle,
+  type HostOperationDispatchInput,
 } from "../src/services/index.js";
 import {
   parseHostOperationRequest,
@@ -155,6 +160,66 @@ describe("host-api schemas", () => {
     await expect(
       Effect.runPromise(parseHostOperationResponse(response)),
     ).resolves.toEqual(response);
+  });
+});
+
+describe("HostOperationDispatcherFromInstanceDiscoveryLive", () => {
+  it("resolves by hostId and forwards the original dispatch input unchanged", async () => {
+    const input: HostOperationDispatchInput = {
+      hostId: "demo-host",
+      publicOrigin: "https://ptools.example",
+      caller: Option.some({ kind: "HostApiTokenCaller" }),
+      request: {
+        operation: "code_mode",
+        input: searchRequest(),
+      },
+    };
+    const response: HostOperationResponse = {
+      operation: "code_mode",
+      result: {
+        ok: true,
+        response: {
+          operation: "search",
+          output: { actions: [], diagnostics: [] },
+        },
+      },
+    };
+    const seen: {
+      resolvedHostId?: string;
+      dispatchedInput?: HostOperationDispatchInput;
+    } = {};
+    const handle: HostInstanceHandle = {
+      dispatch: (dispatchInput) =>
+        Effect.sync(() => {
+          seen.dispatchedInput = dispatchInput;
+          return response;
+        }),
+    };
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const dispatcher = yield* HostOperationDispatcher;
+        return yield* dispatcher.dispatch(input);
+      }).pipe(
+        Effect.provide(
+          HostOperationDispatcherFromInstanceDiscoveryLive.pipe(
+            Layer.provide(
+              Layer.succeed(HostInstanceDiscovery, {
+                resolve: (hostId) =>
+                  Effect.sync(() => {
+                    seen.resolvedHostId = hostId;
+                    return handle;
+                  }),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(result).toEqual(response);
+    expect(seen.resolvedHostId).toBe("demo-host");
+    expect(seen.dispatchedInput).toBe(input);
   });
 });
 

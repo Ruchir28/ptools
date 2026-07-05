@@ -5,6 +5,7 @@
  * package surface remains the Promise handle and schema DTOs for SDK users.
  */
 export * from "./hostOperationDispatcher.js";
+export * from "./hostInstanceDiscovery.js";
 export * from "./hostHttpClient.js";
 export * from "./hostHttpMiddleware.js";
 export * from "./hostHttpOperationAdapter.js";
