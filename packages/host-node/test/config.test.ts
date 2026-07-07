@@ -2,16 +2,15 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ConfigSource,
+  ResolvedPtoolsConfigSource,
   ServerConfigError,
   type ResolvedPtoolsConfig,
 } from "@ptools/config";
 import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  FileConfigSourceLive,
-  NodeConfigSourceLive,
-  ProcessEnvSecretResolverLive,
+  FileResolvedPtoolsConfigSourceLive,
+  NodeResolvedPtoolsConfigSourceLive,
 } from "../src/index.js";
 
 describe("node config loading", () => {
@@ -30,9 +29,7 @@ describe("node config loading", () => {
 
     const resolved = await Effect.runPromise(
       loadProvidedConfig(
-        FileConfigSourceLive({ path: configPath }).pipe(
-          Layer.provide(ProcessEnvSecretResolverLive({ env: {} })),
-        ),
+        FileResolvedPtoolsConfigSourceLive({ path: configPath }),
       ),
     );
 
@@ -45,7 +42,7 @@ describe("node config loading", () => {
     expect(fixture.cwd).toEqual(Option.some(join(dir, "servers")));
   });
 
-  it("resolves config path from argv, env, or default project files through NodeConfigSourceLive", async () => {
+  it("resolves config path from argv, env, or default project files through NodeResolvedPtoolsConfigSourceLive", async () => {
     const cliDir = await mkdtemp(join(tmpdir(), "ptools-host-node-cli-"));
     await writeConfig(join(cliDir, "ptools.json"), {
       mcpServers: { cli: { command: "node" } },
@@ -54,7 +51,7 @@ describe("node config loading", () => {
     await expect(
       Effect.runPromise(
         loadProvidedConfig(
-          NodeConfigSourceLive({
+          NodeResolvedPtoolsConfigSourceLive({
             argv: ["--config", "ptools.json"],
             env: {},
             cwd: cliDir,
@@ -74,7 +71,7 @@ describe("node config loading", () => {
     await expect(
       Effect.runPromise(
         loadProvidedConfig(
-          NodeConfigSourceLive({
+          NodeResolvedPtoolsConfigSourceLive({
             argv: [],
             env: { PTOOLS_CONFIG: envConfigPath },
             cwd: envDir,
@@ -99,7 +96,7 @@ describe("node config loading", () => {
     await expect(
       Effect.runPromise(
         loadProvidedConfig(
-          NodeConfigSourceLive({
+          NodeResolvedPtoolsConfigSourceLive({
             argv: [],
             env: {},
             cwd: defaultDir,
@@ -118,7 +115,7 @@ describe("node config loading", () => {
     await expect(
       Effect.runPromise(
         loadProvidedConfig(
-          NodeConfigSourceLive({
+          NodeResolvedPtoolsConfigSourceLive({
             argv: [],
             env: {},
             cwd: legacyDir,
@@ -137,7 +134,7 @@ describe("node config loading", () => {
 
     const result = await Effect.runPromise(
       loadProvidedConfig(
-        NodeConfigSourceLive({
+        NodeResolvedPtoolsConfigSourceLive({
           argv: [],
           env: {},
           cwd: dir,
@@ -152,7 +149,7 @@ describe("node config loading", () => {
     }
   });
 
-  it("provides explicit env secrets through ProcessEnvSecretResolverLive", async () => {
+  it("provides explicit env secrets through FileResolvedPtoolsConfigSourceLive", async () => {
     const dir = await mkdtemp(
       join(tmpdir(), "ptools-host-node-config-source-"),
     );
@@ -168,11 +165,10 @@ describe("node config loading", () => {
 
     const resolved = await Effect.runPromise(
       loadProvidedConfig(
-        FileConfigSourceLive({ path: configPath }).pipe(
-          Layer.provide(
-            ProcessEnvSecretResolverLive({ env: { NODE_BIN: "node" } }),
-          ),
-        ),
+        FileResolvedPtoolsConfigSourceLive({
+          path: configPath,
+          env: { NODE_BIN: "node" },
+        }),
       ),
     );
 
@@ -184,10 +180,10 @@ describe("node config loading", () => {
 });
 
 const loadProvidedConfig = <E, R>(
-  layer: Layer.Layer<ConfigSource, E, R>,
+  layer: Layer.Layer<ResolvedPtoolsConfigSource, E, R>,
 ): Effect.Effect<ResolvedPtoolsConfig, E | ServerConfigError, R> =>
   Effect.gen(function* () {
-    const source = yield* ConfigSource;
+    const source = yield* ResolvedPtoolsConfigSource;
 
     return yield* source.load;
   }).pipe(Effect.provide(layer));

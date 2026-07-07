@@ -136,27 +136,30 @@ const emptyAuthConfig = (): ResolvedHttpMcpAuthConfig =>
   });
 
 const makeTestAuthCoordinatorLive = (calls: { providerFor: number }) =>
-  Layer.succeed(AuthCoordinator, {
-    origin: Effect.succeed("http://127.0.0.1/auth"),
-    callbackUrl: (serverName) =>
-      Effect.succeed(
-        `http://127.0.0.1/oauth/callback/${encodeURIComponent(serverName)}`,
-      ),
-    noteConfigured: () => Effect.void,
-    noteConnected: () => Effect.void,
-    noteConnectionError: () => Effect.void,
-    shouldAttachAuthProvider: () => Effect.succeed(false),
-    hasStoredCredentials: () => Effect.succeed(false),
-    providerFor: () => {
-      calls.providerFor += 1;
+  Layer.succeed(
+    AuthCoordinator,
+    AuthCoordinator.make({
+      origin: Effect.succeed("http://127.0.0.1/auth"),
+      callbackUrl: (serverName) =>
+        Effect.succeed(
+          `http://127.0.0.1/oauth/callback/${encodeURIComponent(serverName)}`,
+        ),
+      noteConfigured: () => Effect.void,
+      noteConnected: () => Effect.void,
+      noteConnectionError: () => Effect.void,
+      shouldAttachAuthProvider: () => Effect.succeed(false),
+      hasStoredCredentials: () => Effect.succeed(false),
+      providerFor: () => {
+        calls.providerFor += 1;
 
-      return Effect.succeed({} as OAuthClientProvider);
-    },
-    status: Effect.succeed({
-      authUrl: "http://127.0.0.1/auth",
-      servers: [],
+        return Effect.succeed({} as OAuthClientProvider);
+      },
+      status: Effect.succeed({
+        authUrl: "http://127.0.0.1/auth",
+        servers: [],
+      }),
     }),
-  });
+  );
 
 const withHeaderCaptureServer = async (
   run: (url: string) => Promise<void>,

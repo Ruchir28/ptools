@@ -1,17 +1,15 @@
 import { parseCodeModeRequest, type CodeModeResponse } from "@ptools/code-mode-api";
+import { McpOAuthStatePayload, McpOAuthStateStore } from "@ptools/auth";
 import type { CodeModeObjectCallInput } from "../src/objects/codeModeObject/rpc.js";
-import { ResolvedPtoolsConfig } from "@ptools/config";
+import {
+  CONFIGURED_HOST_CONFIG_BLOB_KEY,
+  CONFIGURED_SECRET_VALUE_KEY_PREFIX,
+  ConfiguredHostConfigBlob,
+  HostSecretStorage,
+  ResolvedPtoolsConfig,
+} from "@ptools/config";
 import { Effect, Schema } from "effect";
-import {
-  CloudflareOAuthStatePayloadSchema,
-  signOAuthState,
-} from "../src/layers/auth.js";
-import {
-  CODE_MODE_OBJECT_CONFIG_BLOB_KEY,
-  CODE_MODE_OBJECT_SECRET_KEY_PREFIX,
-  StoredConfigBlob,
-} from "../src/layers/config.js";
-import { makeCodeModeObjectStorage } from "../src/layers/platform.js";
+import { makeDurableObjectHostStorage } from "../src/layers/platform.js";
 import { CodeModeObject } from "../src/objects/CodeModeObject.js";
 import worker from "../src/worker/entry.js";
 import {
@@ -74,26 +72,33 @@ export class TestCodeModeObject extends CodeModeObject {
     }
   }
 
-  readConfigBlobForTest(): Promise<
-    typeof StoredConfigBlob.Encoded | undefined
+  async readConfigBlobForTest(): Promise<
+    typeof ConfiguredHostConfigBlob.Encoded | undefined
   > {
-    return this.ctx.storage.get<typeof StoredConfigBlob.Encoded>(
-      CODE_MODE_OBJECT_CONFIG_BLOB_KEY,
+    const raw = await this.ctx.storage.get<string>(
+      CONFIGURED_HOST_CONFIG_BLOB_KEY,
     );
+
+    return raw === undefined
+      ? undefined
+      : (JSON.parse(raw) as typeof ConfiguredHostConfigBlob.Encoded);
   }
 
   writeConfigBlobForTest(blob: unknown): Promise<void> {
-    return this.ctx.storage.put(CODE_MODE_OBJECT_CONFIG_BLOB_KEY, blob);
+    return this.ctx.storage.put(
+      CONFIGURED_HOST_CONFIG_BLOB_KEY,
+      JSON.stringify(blob),
+    );
   }
 
   async readSecretsForTest(): Promise<Record<string, string>> {
     const stored = await this.ctx.storage.list<string>({
-      prefix: CODE_MODE_OBJECT_SECRET_KEY_PREFIX,
+      prefix: CONFIGURED_SECRET_VALUE_KEY_PREFIX,
     });
     const secrets: Record<string, string> = {};
 
     for (const [key, value] of stored) {
-      secrets[key.slice(CODE_MODE_OBJECT_SECRET_KEY_PREFIX.length)] = value;
+      secrets[decodeURIComponent(key.slice(CONFIGURED_SECRET_VALUE_KEY_PREFIX.length))] = value;
     }
 
     return secrets;
@@ -125,13 +130,19 @@ export class TestCodeModeObject extends CodeModeObject {
   }
 
   signOAuthStateForTest(
-    payload: Parameters<typeof CloudflareOAuthStatePayloadSchema.make>[0],
+    payload: Parameters<typeof McpOAuthStatePayload.make>[0],
   ): Promise<string> {
     return Effect.runPromise(
-      signOAuthState({
-        storage: makeCodeModeObjectStorage(this.ctx.storage),
-        payload,
-      }),
+      Effect.gen(function* () {
+        const store = yield* McpOAuthStateStore;
+        return yield* store.sign({ payload });
+      }).pipe(
+        Effect.provide(McpOAuthStateStore.Default),
+        Effect.provideService(
+          HostSecretStorage,
+          makeDurableObjectHostStorage(this.ctx.storage, "secret"),
+        ),
+      ),
     );
   }
 }

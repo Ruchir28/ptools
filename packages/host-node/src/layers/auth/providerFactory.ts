@@ -10,10 +10,10 @@ import type {
 import {
   AuthError,
   AuthProviderFactory,
-  CredentialError,
-  CredentialsStore,
+  McpOAuthCredentialStore,
   type AuthCoordinatorOAuthProvider,
   type HttpMcpConfig,
+  type McpOAuthCredentialIdentity,
   type UpstreamHttpAuthConfig,
 } from "@ptools/auth";
 import { spawn } from "node:child_process";
@@ -26,11 +26,11 @@ import { oauthCallbackUrl, type NodeAuthRouteOptions } from "./policy.js";
 export const NodeAuthProviderFactoryLayer: Layer.Layer<
   AuthProviderFactory,
   never,
-  CredentialsStore | NodeHostIdentity | NodeHostSettings
+  McpOAuthCredentialStore | NodeHostIdentity | NodeHostSettings
 > = Layer.effect(
     AuthProviderFactory,
     Effect.gen(function* () {
-      const credentialsStore = yield* CredentialsStore;
+      const oauthCredentials = yield* McpOAuthCredentialStore;
       const identity = yield* NodeHostIdentity;
       const settings = yield* NodeHostSettings;
 
@@ -38,7 +38,7 @@ export const NodeAuthProviderFactoryLayer: Layer.Layer<
         makeProvider: (input) =>
           Effect.succeed(
             new PtoolsOAuthProvider({
-              credentialsStore,
+              oauthCredentials,
               origin: settings.publicOrigin,
               hostId: identity.hostId,
               autoOpen: settings.auth.autoOpen ?? false,
@@ -52,7 +52,7 @@ export const NodeAuthProviderFactoryLayer: Layer.Layer<
   );
 
 class PtoolsOAuthProvider implements AuthCoordinatorOAuthProvider {
-  readonly #credentialsStore: ContextCredentialsStore;
+  readonly #oauthCredentials: typeof McpOAuthCredentialStore.Service;
   readonly #origin: string;
   readonly #hostId: string;
   readonly #autoOpen: boolean;
@@ -62,11 +62,9 @@ class PtoolsOAuthProvider implements AuthCoordinatorOAuthProvider {
     authorizationUrl: URL,
   ) => Effect.Effect<void, AuthError>;
   readonly clientMetadataUrl?: string;
-  #codeVerifier: string | undefined;
-  #discoveryState: OAuthDiscoveryState | undefined;
 
   constructor(options: {
-    readonly credentialsStore: ContextCredentialsStore;
+    readonly oauthCredentials: typeof McpOAuthCredentialStore.Service;
     readonly origin: string;
     readonly hostId: string;
     readonly autoOpen: boolean;
@@ -76,7 +74,7 @@ class PtoolsOAuthProvider implements AuthCoordinatorOAuthProvider {
       authorizationUrl: URL,
     ) => Effect.Effect<void, AuthError>;
   }) {
-    this.#credentialsStore = options.credentialsStore;
+    this.#oauthCredentials = options.oauthCredentials;
     this.#origin = options.origin;
     this.#hostId = options.hostId;
     this.#autoOpen = options.autoOpen;
@@ -137,32 +135,40 @@ class PtoolsOAuthProvider implements AuthCoordinatorOAuthProvider {
       };
     }
 
-    return this.#readJson<OAuthClientInformationMixed>("client");
+    return Effect.runPromise(
+      this.#oauthCredentials
+        .getClientInformation(this.#credentialIdentity())
+        .pipe(Effect.map(Option.getOrUndefined)),
+    );
   }
 
   async saveClientInformation(
     clientInformation: OAuthClientInformationMixed,
   ): Promise<void> {
-    await this.#writeJson("client", clientInformation);
+    await Effect.runPromise(
+      this.#oauthCredentials.setClientInformation(
+        this.#credentialIdentity(),
+        clientInformation,
+      ),
+    );
   }
 
   async tokens(): Promise<OAuthTokens | undefined> {
-    return this.#readJson<OAuthTokens>("tokens");
+    return Effect.runPromise(
+      this.#oauthCredentials
+        .getTokens(this.#credentialIdentity())
+        .pipe(Effect.map(Option.getOrUndefined)),
+    );
   }
 
   async saveTokens(tokens: OAuthTokens): Promise<void> {
-    await this.#writeJson("tokens", tokens);
+    await Effect.runPromise(
+      this.#oauthCredentials.setTokens(this.#credentialIdentity(), tokens),
+    );
   }
 
-  hasStoredCredentials(): Effect.Effect<boolean, CredentialError> {
-    return Effect.tryPromise({
-      try: () => this.tokens(),
-      catch: (cause) =>
-        new CredentialError({
-          message: `Failed to read stored OAuth credentials for ${this.#serverName}`,
-          cause,
-        }),
-    }).pipe(Effect.map((tokens) => tokens !== undefined));
+  hasStoredCredentials() {
+    return this.#oauthCredentials.hasStoredCredentials(this.#credentialIdentity());
   }
 
   redirectToAuthorization(authorizationUrl: URL): void {
@@ -173,76 +179,53 @@ class PtoolsOAuthProvider implements AuthCoordinatorOAuthProvider {
     }
   }
 
-  saveCodeVerifier(codeVerifier: string): void {
-    this.#codeVerifier = codeVerifier;
+  saveCodeVerifier(codeVerifier: string): Promise<void> {
+    return Effect.runPromise(
+      this.#oauthCredentials.setCodeVerifier(
+        this.#credentialIdentity(),
+        codeVerifier,
+      ),
+    );
   }
 
-  codeVerifier(): string {
-    if (this.#codeVerifier === undefined) {
-      throw new Error(
-        `Missing OAuth PKCE verifier for ${this.#serverName}. Restart authorization from ptools.`,
-      );
-    }
-
-    return this.#codeVerifier;
+  codeVerifier(): Promise<string> {
+    return Effect.runPromise(
+      this.#oauthCredentials.getCodeVerifier(this.#credentialIdentity()),
+    );
   }
 
   async invalidateCredentials(
     scope: "all" | "client" | "tokens" | "verifier" | "discovery",
   ): Promise<void> {
-    if (scope === "all" || scope === "tokens") {
-      await this.#delete("tokens");
-    }
-
-    if (scope === "all" || scope === "client") {
-      await this.#delete("client");
-    }
-
-    if (scope === "all" || scope === "verifier") {
-      this.#codeVerifier = undefined;
-    }
-
-    if (scope === "all" || scope === "discovery") {
-      this.#discoveryState = undefined;
-    }
-  }
-
-  saveDiscoveryState(state: OAuthDiscoveryState): void {
-    this.#discoveryState = state;
-  }
-
-  discoveryState(): OAuthDiscoveryState | undefined {
-    return this.#discoveryState;
-  }
-
-  async #readJson<Value>(kind: string): Promise<Value | undefined> {
-    const password = await Effect.runPromise(
-      this.#credentialsStore.get(this.#key(kind)),
-    );
-
-    if (password === undefined) {
-      return undefined;
-    }
-
-    return JSON.parse(password) as Value;
-  }
-
-  async #writeJson(kind: string, value: unknown): Promise<void> {
     await Effect.runPromise(
-      this.#credentialsStore.set(this.#key(kind), JSON.stringify(value)),
+      this.#oauthCredentials.invalidate(this.#credentialIdentity(), scope),
     );
   }
 
-  async #delete(kind: string): Promise<void> {
-    await Effect.runPromise(this.#credentialsStore.delete(this.#key(kind)));
+  saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
+    return Effect.runPromise(
+      this.#oauthCredentials.setDiscoveryState(
+        this.#credentialIdentity(),
+        state,
+      ),
+    );
   }
 
-  #key(kind: string): string {
-    return `${encodeURIComponent(this.#serverName)}:${hashKey(this.#config.url)}:${kind}`;
+  discoveryState(): Promise<OAuthDiscoveryState | undefined> {
+    return Effect.runPromise(
+      this.#oauthCredentials
+        .getDiscoveryState(this.#credentialIdentity())
+        .pipe(Effect.map(Option.getOrUndefined)),
+    );
+  }
+
+  #credentialIdentity(): McpOAuthCredentialIdentity {
+    return {
+      serverName: this.#serverName,
+      serverUrl: this.#config.url,
+    };
   }
 }
-
-type ContextCredentialsStore = typeof CredentialsStore.Service;
 
 const redirectUrlFor = (
   route: NodeAuthRouteOptions,
@@ -253,16 +236,6 @@ const redirectUrlFor = (
     Option.flatMap(config, (auth) => auth.redirectUri),
     () => oauthCallbackUrl({ ...route, serverName }),
   );
-
-const hashKey = (value: string): string => {
-  let hash = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
-  }
-
-  return hash.toString(16);
-};
 
 const openUrl = (url: string): void => {
   const command =

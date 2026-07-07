@@ -26,11 +26,14 @@ import {
   CodeModeToolSchemaRequest,
 } from "@ptools/code-mode-api";
 import { CodeModeServer } from "@ptools/code-mode-api/effect";
-import { PtoolsConfig } from "@ptools/config";
+import {
+  CONFIGURED_HOST_CONFIG_BLOB_KEY,
+  ConfiguredHostConfigBlob,
+  PtoolsConfig,
+} from "@ptools/config";
 import type { SandboxCompletion } from "@ptools/executor";
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import { StoredConfigBlob } from "../src/layers/config.js";
 import {
   CloudflareCodeModeRuntimeLayer,
   type CloudflareCodeModeRuntimeServices,
@@ -54,8 +57,8 @@ describe("CloudflareCodeModeRuntimeLayer", () => {
     const storage = makeMemoryStorage(
       new Map([
         [
-          "config/blob",
-          makeStoredConfigBlob({
+          CONFIGURED_HOST_CONFIG_BLOB_KEY,
+          makeConfiguredHostConfigBlob({
             mcpServers: {
               fixture: {
                 transport: "http",
@@ -217,25 +220,27 @@ describe("CloudflareCodeModeRuntimeLayer", () => {
     });
 
     await expect(runtime.runtime()).rejects.toMatchObject({
-      message: "Cloudflare host demo config has not been configured.",
+      message: "Configured host config has not been configured.",
     });
   });
 });
 
-const makeStoredConfigBlob = (options: {
+const makeConfiguredHostConfigBlob = (options: {
   readonly mcpServers: Parameters<typeof PtoolsConfig.make>[0]["mcpServers"];
   readonly serverCount: number;
-}): typeof StoredConfigBlob.Encoded =>
-  Effect.runSync(
-    Schema.encode(StoredConfigBlob)(
-      StoredConfigBlob.make({
-        config: PtoolsConfig.make({
-          mcpServers: options.mcpServers,
-          executor: Option.none(),
+}): string =>
+  JSON.stringify(
+    Effect.runSync(
+      Schema.encode(ConfiguredHostConfigBlob)(
+        ConfiguredHostConfigBlob.make({
+          config: PtoolsConfig.make({
+            mcpServers: options.mcpServers,
+            executor: Option.none(),
+          }),
+          updatedAt: new Date(0).toISOString(),
+          serverCount: options.serverCount,
         }),
-        updatedAt: new Date(0).toISOString(),
-        serverCount: options.serverCount,
-      }),
+      ),
     ),
   );
 
@@ -262,30 +267,33 @@ const makeRuntime = (options: {
   return runtime;
 };
 
-const makeMemoryStorage = (values: Map<string, unknown>) => ({
-  get: <Value>(key: string) =>
-    Effect.succeed(Option.fromNullable(values.get(key) as Value | undefined)),
-  put: <Value>(key: string, value: Value) =>
-    Effect.sync(() => {
+const makeMemoryStorage = (values: Map<string, unknown>): DurableObjectStorage =>
+  ({
+    get: ((key: string) => Promise.resolve(values.get(key))) as DurableObjectStorage["get"],
+    put: ((key: string, value: unknown) => {
       values.set(key, value);
-    }),
-  delete: (key: string | ReadonlyArray<string>) =>
-    Effect.sync(() => {
+      return Promise.resolve();
+    }) as DurableObjectStorage["put"],
+    delete: ((key: string | ReadonlyArray<string>) => {
       if (typeof key === "string") {
-        values.delete(key);
-      } else {
-        for (const item of key) values.delete(item);
+        return Promise.resolve(values.delete(key));
       }
-    }),
-  list: <Value>(options?: DurableObjectListOptions) =>
-    Effect.succeed(
-      new Map(
-        [...values.entries()].filter(([key]) =>
-          options?.prefix === undefined ? true : key.startsWith(options.prefix),
-        ) as Array<[string, Value]>,
-      ),
-    ),
-});
+
+      let deleted = 0;
+      for (const item of key) {
+        if (values.delete(item)) deleted += 1;
+      }
+      return Promise.resolve(deleted);
+    }) as DurableObjectStorage["delete"],
+    list: ((options?: DurableObjectListOptions) =>
+      Promise.resolve(
+        new Map(
+          [...values.entries()].filter(([key]) =>
+            options?.prefix === undefined ? true : key.startsWith(options.prefix),
+          ),
+        ),
+      )) as DurableObjectStorage["list"],
+  }) as DurableObjectStorage;
 
 const makeRecordingWorkerLoader = (
   calls: Array<{

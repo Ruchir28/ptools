@@ -189,17 +189,19 @@ describe("host-cloudflare import boundaries", () => {
       join(packageRoot, "src/objects/CodeModeObject.ts"),
       "utf8",
     );
-    const config = await readFile(
-      join(packageRoot, "src/layers/config.ts"),
+    const codeModeRuntime = await readFile(
+      join(packageRoot, "src/layers/codeModeRuntime.ts"),
       "utf8",
     );
+    const resolvedConfigWiring = [codeModeObject, codeModeRuntime].join("\n");
 
     expect(auth).toContain("CloudflareOAuthFlow");
     expect(auth).toContain("DurableObjectAuthLayer");
-    expect(auth).toContain("yield* CodeModeObjectStorage");
+    expect(codeModeRuntime).not.toContain("McpOAuthStateStore.Default");
+    expect(auth).not.toContain("McpOAuthStateStore.Default");
     expect(auth).toContain("yield* CodeModeObjectIdentity");
     expect(auth).toContain("AuthCoordinatorCore");
-    expect(auth).toContain("AuthCoordinatorCoreLayer");
+    expect(auth).toContain("AuthCoordinatorCore.Default");
     expect(auth).toContain("AuthProviderFactory");
     expect(auth).toContain("AuthCoordinatorPolicy");
     expect(auth).toContain("CloudflareOAuthPlatform");
@@ -208,6 +210,8 @@ describe("host-cloudflare import boundaries", () => {
     expect(authEntry).toContain('export * from "./auth/index.js"');
     expect(auth).not.toContain("DurableObjectAuthLayer = (options");
     expect(auth).not.toContain("DurableObjectCredentialsStoreLayer = (options");
+    expect(auth).not.toContain("codeModeObjectCredential");
+    expect(auth).not.toContain("CODE_MODE_OBJECT_CREDENTIAL");
     expect(auth).not.toContain("readonly records: Ref.Ref");
     expect(auth).not.toContain("readonly providers: Ref.Ref");
     expect(auth).not.toContain("readonly oauthServers: Ref.Ref");
@@ -216,10 +220,13 @@ describe("host-cloudflare import boundaries", () => {
     expect(auth).not.toContain("CloudflareAuthStateService");
     expect(auth).not.toContain("CloudflareAuthStateLayer");
     expect(auth).not.toContain("CloudflareAuthStateSnapshot");
-    expect(config).toContain("yield* CodeModeObjectStorage");
-    expect(config).toContain("yield* CodeModeObjectIdentity");
-    expect(config).not.toContain("DurableObjectConfigSourceLayer = (options");
-    expect(config).not.toContain("DurableObjectSecretResolverLayer = (options");
+    expect(resolvedConfigWiring).toContain("ResolvedPtoolsConfigSource.Default");
+    expect(resolvedConfigWiring).not.toContain("DurableObjectResolvedPtoolsConfigSourceLayer");
+    expect(resolvedConfigWiring).not.toContain("resolvePtoolsConfigWithSecrets");
+    expect(resolvedConfigWiring).not.toContain("CODE_MODE_OBJECT_CONFIG_BLOB_KEY");
+    expect(resolvedConfigWiring).not.toContain("StoredConfigBlob");
+    expect(resolvedConfigWiring).not.toContain("ConfiguredSecretIndexJson");
+    expect(resolvedConfigWiring).not.toContain("loadConfiguredSecretIndex");
     expect(auth).not.toContain("CloudflareAuthManager");
     expect(auth).not.toContain("CloudflareAuthCoordinatorHooks");
     expect(auth).not.toContain("AuthCoordinatorService &");

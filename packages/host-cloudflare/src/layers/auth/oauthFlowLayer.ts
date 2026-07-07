@@ -4,10 +4,11 @@ import {
   AuthError,
   isDynamicClientRegistrationUnsupported,
   safeErrorMessage,
+  type AuthCoordinatorCoreService,
   type HttpMcpConfig,
 } from "@ptools/auth";
 import { Effect, Layer, Option } from "effect";
-import { CodeModeObjectIdentity, CodeModeObjectStorage } from "../platform.js";
+import { CodeModeObjectIdentity } from "../platform.js";
 import { CloudflareOAuthFlow } from "./oauthFlow.js";
 
 /**
@@ -19,7 +20,6 @@ import { CloudflareOAuthFlow } from "./oauthFlow.js";
  *
  * Requires:
  * - AuthCoordinatorCore
- * - CodeModeObjectStorage
  * - CodeModeObjectIdentity
  *
  * Provides:
@@ -28,7 +28,7 @@ import { CloudflareOAuthFlow } from "./oauthFlow.js";
 export const CloudflareOAuthFlowLayer: Layer.Layer<
   CloudflareOAuthFlow,
   never,
-  AuthCoordinatorCore | CodeModeObjectStorage | CodeModeObjectIdentity
+  AuthCoordinatorCore | CodeModeObjectIdentity
 > = Layer.effect(
   CloudflareOAuthFlow,
   Effect.gen(function* () {
@@ -58,7 +58,7 @@ export const CloudflareOAuthFlowLayer: Layer.Layer<
  * It always returns a URL string that the Worker should use for a 302 Redirect.
  */
 const beginCloudflareOAuthAuthorization = (input: {
-  readonly core: AuthCoordinatorCore["Type"];
+  readonly core: AuthCoordinatorCoreService;
   readonly serverName: string;
   readonly force: boolean;
 }): Effect.Effect<string, AuthError> =>
@@ -116,7 +116,7 @@ const beginCloudflareOAuthAuthorization = (input: {
  * It exchanges the authorization code for tokens and persists them via the provider.
  */
 const finishCloudflareOAuthAuthorization = (input: {
-  readonly core: AuthCoordinatorCore["Type"];
+  readonly core: AuthCoordinatorCoreService;
   readonly serverName: string;
   readonly code: string;
 }): Effect.Effect<void, AuthError> =>
@@ -161,7 +161,7 @@ const oauthRequestOptions = (config: HttpMcpConfig) => ({
 });
 
 const handleAuthStartError = (
-  core: AuthCoordinatorCore["Type"],
+  core: AuthCoordinatorCoreService,
   serverName: string,
   cause: unknown,
 ): Effect.Effect<void, AuthError> =>

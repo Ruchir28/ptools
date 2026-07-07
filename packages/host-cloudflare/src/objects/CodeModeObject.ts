@@ -1,25 +1,23 @@
 import type { CodeModeResponse } from "@ptools/code-mode-api";
 import { CodeModeServer } from "@ptools/code-mode-api/effect";
-import { AuthCoordinator } from "@ptools/auth";
+import { AuthCoordinator, McpOAuthStateStore } from "@ptools/auth";
 import {
-  ConfigSource,
+  ResolvedPtoolsConfigSource,
+  ConfiguredHostConfigStore,
+  ConfiguredSecretStore,
+  HostSecretStorage,
+  HostStateStorage,
   ServerConfigError,
   type ResolvedPtoolsConfig,
 } from "@ptools/config";
 import { DurableObject } from "cloudflare:workers";
 import { Effect, Layer, ManagedRuntime, Option } from "effect";
 import { CloudflareOAuthFlow } from "../layers/auth.js";
-import {
-  DurableObjectConfigSourceLayer,
-  DurableObjectSecretResolverLayer,
-} from "../layers/config.js";
 import { CloudflareCodeModeRuntimeLayer } from "../layers/codeModeRuntime.js";
 import {
   CodeModeObjectIdentity,
   CodeModeObjectPlatformLayer,
   CodeModeObjectRequestOriginLayer,
-  CodeModeObjectStorage,
-  makeCodeModeObjectStorage,
 } from "../layers/platform.js";
 import {
   makeCodeModeObjectWorkerLoader,
@@ -76,7 +74,7 @@ export type {
 } from "./codeModeObject/rpc.js";
 
 type HostRuntime = ManagedRuntime.ManagedRuntime<
-  CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ConfigSource,
+  CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ResolvedPtoolsConfigSource,
   unknown
 >;
 
@@ -104,17 +102,23 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    * background fibers, or require runtime-specific configuration.
    */
   readonly #platformLayer: Layer.Layer<
-    CodeModeObjectStorage | CodeModeObjectIdentity | CodeModeObjectWorkerLoader
+    | HostStateStorage
+    | HostSecretStorage
+    | McpOAuthStateStore
+    | CodeModeObjectIdentity
+    | CodeModeObjectWorkerLoader
   >;
 
+  readonly #hostId: string;
   #hostRuntime: Option.Option<CachedHostRuntime> = Option.none();
 
   constructor(ctx: DurableObjectState, env: PtoolsWorkerEnv) {
     super(ctx, env);
 
+    this.#hostId = requireHostId(ctx);
     this.#platformLayer = CodeModeObjectPlatformLayer({
-      storage: makeCodeModeObjectStorage(ctx.storage),
-      hostId: requireHostId(ctx),
+      storage: ctx.storage,
+      hostId: this.#hostId,
       workerLoader: makeCodeModeObjectWorkerLoader(env.PTOOLS_EXECUTION_LOADER),
     });
   }
@@ -165,7 +169,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
       Effect.gen(this, function* () {
         const result = yield* configureCodeModeObject({
           rawConfigJson: input.rawConfigJson,
-        });
+        }).pipe(Effect.provide(ConfiguredHostConfigStore.Default));
         yield* this.disposeHostRuntimeEffect();
 
         return result;
@@ -178,9 +182,9 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    *
    * Like `configure(...)`, this is a one-off `Effect.runPromise` workflow, not a
    * call through the cached `ManagedRuntime`. It only needs
-   * `CodeModeObjectStorage` from `#platformLayer` to write `secrets/<name>`
-   * values. After the write, the cached runtime is disposed because its
-   * `ConfigSource` may already have resolved old secret values; the next
+   * `ConfiguredSecretStore.Default` plus host-scoped storage from
+   * `#platformLayer` to replace configured secret values. After the write, the cached runtime is disposed because its
+   * `ResolvedPtoolsConfigSource` may already have resolved old secret values; the next
    * Code Mode/auth operation will build a fresh runtime and resolve secrets from
    * storage again.
    */
@@ -191,7 +195,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
       Effect.gen(this, function* () {
         const result = yield* configureCodeModeObjectSecrets({
           rawSecretsJson: input.rawSecretsJson,
-        });
+        }).pipe(Effect.provide(ConfiguredSecretStore.Default));
         yield* this.disposeHostRuntimeEffect();
 
         return result;
@@ -223,21 +227,22 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    * this method returns an HTML page the user sees in the browser.
    *
    * The flow is split into two phases:
-   * 1. Parse + verify state (platform layer only) — cheap early exit for bad
-   *    callbacks or provider-side errors.
-   * 2. Exchange code for tokens (full host runtime) — only when state is valid
-   *    and the provider returned an authorization code.
+   * 1. Parse + verify state through stable platform services. This reuses the
+   *    `McpOAuthStateStore` value captured in `#platformLayer` without starting
+   *    the full config-derived host runtime for invalid callbacks.
+   * 2. Exchange code for tokens through the full host runtime, only when state
+   *    is valid and the provider returned an authorization code.
    */
   completeMcpOAuthCallback(
     input: CompleteMcpOAuthCallbackInput,
   ): Promise<CompleteMcpOAuthCallbackResponse> {
     return Effect.runPromise(
-      // Phase 1: parse callback params and verify/consume the OAuth state nonce.
       parseCompleteMcpOAuthCallback({
         provider: input.provider,
         method: input.method,
         url: input.url,
         bodyText: Option.fromNullable(input.bodyText),
+        expectedHostId: this.#hostId,
       }).pipe(
         Effect.provide(this.#platformLayer),
         Effect.flatMap(
@@ -277,7 +282,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     ServerConfigError
   > {
     return Effect.gen(function* () {
-      const source = yield* ConfigSource;
+      const source = yield* ResolvedPtoolsConfigSource;
 
       return yield* source.load;
     }).pipe(
@@ -297,7 +302,8 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    * stable `#platformLayer` and request-derived origin.
    *
    * Effects passed here may `yield*` any of the runtime's exported services
-   * (`CodeModeServer`, `AuthCoordinator`, `CloudflareOAuthFlow`, `ConfigSource`).
+   * (`CodeModeServer`, `AuthCoordinator`, `CloudflareOAuthFlow`,
+   * `ResolvedPtoolsConfigSource`).
    * Those tags resolve against the runtime `Context` built in
    * `#createHostRuntime`; `runtime.runPromise` does not re-run layer construction
    * on each call unless the cached runtime was disposed and recreated.
@@ -307,7 +313,10 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     effect: Effect.Effect<
       A,
       E,
-      CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ConfigSource
+      | CodeModeServer
+      | AuthCoordinator
+      | CloudflareOAuthFlow
+      | ResolvedPtoolsConfigSource
     >,
   ): Promise<A> {
     const runtime = await this.getOrCreateHostRuntime(origin);
@@ -320,7 +329,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     effect: Effect.Effect<
       A,
       CodeModeObjectMcpAuthError,
-      AuthCoordinator | CloudflareOAuthFlow | ConfigSource
+      AuthCoordinator | CloudflareOAuthFlow | ResolvedPtoolsConfigSource
     >,
   ): Promise<
     | { readonly ok: true; readonly result: A }
@@ -348,7 +357,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    * Materializes the configured host layer graph once and caches the resulting
    * `ManagedRuntime` for this origin.
    *
-   * `runtime.runtime()` is where Effect builds services such as `ConfigSource`,
+   * `runtime.runtime()` is where Effect builds services such as `ResolvedPtoolsConfigSource`,
    * `AuthCoordinator`, internal `CodeMode`, and `CodeModeServer`. Later RPC
    * handlers only look those services up from the runtime context.
    */
@@ -388,7 +397,10 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
   private hostRuntimeLayer(
     origin: string,
   ): Layer.Layer<
-    CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ConfigSource,
+    | CodeModeServer
+    | AuthCoordinator
+    | CloudflareOAuthFlow
+    | ResolvedPtoolsConfigSource,
     unknown
   > {
     const requestOrigin = CodeModeObjectRequestOriginLayer(origin);
@@ -406,12 +418,13 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
   }
 
   private configLayer(): Layer.Layer<
-    ConfigSource,
+    ResolvedPtoolsConfigSource,
     never,
-    CodeModeObjectStorage | CodeModeObjectIdentity
+    HostStateStorage | HostSecretStorage
   > {
-    return DurableObjectConfigSourceLayer.pipe(
-      Layer.provide(DurableObjectSecretResolverLayer),
+    return ResolvedPtoolsConfigSource.Default.pipe(
+      Layer.provide(ConfiguredSecretStore.Default),
+      Layer.provide(ConfiguredHostConfigStore.Default),
     );
   }
 
@@ -420,7 +433,7 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
    * change.
    *
    * Config and secret setup methods run outside `#hostRuntime`, but they mutate
-   * storage read by that runtime's `ConfigSource`, `SecretResolver`, auth, and
+   * storage read by that runtime's `ResolvedPtoolsConfigSource`, `ConfiguredSecretStore`, auth, and
    * MCP services. Disposing here is what connects those one-off storage writes
    * to the next runtime-backed request: the next call rebuilds the ManagedRuntime
    * from current Durable Object storage instead of reusing stale services.

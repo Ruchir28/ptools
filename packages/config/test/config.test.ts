@@ -1,7 +1,7 @@
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Either, Option, Schema } from "effect";
+import { Effect, Either, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   hashResolvedPtoolsConfig,
@@ -15,8 +15,15 @@ import {
   resolvePtoolsConfig,
   resolvePtoolsConfigWithSecrets,
   ServerConfigError,
-  SecretResolver,
+  ConfiguredSecretStore,
 } from "../src/config.js";
+import {
+  ConfiguredHostConfigStore,
+  HostSecretStorage,
+  HostStateStorage,
+  ResolvedPtoolsConfigSource,
+  type HostStorageOperations,
+} from "../src/services/index.js";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -37,6 +44,15 @@ describe("config source layout", () => {
     await expect(
       fileExists(join(packageRoot, "src/services/configServices.ts")),
     ).resolves.toBe(true);
+    await expect(
+      fileExists(join(packageRoot, "src/services/hostStorage.ts")),
+    ).resolves.toBe(true);
+    await expect(
+      fileExists(join(packageRoot, "src/services/configuredSecrets.ts")),
+    ).resolves.toBe(true);
+    await expect(
+      fileExists(join(packageRoot, "src/services/configuredHostConfig.ts")),
+    ).resolves.toBe(true);
 
     await expect(
       fileExists(join(packageRoot, "src/contracts/ptoolsConfig.ts")),
@@ -44,6 +60,20 @@ describe("config source layout", () => {
     await expect(fileExists(join(packageRoot, "src/effect"))).resolves.toBe(
       false,
     );
+  });
+
+  it("keeps shared host storage and configured-secret services platform-free", async () => {
+    const sources = await Promise.all([
+      readFile(join(packageRoot, "src/services/hostStorage.ts"), "utf8"),
+      readFile(join(packageRoot, "src/services/configuredSecrets.ts"), "utf8"),
+      readFile(join(packageRoot, "src/services/configuredHostConfig.ts"), "utf8"),
+    ]);
+
+    for (const source of sources) {
+      expect(source).not.toMatch(
+        /from\s+["'][^"']*(cloudflare|hono|host-cloudflare|host-node|cloudflare:workers|@cloudflare|@effect\/platform|@napi-rs\/keyring)[^"']*["']/,
+      );
+    }
   });
 });
 
@@ -355,7 +385,7 @@ describe("server config", () => {
     }
   });
 
-  it("resolves env placeholders through SecretResolver service", async () => {
+  it("resolves env placeholders through ConfiguredSecretStore", async () => {
     const config = await parseConfig({
       mcpServers: {
         local: {
@@ -367,17 +397,22 @@ describe("server config", () => {
       },
     });
 
+    const storage = makeMemoryHostStorage();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* ConfiguredSecretStore;
+        yield* store.replaceAll({
+          secrets: {
+            NODE_BIN: "node",
+            SOURCE_TOKEN: "secret-token",
+          },
+        });
+      }).pipe(Effect.provide(configuredSecretStoreTestLayer(storage))),
+    );
+
     const resolved = await Effect.runPromise(
       resolvePtoolsConfigWithSecrets(config).pipe(
-        Effect.provideService(SecretResolver, {
-          get: (name) =>
-            Effect.succeed(
-              {
-                NODE_BIN: "node",
-                SOURCE_TOKEN: "secret-token",
-              }[name] ?? "",
-            ),
-        }),
+        Effect.provide(configuredSecretStoreTestLayer(storage)),
       ),
     );
 
@@ -385,6 +420,72 @@ describe("server config", () => {
     expect(stdioServer(resolved, "local").env).toEqual(
       Option.some({ TOKEN: "secret-token" }),
     );
+  });
+
+  it("provides a shared resolved config source from configured host storage", async () => {
+    const storage = makeMemoryHostStorage();
+    const unresolvedConfig = await parseConfig({
+      mcpServers: {
+        remote: {
+          url: "https://example.com/mcp",
+          headers: {
+            Authorization: "Bearer ${env:API_TOKEN}",
+          },
+        },
+      },
+    });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const configStore = yield* ConfiguredHostConfigStore;
+        const secretStore = yield* ConfiguredSecretStore;
+        yield* configStore.replace({ config: unresolvedConfig });
+        yield* secretStore.replaceAll({ secrets: { API_TOKEN: "stored-token" } });
+      }).pipe(Effect.provide(configuredHostStoreTestLayer(storage))),
+    );
+
+    const resolved = await Effect.runPromise(
+      Effect.gen(function* () {
+        const source = yield* ResolvedPtoolsConfigSource;
+        return yield* source.load;
+      }).pipe(Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage))),
+    );
+
+    expect(httpServer(resolved, "remote").headers).toEqual(
+      Option.some({ Authorization: "Bearer stored-token" }),
+    );
+  });
+
+  it("replaces configured secret sets and deletes stale values", async () => {
+    const storage = makeMemoryHostStorage();
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* ConfiguredSecretStore;
+        yield* store.replaceAll({
+          secrets: {
+            KEEP: "first",
+            STALE: "old",
+          },
+        });
+        const replacement = yield* store.replaceAll({
+          secrets: {
+            KEEP: "second",
+            NEW: "new",
+          },
+        });
+        const keep = yield* store.get("KEEP");
+        const newest = yield* store.get("NEW");
+        const stale = yield* store.get("STALE").pipe(Effect.either);
+
+        return { replacement, keep, newest, stale };
+      }).pipe(Effect.provide(configuredSecretStoreTestLayer(storage))),
+    );
+
+    expect(result.replacement.secretCount).toBe(2);
+    expect(result.keep).toBe("second");
+    expect(result.newest).toBe("new");
+    expect(Either.isLeft(result.stale)).toBe(true);
   });
 
   it("infers stdio and HTTP transport from command and url", async () => {
@@ -592,6 +693,47 @@ const fileExists = async (path: string): Promise<boolean> =>
   access(path).then(
     () => true,
     () => false,
+  );
+
+const makeMemoryHostStorage = (): HostStorageOperations => {
+  const values = new Map<string, string>();
+
+  return {
+    get: (key) => Effect.succeed(Option.fromNullable(values.get(key))),
+    put: (key, value) =>
+      Effect.sync(() => {
+        values.set(key, value);
+      }),
+    delete: (key) =>
+      Effect.sync(() => {
+        values.delete(key);
+      }),
+  };
+};
+
+const configuredSecretStoreTestLayer = (storage: HostStorageOperations) =>
+  ConfiguredSecretStore.Default.pipe(
+    Layer.provide(Layer.succeed(HostStateStorage, storage)),
+    Layer.provide(Layer.succeed(HostSecretStorage, storage)),
+  );
+
+const configuredHostStoreTestLayer = (storage: HostStorageOperations) =>
+  Layer.merge(
+    ConfiguredHostConfigStore.Default,
+    ConfiguredSecretStore.Default,
+  ).pipe(
+    Layer.provide(Layer.succeed(HostStateStorage, storage)),
+    Layer.provide(Layer.succeed(HostSecretStorage, storage)),
+  );
+
+const configuredHostResolvedConfigSourceTestLayer = (
+  storage: HostStorageOperations,
+) =>
+  ResolvedPtoolsConfigSource.Default.pipe(
+    Layer.provide(ConfiguredHostConfigStore.Default),
+    Layer.provide(ConfiguredSecretStore.Default),
+    Layer.provide(Layer.succeed(HostStateStorage, storage)),
+    Layer.provide(Layer.succeed(HostSecretStorage, storage)),
   );
 
 const stdioServer = (

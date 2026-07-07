@@ -12,9 +12,9 @@ const bannedImports = [
   "@ptools/mcp-registry",
 ];
 const bannedSymbols = [
-  "ConfigSource",
-  "NodeConfigSourceLive",
-  "FileConfigSourceLive",
+  "ResolvedPtoolsConfigSource",
+  "NodeResolvedPtoolsConfigSourceLive",
+  "FileResolvedPtoolsConfigSourceLive",
   "makeCodeModeLive",
   "makeMcpRegistryLive",
   "LocalSandboxExecutorLayer",

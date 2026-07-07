@@ -1,11 +1,10 @@
-import { AuthCoordinator, CredentialsStore } from "@ptools/auth";
+import { AuthCoordinator, McpOAuthStateStore } from "@ptools/auth";
+import { HostSecretStorage } from "@ptools/config";
 import { Layer } from "effect";
 import {
   CodeModeObjectIdentity,
   CodeModeObjectRequestOrigin,
-  CodeModeObjectStorage,
 } from "../platform.js";
-import { AuthCoordinatorLayer } from "./authCoordinatorLayer.js";
 import { DurableObjectAuthCoreLayer } from "./durableObjectAuthCoreLayer.js";
 import { CloudflareOAuthFlow } from "./oauthFlow.js";
 import { CloudflareOAuthFlowLayer } from "./oauthFlowLayer.js";
@@ -18,18 +17,18 @@ import { CloudflareOAuthFlowLayer } from "./oauthFlowLayer.js";
  * - CloudflareOAuthFlow for Worker/DO browser OAuth routes.
  *
  * Requires:
- * - CredentialsStore
- * - CodeModeObjectStorage
+ * - HostSecretStorage
+ * - McpOAuthStateStore
  * - CodeModeObjectIdentity
  * - CodeModeObjectRequestOrigin
  */
 export const DurableObjectAuthLayer: Layer.Layer<
   AuthCoordinator | CloudflareOAuthFlow,
   never,
-  | CredentialsStore
-  | CodeModeObjectStorage
+  | HostSecretStorage
+  | McpOAuthStateStore
   | CodeModeObjectIdentity
   | CodeModeObjectRequestOrigin
-> = Layer.merge(AuthCoordinatorLayer, CloudflareOAuthFlowLayer).pipe(
+> = Layer.merge(AuthCoordinator.Default, CloudflareOAuthFlowLayer).pipe(
   Layer.provide(DurableObjectAuthCoreLayer),
 );

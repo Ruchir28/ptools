@@ -256,28 +256,31 @@ const makeFakeMcpConnectorLive = () =>
   });
 
 const makeTestAuthCoordinatorLive = () =>
-  Layer.succeed(AuthCoordinator, {
-    origin: Effect.succeed("http://127.0.0.1/auth"),
-    callbackUrl: (serverName) =>
-      Effect.succeed(
-        `http://127.0.0.1/oauth/callback/${encodeURIComponent(serverName)}`,
-      ),
-    noteConfigured: () => Effect.void,
-    noteConnected: () => Effect.void,
-    noteConnectionError: () => Effect.void,
-    shouldAttachAuthProvider: () => Effect.succeed(false),
-    hasStoredCredentials: () => Effect.succeed(false),
-    providerFor: (serverName) =>
-      Effect.fail(
-        new AuthError({
-          message: `Unexpected auth provider request for ${serverName}`,
-        }),
-      ),
-    status: Effect.succeed({
-      authUrl: "http://127.0.0.1/auth",
-      servers: [],
+  Layer.succeed(
+    AuthCoordinator,
+    AuthCoordinator.make({
+      origin: Effect.succeed("http://127.0.0.1/auth"),
+      callbackUrl: (serverName) =>
+        Effect.succeed(
+          `http://127.0.0.1/oauth/callback/${encodeURIComponent(serverName)}`,
+        ),
+      noteConfigured: () => Effect.void,
+      noteConnected: () => Effect.void,
+      noteConnectionError: () => Effect.void,
+      shouldAttachAuthProvider: () => Effect.succeed(false),
+      hasStoredCredentials: () => Effect.succeed(false),
+      providerFor: (serverName) =>
+        Effect.fail(
+          new AuthError({
+            message: `Unexpected auth provider request for ${serverName}`,
+          }),
+        ),
+      status: Effect.succeed({
+        authUrl: "http://127.0.0.1/auth",
+        servers: [],
+      }),
     }),
-  });
+  );
 
 const toToolKeys = (context: {
   readonly actions: ReadonlyArray<{ readonly toolId: string }>;

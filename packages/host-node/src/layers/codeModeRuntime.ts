@@ -1,5 +1,10 @@
 import { resolve } from "node:path";
-import { AuthCoordinator, AuthError, CredentialError } from "@ptools/auth";
+import {
+  AuthCoordinator,
+  AuthError,
+  CredentialError,
+  McpOAuthCredentialStore,
+} from "@ptools/auth";
 import {
   CodeMode,
   CodeModeServerLayer,
@@ -8,7 +13,7 @@ import {
 } from "@ptools/code-mode";
 import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import {
-  ConfigSource,
+  ResolvedPtoolsConfigSource,
   ServerConfigError,
 } from "@ptools/config";
 import { ExecutorStartError, type ExecutorError } from "@ptools/executor";
@@ -19,13 +24,11 @@ import {
 import { Effect, Layer, Option } from "effect";
 import {
   NodeAuthCoordinatorLive,
-  NodeCredentialsStoreLive,
   NodeMcpAuthFlow,
 } from "./auth/index.js";
 import {
-  FileConfigSourceLive,
-  NodeConfigSourceLive,
-  ProcessEnvSecretResolverLive,
+  FileResolvedPtoolsConfigSourceLive,
+  NodeResolvedPtoolsConfigSourceLive,
 } from "../config.js";
 import {
   HostNodeError,
@@ -41,6 +44,7 @@ import {
   NodeHostPlatformLive,
   NodeHostRuntimePlatformLive,
   NodeHostSettings,
+  NodeKeyringHostSecretStorageLive,
   type NodeHostProcessPlatform,
 } from "./platform/index.js";
 
@@ -57,7 +61,7 @@ export type NodeCodeModeRuntimeServices =
   | CodeModeServer
   | AuthCoordinator
   | NodeMcpAuthFlow
-  | ConfigSource;
+  | ResolvedPtoolsConfigSource;
 
 export const NodeCodeModeRuntimeLive = (
   configPath?: string,
@@ -88,13 +92,13 @@ export const NodeCodeModeRuntimeLiveForHost = (input: {
     hostId: input.hostId,
     processPlatformLayer: input.processPlatformLayer,
   });
-  const configSourceLayer = makeConfigSourceLayer(input.configPath).pipe(
+  const configSourceLayer = makeResolvedPtoolsConfigSourceLayer(input.configPath).pipe(
     Layer.provide(platformLayer),
   );
   const authLayer = makeNodeAuthCoordinatorLive().pipe(
     Layer.provide(platformLayer),
   );
-  const codeModeLayer = NodeCodeModeLiveFromConfigSource({
+  const codeModeLayer = NodeCodeModeLiveFromResolvedPtoolsConfigSource({
     ...(input.options.executor?.denoExecutable === undefined
       ? {}
       : { denoExecutable: input.options.executor.denoExecutable }),
@@ -120,16 +124,16 @@ export const NodeCodeModeServerLive = (
     processPlatformLayer: NodeHostPlatformLive(options),
   });
 
-const NodeCodeModeLiveFromConfigSource = (options: {
+const NodeCodeModeLiveFromResolvedPtoolsConfigSource = (options: {
   readonly denoExecutable?: string;
 } = {}): Layer.Layer<
   CodeMode,
   HostNodeError | ServerConfigError,
-  ConfigSource | NodeHostIdentity | NodeHostSettings
+  ResolvedPtoolsConfigSource | NodeHostIdentity | NodeHostSettings
 > =>
   Layer.unwrapEffect(
     Effect.gen(function* () {
-      const source = yield* ConfigSource;
+      const source = yield* ResolvedPtoolsConfigSource;
       const config = yield* source.load;
 
       const registryLayer = makeMcpRegistryLive(config.mcpServers).pipe(
@@ -177,7 +181,13 @@ const makeNodeAuthCoordinatorLive = (): Layer.Layer<
 
       return NodeAuthCoordinatorLive().pipe(
         Layer.provide(
-          NodeCredentialsStoreLive({ serviceName: settings.auth.serviceName }),
+          McpOAuthCredentialStore.Default.pipe(
+            Layer.provide(
+              NodeKeyringHostSecretStorageLive({
+                serviceName: settings.auth.serviceName,
+              }),
+            ),
+          ),
         ),
         Layer.mapError((cause) =>
           toHostNodeError("Failed to start local Node MCP auth.", cause),
@@ -186,10 +196,10 @@ const makeNodeAuthCoordinatorLive = (): Layer.Layer<
     }),
   );
 
-const makeConfigSourceLayer = (
+const makeResolvedPtoolsConfigSourceLayer = (
   configPath: string | undefined,
 ): Layer.Layer<
-  ConfigSource,
+  ResolvedPtoolsConfigSource,
   ServerConfigError,
   NodeConfigDiscoveryContext
 > =>
@@ -198,18 +208,17 @@ const makeConfigSourceLayer = (
       const discovery = yield* NodeConfigDiscoveryContext;
 
       if (configPath === undefined) {
-        return NodeConfigSourceLive({
+        return NodeResolvedPtoolsConfigSourceLive({
           argv: discovery.argv,
           env: discovery.env,
           cwd: discovery.cwd,
         });
       }
 
-      return FileConfigSourceLive({
+      return FileResolvedPtoolsConfigSourceLive({
         path: resolve(discovery.cwd, configPath),
-      }).pipe(
-        Layer.provide(ProcessEnvSecretResolverLive({ env: discovery.env })),
-      );
+        env: discovery.env,
+      });
     }),
   );
 

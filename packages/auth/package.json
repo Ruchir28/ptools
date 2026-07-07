@@ -21,6 +21,10 @@
     "dist/contracts/*.js.map",
     "dist/contracts/*.d.ts",
     "dist/contracts/*.d.ts.map",
+    "dist/services/*.js",
+    "dist/services/*.js.map",
+    "dist/services/*.d.ts",
+    "dist/services/*.d.ts.map",
     "README.md",
     "LICENSE"
   ],

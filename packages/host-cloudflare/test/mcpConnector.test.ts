@@ -140,27 +140,30 @@ const makeUnavailableHttpConnectorLayer = () =>
   });
 
 const makeTestAuthCoordinatorLayer = (calls: { providerFor: number }) =>
-  Layer.succeed(AuthCoordinator, {
-    origin: Effect.succeed("https://ptools.example/hosts/demo/auth"),
-    callbackUrl: (serverName) =>
-      Effect.succeed(
-        `https://ptools.example/hosts/demo/oauth/callback/${encodeURIComponent(serverName)}`,
-      ),
-    noteConfigured: () => Effect.void,
-    noteConnected: () => Effect.void,
-    noteConnectionError: () => Effect.void,
-    shouldAttachAuthProvider: () => Effect.succeed(false),
-    hasStoredCredentials: () => Effect.succeed(false),
-    providerFor: () => {
-      calls.providerFor += 1;
+  Layer.succeed(
+    AuthCoordinator,
+    AuthCoordinator.make({
+      origin: Effect.succeed("https://ptools.example/hosts/demo/auth"),
+      callbackUrl: (serverName) =>
+        Effect.succeed(
+          `https://ptools.example/hosts/demo/oauth/callback/${encodeURIComponent(serverName)}`,
+        ),
+      noteConfigured: () => Effect.void,
+      noteConnected: () => Effect.void,
+      noteConnectionError: () => Effect.void,
+      shouldAttachAuthProvider: () => Effect.succeed(false),
+      hasStoredCredentials: () => Effect.succeed(false),
+      providerFor: () => {
+        calls.providerFor += 1;
 
-      return Effect.succeed({} as OAuthClientProvider);
-    },
-    status: Effect.succeed({
-      authUrl: "https://ptools.example/hosts/demo/auth",
-      servers: [],
+        return Effect.succeed({} as OAuthClientProvider);
+      },
+      status: Effect.succeed({
+        authUrl: "https://ptools.example/hosts/demo/auth",
+        servers: [],
+      }),
     }),
-  });
+  );
 
 const withHeaderCaptureServer = async (
   run: (url: string) => Promise<void>,

@@ -1,14 +1,12 @@
-import { parsePtoolsConfigJson, type PtoolsConfig } from "@ptools/config";
-import { PtoolsSecretValues } from "@ptools/config/contracts";
-import { Array as EffectArray, Effect, Option, Schema } from "effect";
 import {
-  CODE_MODE_OBJECT_CONFIG_BLOB_KEY,
-  CODE_MODE_OBJECT_SECRET_KEY_PREFIX,
-  CodeModeObjectIdentity,
-  CodeModeObjectStorage,
-  StoredConfigBlob,
-  codeModeObjectSecretKey,
-} from "../../layers/index.js";
+  ConfiguredHostConfigStore,
+  ConfiguredSecretStore,
+  parsePtoolsConfigJson,
+  type PtoolsConfig,
+} from "@ptools/config";
+import { PtoolsSecretValues } from "@ptools/config/contracts";
+import { Effect, Option, Schema } from "effect";
+import { CodeModeObjectIdentity } from "../../layers/index.js";
 import type {
   ConfigureCodeModeObjectError,
   ConfigureCodeModeObjectResult,
@@ -22,10 +20,10 @@ export const configureCodeModeObject = (input: {
 }): Effect.Effect<
   ConfigureCodeModeObjectResult,
   ConfigureCodeModeObjectError,
-  CodeModeObjectStorage | CodeModeObjectIdentity
+  ConfiguredHostConfigStore | CodeModeObjectIdentity
 > =>
   Effect.gen(function* () {
-    const storage = yield* CodeModeObjectStorage;
+    const configStore = yield* ConfiguredHostConfigStore;
     const identity = yield* CodeModeObjectIdentity;
     const parsed = yield* parsePtoolsConfigJson(
       input.rawConfigJson,
@@ -39,28 +37,14 @@ export const configureCodeModeObject = (input: {
 
     yield* rejectUnsupportedStdioConfig(parsed);
 
-    const updatedAt = new Date().toISOString();
-    const serverCount = Object.keys(parsed.mcpServers).length;
-    const blob = StoredConfigBlob.make({
-      config: parsed,
-      updatedAt,
-      serverCount,
-    });
-    const encodedBlob = yield* Schema.encode(StoredConfigBlob)(blob).pipe(
-      Effect.mapError(() => ({
-        code: "invalid_config" as const,
-        message: "Invalid host config",
-      })),
-    );
-
-    yield* storage
-      .put(CODE_MODE_OBJECT_CONFIG_BLOB_KEY, encodedBlob)
+    const result = yield* configStore
+      .replace({ config: parsed })
       .pipe(Effect.mapError(configStorageUnavailable));
 
     return {
       hostId: identity.hostId,
-      serverCount,
-      updatedAt,
+      serverCount: result.serverCount,
+      updatedAt: result.updatedAt,
     };
   });
 
@@ -69,46 +53,20 @@ export const configureCodeModeObjectSecrets = (input: {
 }): Effect.Effect<
   ConfigureCodeModeObjectSecretsResult,
   ConfigureCodeModeObjectError,
-  CodeModeObjectStorage | CodeModeObjectIdentity
+  ConfiguredSecretStore | CodeModeObjectIdentity
 > =>
   Effect.gen(function* () {
-    const storage = yield* CodeModeObjectStorage;
+    const configuredSecrets = yield* ConfiguredSecretStore;
     const identity = yield* CodeModeObjectIdentity;
     const secrets = yield* parseSecretsJson(input.rawSecretsJson);
-    const updatedAt = new Date().toISOString();
-    const secretCount = Object.keys(secrets).length;
-
-    const existing = yield* storage
-      .list<string>({
-        prefix: CODE_MODE_OBJECT_SECRET_KEY_PREFIX,
-      })
+    const result = yield* configuredSecrets
+      .replaceAll({ secrets })
       .pipe(Effect.mapError(secretStorageUnavailable));
-    const submittedKeys = new Set(
-      Object.keys(secrets).map(codeModeObjectSecretKey),
-    );
-    const staleKeys = [...existing.keys()].filter(
-      (key) => !submittedKeys.has(key),
-    );
-
-    yield* Effect.all([
-      ...Object.entries(secrets).map(([name, secret]) =>
-        storage
-          .put(codeModeObjectSecretKey(name), secret)
-          .pipe(Effect.mapError(secretStorageUnavailable)),
-      ),
-      EffectArray.match(staleKeys, {
-        onEmpty: () => Effect.void,
-        onNonEmpty: (keys) =>
-          storage
-            .delete(keys)
-            .pipe(Effect.mapError(secretStorageUnavailable), Effect.asVoid),
-      }),
-    ]);
 
     return {
       hostId: identity.hostId,
-      secretCount,
-      updatedAt,
+      secretCount: result.secretCount,
+      updatedAt: result.updatedAt,
     };
   });
 

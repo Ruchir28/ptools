@@ -421,7 +421,7 @@ describe("Cloudflare Worker ingress", () => {
     expect(secrets.status).toBe(400);
   });
 
-  it("resolves stored config secrets only when ConfigSource loads", async () => {
+  it("resolves stored config secrets only when ResolvedPtoolsConfigSource loads", async () => {
     const hostId = uniqueHostId();
     const rawConfigJson = configBody({
       headers: { Authorization: "Bearer ${env:TEST_MCP_TOKEN}" },
@@ -456,7 +456,7 @@ describe("Cloudflare Worker ingress", () => {
     });
   });
 
-  it("uses rotated secrets on the next ConfigSource load without re-uploading config", async () => {
+  it("uses rotated secrets on the next ResolvedPtoolsConfigSource load without re-uploading config", async () => {
     const hostId = uniqueHostId();
 
     await configureSecrets(hostId, {
@@ -500,7 +500,7 @@ describe("Cloudflare Worker ingress", () => {
     });
   });
 
-  it("fails ConfigSource.load when a stored secret is missing", async () => {
+  it("fails ResolvedPtoolsConfigSource.load when a stored secret is missing", async () => {
     const hostId = uniqueHostId();
 
     await configureHost(
@@ -524,7 +524,7 @@ describe("Cloudflare Worker ingress", () => {
     });
   });
 
-  it("fails ConfigSource.load when the stored config blob is invalid", async () => {
+  it("fails ResolvedPtoolsConfigSource.load when the stored config blob is invalid", async () => {
     const hostId = uniqueHostId();
     const stub = configTestStub(hostId);
 
@@ -543,7 +543,7 @@ describe("Cloudflare Worker ingress", () => {
 
     await expect(stub.loadResolvedConfigResultForTest()).resolves.toEqual({
       ok: false,
-      message: `Stored Cloudflare host ${hostId} config is invalid.`,
+      message: "Stored configured host config is invalid.",
     });
   });
 

@@ -1,13 +1,13 @@
 import {
   AuthCoordinatorCore,
-  AuthCoordinatorCoreLayer,
-  CredentialsStore,
+  McpOAuthCredentialStore,
+  McpOAuthStateStore,
 } from "@ptools/auth";
+import { HostSecretStorage } from "@ptools/config";
 import { Layer } from "effect";
 import {
   CodeModeObjectIdentity,
   CodeModeObjectRequestOrigin,
-  CodeModeObjectStorage,
 } from "../platform.js";
 import { CloudflareAuthPolicyLayer } from "./policy.js";
 import { CloudflareAuthProviderFactoryLayer } from "./providerFactory.js";
@@ -19,8 +19,8 @@ import { CloudflareAuthProviderFactoryLayer } from "./providerFactory.js";
  * policy and Cloudflare OAuth provider construction.
  *
  * Requires:
- * - CredentialsStore
- * - CodeModeObjectStorage
+ * - HostSecretStorage
+ * - McpOAuthStateStore
  * - CodeModeObjectIdentity
  * - CodeModeObjectRequestOrigin
  *
@@ -30,11 +30,15 @@ import { CloudflareAuthProviderFactoryLayer } from "./providerFactory.js";
 export const DurableObjectAuthCoreLayer: Layer.Layer<
   AuthCoordinatorCore,
   never,
-  | CredentialsStore
-  | CodeModeObjectStorage
+  | HostSecretStorage
+  | McpOAuthStateStore
   | CodeModeObjectIdentity
   | CodeModeObjectRequestOrigin
-> = AuthCoordinatorCoreLayer.pipe(
-  Layer.provide(CloudflareAuthProviderFactoryLayer),
+> = AuthCoordinatorCore.Default.pipe(
+  Layer.provide(
+    CloudflareAuthProviderFactoryLayer.pipe(
+      Layer.provide(McpOAuthCredentialStore.Default),
+    ),
+  ),
   Layer.provide(CloudflareAuthPolicyLayer),
 );

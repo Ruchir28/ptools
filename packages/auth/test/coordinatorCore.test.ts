@@ -12,7 +12,6 @@ import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AuthCoordinatorCore,
-  AuthCoordinatorCoreLayer,
   AuthCoordinatorPolicy,
   AuthProviderFactory,
   CredentialError,
@@ -37,7 +36,7 @@ const policy = AuthCoordinatorPolicy.of({
     `${serverName} needs manual OAuth client configuration.`,
 });
 
-describe("AuthCoordinatorCoreLayer", () => {
+describe("AuthCoordinatorCore.Default", () => {
   it("tracks only HTTP configs and formats host policy URLs", async () => {
     const status = await Effect.runPromise(
       Effect.gen(function* () {
@@ -500,7 +499,7 @@ const makeCoreLayer = (
   calls: { makeProvider: number } = { makeProvider: 0 },
   overrides: Partial<AuthCoordinatorOAuthProvider> = {},
 ) =>
-  AuthCoordinatorCoreLayer.pipe(
+  AuthCoordinatorCore.Default.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(AuthCoordinatorPolicy, policy),

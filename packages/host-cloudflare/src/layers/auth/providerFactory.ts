@@ -1,9 +1,12 @@
-import { AuthProviderFactory, CredentialsStore } from "@ptools/auth";
+import {
+  AuthProviderFactory,
+  McpOAuthCredentialStore,
+  McpOAuthStateStore,
+} from "@ptools/auth";
 import { Effect, Layer } from "effect";
 import {
   CodeModeObjectIdentity,
   CodeModeObjectRequestOrigin,
-  CodeModeObjectStorage,
 } from "../platform.js";
 import { CloudflareOAuthProvider } from "./provider.js";
 import type { CloudflareOAuthPlatform } from "./types.js";
@@ -16,8 +19,8 @@ import type { CloudflareOAuthPlatform } from "./types.js";
  * platform dependencies.
  *
  * Requires:
- * - CredentialsStore
- * - CodeModeObjectStorage
+ * - McpOAuthCredentialStore
+ * - McpOAuthStateStore
  * - CodeModeObjectIdentity
  * - CodeModeObjectRequestOrigin
  *
@@ -27,8 +30,8 @@ import type { CloudflareOAuthPlatform } from "./types.js";
 export const CloudflareAuthProviderFactoryLayer: Layer.Layer<
   AuthProviderFactory,
   never,
-  | CredentialsStore
-  | CodeModeObjectStorage
+  | McpOAuthCredentialStore
+  | McpOAuthStateStore
   | CodeModeObjectIdentity
   | CodeModeObjectRequestOrigin
 > = Layer.effect(
@@ -53,19 +56,19 @@ export const CloudflareAuthProviderFactoryLayer: Layer.Layer<
 const makeCloudflareOAuthPlatform: Effect.Effect<
   CloudflareOAuthPlatform,
   never,
-  | CredentialsStore
-  | CodeModeObjectStorage
+  | McpOAuthCredentialStore
+  | McpOAuthStateStore
   | CodeModeObjectIdentity
   | CodeModeObjectRequestOrigin
 > = Effect.gen(function* () {
-  const storage = yield* CodeModeObjectStorage;
+  const oauthCredentials = yield* McpOAuthCredentialStore;
+  const oauthStateStore = yield* McpOAuthStateStore;
   const identity = yield* CodeModeObjectIdentity;
   const requestOrigin = yield* CodeModeObjectRequestOrigin;
-  const credentialsStore = yield* CredentialsStore;
 
   return {
-    storage,
-    credentialsStore,
+    oauthCredentials,
+    oauthStateStore,
     hostId: identity.hostId,
     origin: requestOrigin.origin,
   };

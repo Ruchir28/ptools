@@ -7,7 +7,12 @@
  * directly; stable Durable Object platform values and request origin are
  * provided by CodeModeObject.
  */
-import { AuthCoordinator, AuthError, CredentialError } from "@ptools/auth";
+import {
+  AuthCoordinator,
+  AuthError,
+  CredentialError,
+  McpOAuthStateStore,
+} from "@ptools/auth";
 import {
   CodeMode,
   CodeModeServerLayer,
@@ -15,7 +20,14 @@ import {
   type CodeModeError,
 } from "@ptools/code-mode";
 import { CodeModeServer } from "@ptools/code-mode-api/effect";
-import { ConfigSource, ServerConfigError } from "@ptools/config";
+import {
+  ResolvedPtoolsConfigSource,
+  ConfiguredHostConfigStore,
+  ConfiguredSecretStore,
+  HostSecretStorage,
+  HostStateStorage,
+  ServerConfigError,
+} from "@ptools/config";
 import { ExecutorStartError, type ExecutorError } from "@ptools/executor";
 import {
   makeMcpRegistryLive,
@@ -23,11 +35,6 @@ import {
 } from "@ptools/mcp-registry";
 import { Data, Effect, Layer, Option } from "effect";
 import { CloudflareOAuthFlow, DurableObjectAuthLayer } from "./auth/index.js";
-import { DurableObjectCredentialsStoreLayer } from "./auth/credentials.js";
-import {
-  DurableObjectConfigSourceLayer,
-  DurableObjectSecretResolverLayer,
-} from "./config.js";
 import {
   CloudflareDynamicWorkerExecutorLayer,
   CodeModeObjectWorkerLoader,
@@ -39,7 +46,6 @@ import {
 import {
   CodeModeObjectIdentity,
   CodeModeObjectRequestOrigin,
-  CodeModeObjectStorage,
 } from "./platform.js";
 
 export class CloudflareCodeModeRuntimeError extends Data.TaggedError(
@@ -54,15 +60,15 @@ export type CloudflareCodeModeRuntimeServices =
   | CodeMode
   | AuthCoordinator
   | CloudflareOAuthFlow
-  | ConfigSource;
+  | ResolvedPtoolsConfigSource;
 
-const CloudflareCodeModeLayerFromConfigSource: Layer.Layer<
+const CloudflareCodeModeLayerFromResolvedPtoolsConfigSource: Layer.Layer<
   CodeMode,
   CloudflareCodeModeRuntimeError | ServerConfigError,
-  ConfigSource | AuthCoordinator | CodeModeObjectWorkerLoader
+  ResolvedPtoolsConfigSource | AuthCoordinator | CodeModeObjectWorkerLoader
 > = Layer.unwrapEffect(
   Effect.gen(function* () {
-    const source = yield* ConfigSource;
+    const source = yield* ResolvedPtoolsConfigSource;
     const config = yield* source.load;
 
     const registryLayer = makeMcpRegistryLive(config.mcpServers).pipe(
@@ -98,18 +104,19 @@ const CloudflareCodeModeLayerFromConfigSource: Layer.Layer<
 export const CloudflareCodeModeRuntimeLayer: Layer.Layer<
   CloudflareCodeModeRuntimeServices,
   CloudflareCodeModeRuntimeError | ServerConfigError,
-  | CodeModeObjectStorage
+  | HostStateStorage
+  | HostSecretStorage
+  | McpOAuthStateStore
   | CodeModeObjectIdentity
   | CodeModeObjectWorkerLoader
   | CodeModeObjectRequestOrigin
 > = (() => {
-  const configSourceLayer = DurableObjectConfigSourceLayer.pipe(
-    Layer.provide(DurableObjectSecretResolverLayer),
+  const configSourceLayer = ResolvedPtoolsConfigSource.Default.pipe(
+    Layer.provide(ConfiguredSecretStore.Default),
+    Layer.provide(ConfiguredHostConfigStore.Default),
   );
-  const authLayer = DurableObjectAuthLayer.pipe(
-    Layer.provide(DurableObjectCredentialsStoreLayer),
-  );
-  const codeModeLayer = CloudflareCodeModeLayerFromConfigSource.pipe(
+  const authLayer = DurableObjectAuthLayer;
+  const codeModeLayer = CloudflareCodeModeLayerFromResolvedPtoolsConfigSource.pipe(
     Layer.provide(configSourceLayer),
     Layer.provide(authLayer),
   );

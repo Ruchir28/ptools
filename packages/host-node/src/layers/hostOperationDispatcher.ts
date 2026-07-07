@@ -22,7 +22,7 @@ import {
   type HostNodeError,
   type NodeCodeModeHostOptions,
 } from "../options.js";
-import { ConfigSource, type ServerConfigError } from "@ptools/config";
+import { ResolvedPtoolsConfigSource, type ServerConfigError } from "@ptools/config";
 import {
   NodeHostPlatformLive,
   type NodeHostProcessPlatform,
@@ -151,7 +151,7 @@ const runNodeHostOperation = (
     const codeModeServer = yield* CodeModeServer;
     const authCoordinator = yield* AuthCoordinator;
     const mcpAuthFlow = yield* NodeMcpAuthFlow;
-    const configSource = yield* ConfigSource;
+    const configSource = yield* ResolvedPtoolsConfigSource;
     const config = yield* configSource.load;
 
     for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {

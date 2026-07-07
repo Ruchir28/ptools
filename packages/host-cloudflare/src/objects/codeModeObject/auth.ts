@@ -1,13 +1,8 @@
-import { AuthCoordinator } from "@ptools/auth";
+import { AuthCoordinator, McpOAuthStateStore } from "@ptools/auth";
 import type { McpAuthStatus } from "@ptools/auth/contracts";
-import { ConfigSource, ServerConfigError } from "@ptools/config";
+import { ResolvedPtoolsConfigSource, ServerConfigError } from "@ptools/config";
 import { Data, Effect, Option } from "effect";
-import {
-  CloudflareOAuthFlow,
-  CodeModeObjectIdentity,
-  CodeModeObjectStorage,
-  verifyAndConsumeOAuthState,
-} from "../../layers/index.js";
+import { CloudflareOAuthFlow } from "../../layers/index.js";
 import type {
   CodeModeObjectMcpAuthError,
   CompleteMcpOAuthCallbackResult,
@@ -62,14 +57,14 @@ export const parseCompleteMcpOAuthCallback = (input: {
   readonly method: string;
   readonly url: string;
   readonly bodyText: Option.Option<string>;
+  readonly expectedHostId: string;
 }): Effect.Effect<
   ParsedCompleteMcpOAuthCallback,
   CodeModeObjectMcpAuthError,
-  CodeModeObjectStorage | CodeModeObjectIdentity
+  McpOAuthStateStore
 > =>
   Effect.gen(function* () {
-    const storage = yield* CodeModeObjectStorage;
-    const identity = yield* CodeModeObjectIdentity;
+    const oauthStateStore = yield* McpOAuthStateStore;
     const url = yield* Effect.try({
       try: () => new URL(input.url),
       catch: () => invalidOAuthCallback("Invalid OAuth callback URL"),
@@ -77,12 +72,13 @@ export const parseCompleteMcpOAuthCallback = (input: {
     const params = callbackParams(input.method, url, input.bodyText);
     const state = yield* requiredCallbackParameter(params, "state");
 
-    const payload = yield* verifyAndConsumeOAuthState({
-      storage,
-      rawState: state,
-      expectedHostId: identity.hostId,
-      expectedProvider: input.provider,
-    }).pipe(Effect.mapError((cause) => invalidOAuthCallback(cause.message)));
+    const payload = yield* oauthStateStore
+      .verifyAndConsume({
+        rawState: state,
+        expectedHostId: input.expectedHostId,
+        expectedProvider: input.provider,
+      })
+      .pipe(Effect.mapError((cause) => invalidOAuthCallback(cause.message)));
 
     return yield* Option.fromNullable(params.get("error")).pipe(
       Option.match({
@@ -127,10 +123,10 @@ export const finishMcpOAuthCallback = (input: {
 export const initializeConfiguredMcpAuth = (): Effect.Effect<
   void,
   ServerConfigError,
-  AuthCoordinator | ConfigSource
+  AuthCoordinator | ResolvedPtoolsConfigSource
 > =>
   Effect.gen(function* () {
-    const source = yield* ConfigSource;
+    const source = yield* ResolvedPtoolsConfigSource;
     const auth = yield* AuthCoordinator;
     const config = yield* source.load;
 

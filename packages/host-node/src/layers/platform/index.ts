@@ -2,6 +2,11 @@ export { NodeConfigDiscoveryContext, NodeConfigDiscoveryContextLive } from "./co
 export { NodeHostIdentity, NodeHostIdentityLive } from "./hostIdentity.js";
 export { NodeHostSettings, NodeHostSettingsLive } from "./hostSettings.js";
 export {
+  NodeFileHostStateStorageLive,
+  NodeKeyringHostSecretStorageLive,
+  encodeHostId,
+} from "./hostStorage.js";
+export {
   NodeHostPlatformLive,
   NodeHostRuntimePlatformLive,
   type NodeHostProcessPlatform,

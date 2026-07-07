@@ -1,34 +1,34 @@
+import { HostStorageError } from "@ptools/config";
 import { Effect, Either, Option } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-  CodeModeObjectStorageError,
-  makeCodeModeObjectStorage,
-} from "../src/layers/platform.js";
+import { makeDurableObjectHostStorage } from "../src/layers/platform.js";
 import { requestOrigin } from "../src/worker/request.js";
 
-describe("makeCodeModeObjectStorage", () => {
-  it("models missing and present values with Option", async () => {
+describe("makeDurableObjectHostStorage", () => {
+  it("models missing and present string values with Option", async () => {
     const values = new Map<string, unknown>([["present", "value"]]);
-    const storage = makeCodeModeObjectStorage(
+    const storage = makeDurableObjectHostStorage(
       makeDurableObjectStorage({
         get: ((key: string) =>
           Promise.resolve(values.get(key))) as DurableObjectStorage["get"],
       }),
+      "state",
     );
 
-    const missing = await Effect.runPromise(storage.get<string>("missing"));
-    const present = await Effect.runPromise(storage.get<string>("present"));
+    const missing = await Effect.runPromise(storage.get("missing"));
+    const present = await Effect.runPromise(storage.get("present"));
 
     expect(Option.isNone(missing)).toBe(true);
     expect(Option.getOrUndefined(present)).toBe("value");
   });
 
-  it("maps Cloudflare failures into a typed storage error", async () => {
+  it("maps Cloudflare failures into a typed host storage error", async () => {
     const cause = new Error("storage unavailable");
-    const storage = makeCodeModeObjectStorage(
+    const storage = makeDurableObjectHostStorage(
       makeDurableObjectStorage({
         get: (() => Promise.reject(cause)) as DurableObjectStorage["get"],
       }),
+      "secret",
     );
 
     const result = await Effect.runPromise(
@@ -37,8 +37,9 @@ describe("makeCodeModeObjectStorage", () => {
 
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(CodeModeObjectStorageError);
+      expect(result.left).toBeInstanceOf(HostStorageError);
       expect(result.left).toMatchObject({
+        storage: "secret",
         operation: "get",
         key: "key",
         cause,

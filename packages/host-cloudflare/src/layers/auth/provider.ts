@@ -6,26 +6,19 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import {
   AuthError,
-  CredentialError,
   type AuthCoordinatorOAuthProvider,
   type HttpMcpConfig,
+  type McpOAuthCredentialIdentity,
 } from "@ptools/auth";
 import { Data, Effect, Option } from "effect";
-import {
-  codeModeObjectCredentialClientKey,
-  codeModeObjectCredentialDiscoveryKey,
-  codeModeObjectCredentialPkceVerifierKey,
-  codeModeObjectCredentialTokensKey,
-} from "./keys.js";
-import { signOAuthState } from "./oauthState.js";
 import type { CloudflareOAuthPlatform } from "./types.js";
 
 /**
  * MCP SDK OAuth provider adapter for one configured HTTP MCP server.
  *
  * Parameters:
- * - platform: private platform facts containing host identity, DO storage, and
- *   CredentialsStore.
+ * - platform: private platform facts containing host identity, OAuth state
+ *   store, and OAuth credential store.
  * - serverName: ptools MCP server name.
  * - config: resolved HTTP MCP config for this server.
  * - onAuthorizationUrl: callback used by the coordinator to record the URL
@@ -35,6 +28,7 @@ import type { CloudflareOAuthPlatform } from "./types.js";
 export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
   readonly #platform: CloudflareOAuthPlatform;
   readonly #serverName: string;
+  readonly #serverUrl: string;
   readonly #auth: OAuthProviderAuth;
   /**
    * Callback invoked when the MCP SDK has produced an Identity Provider (IdP)
@@ -61,6 +55,7 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
   }) {
     this.#platform = options.platform;
     this.#serverName = options.serverName;
+    this.#serverUrl = options.config.url;
     this.#auth = makeOAuthProviderAuth(options.config);
     this.#onAuthorizationUrl = options.onAuthorizationUrl;
 
@@ -111,8 +106,7 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
 
   state(): Promise<string> {
     return Effect.runPromise(
-      signOAuthState({
-        storage: this.#platform.storage,
+      this.#platform.oauthStateStore.sign({
         payload: {
           provider: this.#serverName,
           hostId: this.#platform.hostId,
@@ -129,9 +123,9 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
     return ClientRegistration.$match(this.#auth.clientRegistration, {
       Dynamic: () =>
         Effect.runPromise(
-          this.#readOptionalJson<OAuthClientInformationMixed>(
-            codeModeObjectCredentialClientKey(this.#serverName),
-          ).pipe(Effect.map(Option.getOrUndefined)),
+          this.#platform.oauthCredentials
+            .getClientInformation(this.#credentialIdentity())
+            .pipe(Effect.map(Option.getOrUndefined)),
         ),
       PreRegistered: ({ clientId, clientSecret }) =>
         Promise.resolve({
@@ -148,8 +142,8 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
     clientInformation: OAuthClientInformationMixed,
   ): Promise<void> {
     return Effect.runPromise(
-      this.#writeJson(
-        codeModeObjectCredentialClientKey(this.#serverName),
+      this.#platform.oauthCredentials.setClientInformation(
+        this.#credentialIdentity(),
         clientInformation,
       ),
     );
@@ -157,25 +151,25 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
 
   tokens(): Promise<OAuthTokens | undefined> {
     return Effect.runPromise(
-      this.#readOptionalJson<OAuthTokens>(
-        codeModeObjectCredentialTokensKey(this.#serverName),
-      ).pipe(Effect.map(Option.getOrUndefined)),
+      this.#platform.oauthCredentials
+        .getTokens(this.#credentialIdentity())
+        .pipe(Effect.map(Option.getOrUndefined)),
     );
   }
 
   saveTokens(tokens: OAuthTokens): Promise<void> {
     return Effect.runPromise(
-      this.#writeJson(
-        codeModeObjectCredentialTokensKey(this.#serverName),
+      this.#platform.oauthCredentials.setTokens(
+        this.#credentialIdentity(),
         tokens,
       ),
     );
   }
 
-  hasStoredCredentials(): Effect.Effect<boolean, CredentialError> {
-    return this.#readOptionalJson<OAuthTokens>(
-      codeModeObjectCredentialTokensKey(this.#serverName),
-    ).pipe(Effect.map(Option.isSome));
+  hasStoredCredentials() {
+    return this.#platform.oauthCredentials.hasStoredCredentials(
+      this.#credentialIdentity(),
+    );
   }
 
   /**
@@ -202,8 +196,8 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
    */
   saveCodeVerifier(codeVerifier: string): Promise<void> {
     return Effect.runPromise(
-      this.#platform.credentialsStore.set(
-        codeModeObjectCredentialPkceVerifierKey(this.#serverName),
+      this.#platform.oauthCredentials.setCodeVerifier(
+        this.#credentialIdentity(),
         codeVerifier,
       ),
     );
@@ -214,22 +208,9 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
    */
   codeVerifier(): Promise<string> {
     return Effect.runPromise(
-      this.#platform.credentialsStore
-        .get(codeModeObjectCredentialPkceVerifierKey(this.#serverName))
-        .pipe(
-          Effect.map(Option.fromNullable),
-          Effect.flatMap(
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new CredentialError({
-                    message: `Missing OAuth PKCE verifier for ${this.#serverName}. Restart authorization from the ptools auth route.`,
-                  }),
-                ),
-              onSome: Effect.succeed,
-            }),
-          ),
-        ),
+      this.#platform.oauthCredentials.getCodeVerifier(
+        this.#credentialIdentity(),
+      ),
     );
   }
 
@@ -237,28 +218,10 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
     scope: "all" | "client" | "tokens" | "verifier" | "discovery",
   ): Promise<void> {
     return Effect.runPromise(
-      Effect.all([
-        scope === "all" || scope === "tokens"
-          ? this.#platform.credentialsStore.delete(
-              codeModeObjectCredentialTokensKey(this.#serverName),
-            )
-          : Effect.void,
-        scope === "all" || scope === "client"
-          ? this.#platform.credentialsStore.delete(
-              codeModeObjectCredentialClientKey(this.#serverName),
-            )
-          : Effect.void,
-        scope === "all" || scope === "verifier"
-          ? this.#platform.credentialsStore.delete(
-              codeModeObjectCredentialPkceVerifierKey(this.#serverName),
-            )
-          : Effect.void,
-        scope === "all" || scope === "discovery"
-          ? this.#platform.credentialsStore.delete(
-              codeModeObjectCredentialDiscoveryKey(this.#serverName),
-            )
-          : Effect.void,
-      ]).pipe(Effect.asVoid),
+      this.#platform.oauthCredentials.invalidate(
+        this.#credentialIdentity(),
+        scope,
+      ),
     );
   }
 
@@ -271,8 +234,8 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
    */
   saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
     return Effect.runPromise(
-      this.#writeJson(
-        codeModeObjectCredentialDiscoveryKey(this.#serverName),
+      this.#platform.oauthCredentials.setDiscoveryState(
+        this.#credentialIdentity(),
         state,
       ),
     );
@@ -283,40 +246,17 @@ export class CloudflareOAuthProvider implements AuthCoordinatorOAuthProvider {
    */
   discoveryState(): Promise<OAuthDiscoveryState | undefined> {
     return Effect.runPromise(
-      this.#readOptionalJson<OAuthDiscoveryState>(
-        codeModeObjectCredentialDiscoveryKey(this.#serverName),
-      ).pipe(Effect.map(Option.getOrUndefined)),
+      this.#platform.oauthCredentials
+        .getDiscoveryState(this.#credentialIdentity())
+        .pipe(Effect.map(Option.getOrUndefined)),
     );
   }
 
-  /**
-   * Missing credentials are valid absence; malformed stored JSON is an error.
-   */
-  #readOptionalJson<Value>(
-    key: string,
-  ): Effect.Effect<Option.Option<Value>, CredentialError> {
-    return this.#platform.credentialsStore.get(key).pipe(
-      Effect.map(Option.fromNullable),
-      Effect.flatMap(
-        Effect.transposeMapOption((value) =>
-          Effect.try({
-            try: () => JSON.parse(value) as Value,
-            catch: (cause) =>
-              new CredentialError({
-                message: `Failed to parse Cloudflare credential ${key}`,
-                cause,
-              }),
-          }),
-        ),
-      ),
-    );
-  }
-
-  #writeJson(
-    key: string,
-    value: unknown,
-  ): Effect.Effect<void, CredentialError> {
-    return this.#platform.credentialsStore.set(key, JSON.stringify(value));
+  #credentialIdentity(): McpOAuthCredentialIdentity {
+    return {
+      serverName: this.#serverName,
+      serverUrl: this.#serverUrl,
+    };
   }
 }
 

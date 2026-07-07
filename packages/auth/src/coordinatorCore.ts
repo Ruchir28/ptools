@@ -1,18 +1,22 @@
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { ResolvedHttpMcpConfig } from "@ptools/config";
-import { Context, Data, Effect, Layer, Option, SynchronizedRef } from "effect";
+import { Context, Data, Effect, Option, SynchronizedRef } from "effect";
 import {
   AuthError,
   CredentialError,
   isAuthRequiredError,
   isDynamicClientRegistrationUnsupported,
   safeErrorMessage,
-  type HttpMcpConfig,
-  type McpAuthServerStatus,
-  type McpAuthStatus,
-  type UpstreamHttpAuthConfig,
-  type UpstreamMcpConfig,
-} from "./index.js";
+} from "./authErrors.js";
+import type {
+  McpAuthServerStatus,
+  McpAuthStatus,
+} from "./contracts/index.js";
+import type {
+  HttpMcpConfig,
+  UpstreamHttpAuthConfig,
+  UpstreamMcpConfig,
+} from "./authTypes.js";
 
 /**
  * Host-specific projection policy for HTTP MCP auth state.
@@ -90,6 +94,72 @@ export class AuthProviderFactory extends Context.Tag(
   }
 >() {}
 
+export interface AuthCoordinatorCoreService {
+  /** Return AuthCoordinatorPolicy.origin. */
+  readonly origin: Effect.Effect<string, AuthError>;
+  /** Build callback URL for serverName through policy.callbackUrl. */
+  readonly callbackUrl: (serverName: string) => Effect.Effect<string, AuthError>;
+  /** Return the configured HTTP MCP config for host OAuth flows. */
+  readonly httpConfigFor: (
+    serverName: string,
+  ) => Effect.Effect<HttpMcpConfig, AuthError>;
+  /**
+   * Reconcile the auth core with the latest authoritative server config.
+   *
+   * HTTP configs replace the previous runtime auth record and invalidate any
+   * cached OAuth provider so its next use observes the new URL/auth config.
+   * Non-HTTP configs remove stale HTTP auth state while remaining known to the
+   * core, allowing later connection lifecycle events to be ignored.
+   */
+  readonly noteConfigured: (
+    serverName: string,
+    jsServerName: string,
+    config: UpstreamMcpConfig,
+  ) => Effect.Effect<void>;
+  /** Mark an HTTP server connected and clear pending auth fields. */
+  readonly noteConnected: (serverName: string) => Effect.Effect<void, AuthError>;
+  /** Record an HTTP connection/auth error. */
+  readonly noteConnectionError: (
+    serverName: string,
+    error: unknown,
+  ) => Effect.Effect<void, AuthError>;
+  /** Return true when the HTTP connector should attach an OAuth provider. */
+  readonly shouldAttachAuthProvider: (serverName: string) => Effect.Effect<boolean>;
+  /** Ask the host OAuth provider whether credentials are already stored. */
+  readonly hasStoredCredentials: (
+    serverName: string,
+    config: HttpMcpConfig,
+  ) => Effect.Effect<boolean>;
+  /** Return the cached OAuth provider or create one through the factory. */
+  readonly providerFor: (
+    serverName: string,
+    config: HttpMcpConfig,
+  ) => Effect.Effect<AuthCoordinatorOAuthProvider, AuthError>;
+  /** Project current HTTP auth state into McpAuthStatus. */
+  readonly status: Effect.Effect<McpAuthStatus>;
+  /** Register callback invoked after a server finishes authorization. */
+  readonly setAuthorizedHandler: (
+    handler: (serverName: string) => Promise<void>,
+  ) => Effect.Effect<void>;
+  /** Register callback invoked when a server should be refreshed/reloaded. */
+  readonly setRefreshHandler: (
+    handler: (serverName: string) => Promise<void>,
+  ) => Effect.Effect<void>;
+  /** Store latest authorization URL and mark server requires_auth. */
+  readonly setAuthorizationUrl: (
+    serverName: string,
+    authorizationUrl: URL,
+  ) => Effect.Effect<void, AuthError>;
+  /** Return the latest IdP/provider authorization URL captured for a server. */
+  readonly authorizationUrlFor: (serverName: string) => Effect.Effect<string, AuthError>;
+  /** Mark a server as waiting for the browser/provider authorization step. */
+  readonly markAuthorizationInProgress: (
+    serverName: string,
+  ) => Effect.Effect<void, AuthError>;
+  /** Mark OAuth complete for serverName and invoke authorized handler. */
+  readonly markAuthorized: (serverName: string) => Effect.Effect<void, AuthError>;
+}
+
 /**
  * Shared HTTP MCP auth state machine.
  *
@@ -97,86 +167,12 @@ export class AuthProviderFactory extends Context.Tag(
  * It owns only in-memory runtime coordination state; host providers own
  * credential persistence.
  */
-export class AuthCoordinatorCore extends Context.Tag(
+export class AuthCoordinatorCore extends Effect.Service<AuthCoordinatorCore>()(
   "@ptools/AuthCoordinatorCore",
-)<
-  AuthCoordinatorCore,
   {
-    /** Return AuthCoordinatorPolicy.origin. */
-    readonly origin: Effect.Effect<string, AuthError>;
-    /** Build callback URL for serverName through policy.callbackUrl. */
-    readonly callbackUrl: (
-      serverName: string,
-    ) => Effect.Effect<string, AuthError>;
-    /** Return the configured HTTP MCP config for host OAuth flows. */
-    readonly httpConfigFor: (
-      serverName: string,
-    ) => Effect.Effect<HttpMcpConfig, AuthError>;
-    /**
-     * Reconcile the auth core with the latest authoritative server config.
-     *
-     * HTTP configs replace the previous runtime auth record and invalidate any
-     * cached OAuth provider so its next use observes the new URL/auth config.
-     * Non-HTTP configs remove stale HTTP auth state while remaining known to
-     * the core, allowing later connection lifecycle events to be ignored.
-     */
-    readonly noteConfigured: (
-      serverName: string,
-      jsServerName: string,
-      config: UpstreamMcpConfig,
-    ) => Effect.Effect<void>;
-    /** Mark an HTTP server connected and clear pending auth fields. */
-    readonly noteConnected: (
-      serverName: string,
-    ) => Effect.Effect<void, AuthError>;
-    /** Record an HTTP connection/auth error. */
-    readonly noteConnectionError: (
-      serverName: string,
-      error: unknown,
-    ) => Effect.Effect<void, AuthError>;
-    /** Return true when the HTTP connector should attach an OAuth provider. */
-    readonly shouldAttachAuthProvider: (
-      serverName: string,
-    ) => Effect.Effect<boolean>;
-    /** Ask the host OAuth provider whether credentials are already stored. */
-    readonly hasStoredCredentials: (
-      serverName: string,
-      config: HttpMcpConfig,
-    ) => Effect.Effect<boolean>;
-    /** Return the cached OAuth provider or create one through the factory. */
-    readonly providerFor: (
-      serverName: string,
-      config: HttpMcpConfig,
-    ) => Effect.Effect<AuthCoordinatorOAuthProvider, AuthError>;
-    /** Project current HTTP auth state into McpAuthStatus. */
-    readonly status: Effect.Effect<McpAuthStatus>;
-    /** Register callback invoked after a server finishes authorization. */
-    readonly setAuthorizedHandler: (
-      handler: (serverName: string) => Promise<void>,
-    ) => Effect.Effect<void>;
-    /** Register callback invoked when a server should be refreshed/reloaded. */
-    readonly setRefreshHandler: (
-      handler: (serverName: string) => Promise<void>,
-    ) => Effect.Effect<void>;
-    /** Store latest authorization URL and mark server requires_auth. */
-    readonly setAuthorizationUrl: (
-      serverName: string,
-      authorizationUrl: URL,
-    ) => Effect.Effect<void, AuthError>;
-    /** Return the latest IdP/provider authorization URL captured for a server. */
-    readonly authorizationUrlFor: (
-      serverName: string,
-    ) => Effect.Effect<string, AuthError>;
-    /** Mark a server as waiting for the browser/provider authorization step. */
-    readonly markAuthorizationInProgress: (
-      serverName: string,
-    ) => Effect.Effect<void, AuthError>;
-    /** Mark OAuth complete for serverName and invoke authorized handler. */
-    readonly markAuthorized: (
-      serverName: string,
-    ) => Effect.Effect<void, AuthError>;
-  }
->() {}
+    effect: makeAuthCoordinatorCore(),
+  },
+) {}
 
 interface AuthServerRecord {
   readonly serverName: string;
@@ -238,13 +234,12 @@ interface AuthCoordinatorCoreSnapshot {
  * Builds one shared in-memory core instance from host policy and provider
  * factory.
  */
-export const AuthCoordinatorCoreLayer: Layer.Layer<
-  AuthCoordinatorCore,
+function makeAuthCoordinatorCore(): Effect.Effect<
+  AuthCoordinatorCoreService,
   never,
   AuthCoordinatorPolicy | AuthProviderFactory
-> = Layer.effect(
-  AuthCoordinatorCore,
-  Effect.gen(function* () {
+> {
+  return Effect.gen(function* () {
     const policy = yield* AuthCoordinatorPolicy;
     const providerFactory = yield* AuthProviderFactory;
     const snapshot = yield* SynchronizedRef.make<AuthCoordinatorCoreSnapshot>({
@@ -254,7 +249,7 @@ export const AuthCoordinatorCoreLayer: Layer.Layer<
       ignoredServers: new Set(),
     });
 
-    const service = AuthCoordinatorCore.of({
+    return {
       origin: Effect.succeed(policy.origin),
       callbackUrl: (serverName) =>
         // Per-server redirectUri from auth config overrides the host
@@ -337,11 +332,9 @@ export const AuthCoordinatorCoreLayer: Layer.Layer<
       markAuthorizationInProgress: (serverName) =>
         markAuthorizationInProgress(snapshot, serverName),
       markAuthorized: (serverName) => markAuthorized(snapshot, serverName),
-    });
-
-    return service;
-  }),
-);
+    } satisfies AuthCoordinatorCoreService;
+  });
+}
 
 /**
  * Replaces all derived runtime auth state for one authoritative config entry.

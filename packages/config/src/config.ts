@@ -20,11 +20,11 @@ import {
 } from "./contracts/index.js";
 import type { UnresolvedHttpMcpAuthConfig } from "./contracts/configSchemaFields.js";
 import { ServerConfigError } from "./configErrors.js";
-import { SecretResolver } from "./services/index.js";
+import { ConfiguredSecretStore } from "./services/configuredSecrets.js";
 
 export * from "./contracts/index.js";
 export { ServerConfigError } from "./configErrors.js";
-export { ConfigSource, SecretResolver } from "./services/index.js";
+export { ConfiguredSecretStore } from "./services/configuredSecrets.js";
 
 export interface LoadPtoolsConfigOptions {
   readonly baseDir?: string;
@@ -94,11 +94,28 @@ export const resolvePtoolsConfig = (
 export const resolvePtoolsConfigWithSecrets = (
   config: PtoolsConfig,
   options: LoadPtoolsConfigOptions = {},
-): Effect.Effect<ResolvedPtoolsConfig, ServerConfigError, SecretResolver> =>
+): Effect.Effect<
+  ResolvedPtoolsConfig,
+  ServerConfigError,
+  ConfiguredSecretStore
+> =>
   Effect.gen(function* () {
-    const secrets = yield* SecretResolver;
+    const secrets = yield* ConfiguredSecretStore;
 
-    return yield* resolvePtoolsConfigWithLookup(config, secrets.get, options);
+    return yield* resolvePtoolsConfigWithLookup(
+      config,
+      (name) =>
+        secrets.get(name).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerConfigError({
+                message: cause.message,
+                cause,
+              }),
+          ),
+        ),
+      options,
+    );
   });
 
 const resolvePtoolsConfigWithLookup = (

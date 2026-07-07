@@ -5,3 +5,6 @@
  * users, while source ownership remains under `src/services/`.
  */
 export * from "./configServices.js";
+export * from "./configuredHostConfig.js";
+export * from "./configuredSecrets.js";
+export * from "./hostStorage.js";

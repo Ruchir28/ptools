@@ -51,7 +51,7 @@ describe("Node Code Mode executor startup", () => {
 });
 
 describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
-  it("creates a client from an explicit config file through ConfigSource", async () => {
+  it("creates a client from an explicit config file through ResolvedPtoolsConfigSource", async () => {
     const configPath = await writeFixtureConfig("config-file");
     const client = await createNodeCodeModeClient(configPath);
 

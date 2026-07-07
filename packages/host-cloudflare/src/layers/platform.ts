@@ -1,41 +1,15 @@
-import { Context, Data, Effect, Layer, Option } from "effect";
+import { McpOAuthStateStore } from "@ptools/auth";
+import {
+  HostSecretStorage,
+  HostStateStorage,
+  HostStorageError,
+  type HostStorageOperations,
+} from "@ptools/config";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   CodeModeObjectWorkerLoader,
   type CodeModeObjectWorkerLoaderService,
 } from "./executor/workerLoaderService.js";
-
-export class CodeModeObjectStorageError extends Data.TaggedError(
-  "CodeModeObjectStorageError",
-)<{
-  readonly operation: "get" | "put" | "delete" | "list";
-  readonly key?: string;
-  readonly cause: unknown;
-}> {}
-
-export class CodeModeObjectStorage extends Context.Tag(
-  "@ptools/host-cloudflare/CodeModeObjectStorage",
-)<
-  CodeModeObjectStorage,
-  {
-    readonly get: <Value>(
-      key: string,
-    ) => Effect.Effect<Option.Option<Value>, CodeModeObjectStorageError>;
-    readonly put: <Value>(
-      key: string,
-      value: Value,
-    ) => Effect.Effect<void, CodeModeObjectStorageError>;
-    readonly delete: (
-      key: string | ReadonlyArray<string>,
-    ) => Effect.Effect<void, CodeModeObjectStorageError>;
-    readonly list: <Value>(
-      options?: DurableObjectListOptions,
-    ) => Effect.Effect<ReadonlyMap<string, Value>, CodeModeObjectStorageError>;
-  }
->() {}
-
-export type CodeModeObjectStorageService = Context.Tag.Service<
-  typeof CodeModeObjectStorage
->;
 
 export class CodeModeObjectIdentity extends Context.Tag(
   "@ptools/host-cloudflare/CodeModeObjectIdentity",
@@ -58,71 +32,103 @@ export class CodeModeObjectRequestOrigin extends Context.Tag(
 /**
  * Supplies stable, object-lifetime platform values.
  *
- * `CodeModeObject` constructs stable adapters once and reuses this
- * Layer.succeed graph for platform-only workflows and the config-derived host
- * runtime. Request-derived values such as public origin stay in separate
- * request-scoped layers. If platform services later acquire scoped resources or
- * start background fibers, move their acquisition into a managed layer and
- * revisit whether a dedicated runtime/shared MemoMap is required.
+ * `CodeModeObject` constructs stable storage/loader adapters once and reuses
+ * this platform graph for platform-only workflows and the config-derived host
+ * runtime. Shared services derived from those adapters, such as
+ * `McpOAuthStateStore.Default`, are composed here with `Layer.provideMerge` so
+ * callers do not wire them ad hoc. Request-derived values such as public origin
+ * stay in separate request-scoped layers.
  */
 export const CodeModeObjectPlatformLayer = (options: {
-  readonly storage: CodeModeObjectStorageService;
+  readonly storage: DurableObjectStorage;
   readonly hostId: string;
   readonly workerLoader: CodeModeObjectWorkerLoaderService;
 }): Layer.Layer<
-  CodeModeObjectStorage | CodeModeObjectIdentity | CodeModeObjectWorkerLoader
-> =>
-  Layer.mergeAll(
-    Layer.succeed(CodeModeObjectStorage, options.storage),
+  | HostStateStorage
+  | HostSecretStorage
+  | McpOAuthStateStore
+  | CodeModeObjectIdentity
+  | CodeModeObjectWorkerLoader
+> => {
+  const stateStorage = makeDurableObjectHostStorage(options.storage, "state");
+  const secretStorage = makeDurableObjectHostStorage(options.storage, "secret");
+
+  const stablePlatformLayer = Layer.mergeAll(
+    Layer.succeed(HostStateStorage, stateStorage),
+    Layer.succeed(HostSecretStorage, secretStorage),
     Layer.succeed(CodeModeObjectIdentity, {
       hostId: options.hostId,
     }),
     Layer.succeed(CodeModeObjectWorkerLoader, options.workerLoader),
   );
 
+  return McpOAuthStateStore.Default.pipe(
+    Layer.provideMerge(stablePlatformLayer),
+  );
+};
+
 export const CodeModeObjectRequestOriginLayer = (
   origin: string,
 ): Layer.Layer<CodeModeObjectRequestOrigin> =>
   Layer.succeed(CodeModeObjectRequestOrigin, { origin });
 
-export const makeCodeModeObjectStorage = (
+/** Durable Object implementation of the shared host storage operations. */
+export const makeDurableObjectHostStorage = (
   storage: DurableObjectStorage,
-): CodeModeObjectStorageService => ({
-  get: <Value>(key: string) =>
+  storageKind: "state" | "secret",
+): HostStorageOperations => ({
+  get: (key) =>
     Effect.tryPromise({
-      try: () => storage.get<Value>(key),
+      try: () => storage.get<unknown>(key),
       catch: (cause) =>
-        new CodeModeObjectStorageError({ operation: "get", key, cause }),
-    }).pipe(Effect.map(Option.fromNullable)),
-  put: <Value>(key: string, value: Value) =>
+        new HostStorageError({
+          storage: storageKind,
+          operation: "get",
+          key,
+          cause,
+        }),
+    }).pipe(
+      Effect.flatMap((value) => {
+        if (value === undefined || value === null) {
+          return Effect.succeed(Option.none<string>());
+        }
+
+        if (typeof value === "string") {
+          return Effect.succeed(Option.some(value));
+        }
+
+        return Effect.fail(
+          new HostStorageError({
+            storage: storageKind,
+            operation: "get",
+            key,
+            cause: new TypeError(
+              `Expected stored ${storageKind} value ${key} to be a string.`,
+            ),
+          }),
+        );
+      }),
+    ),
+  put: (key, value) =>
     Effect.tryPromise({
       try: () => storage.put(key, value),
       catch: (cause) =>
-        new CodeModeObjectStorageError({ operation: "put", key, cause }),
+        new HostStorageError({
+          storage: storageKind,
+          operation: "put",
+          key,
+          cause,
+        }),
     }),
   delete: (key) =>
-    typeof key === "string"
-      ? Effect.tryPromise({
-          try: () => storage.delete(key),
-          catch: (cause) =>
-            new CodeModeObjectStorageError({
-              operation: "delete",
-              key,
-              cause,
-            }),
-        }).pipe(Effect.asVoid)
-      : Effect.tryPromise({
-          try: () => storage.delete([...key]),
-          catch: (cause) =>
-            new CodeModeObjectStorageError({
-              operation: "delete",
-              cause,
-            }),
-        }).pipe(Effect.asVoid),
-  list: <Value>(options?: DurableObjectListOptions) =>
     Effect.tryPromise({
-      try: () => storage.list<Value>(options),
+      try: () => storage.delete(key),
       catch: (cause) =>
-        new CodeModeObjectStorageError({ operation: "list", cause }),
-    }),
+        new HostStorageError({
+          storage: storageKind,
+          operation: "delete",
+          key,
+          cause,
+        }),
+    }).pipe(Effect.asVoid),
 });
