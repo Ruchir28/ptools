@@ -73,14 +73,11 @@ describe("Node MCP connector layers", () => {
                 auth: Option.some(emptyAuthConfig()),
               }),
             })
-            .pipe(Effect.either);
-        }).pipe(
-          Effect.provide(
-            NodeHttpMcpConnectorLive.pipe(
-              Layer.provide(makeTestAuthCoordinatorLive(calls)),
-            ),
-          ),
-        ),
+            .pipe(
+              Effect.provide(makeTestAuthCoordinatorLive(calls)),
+              Effect.either,
+            );
+        }).pipe(Effect.provide(NodeHttpMcpConnectorLive)),
       ),
     );
 
@@ -107,14 +104,11 @@ describe("Node MCP connector layers", () => {
                   auth: Option.none(),
                 }),
               })
-              .pipe(Effect.either);
-          }).pipe(
-            Effect.provide(
-              NodeHttpMcpConnectorLive.pipe(
-                Layer.provide(makeTestAuthCoordinatorLive(calls)),
-              ),
-            ),
-          ),
+              .pipe(
+                Effect.provide(makeTestAuthCoordinatorLive(calls)),
+                Effect.either,
+              );
+          }).pipe(Effect.provide(NodeHttpMcpConnectorLive)),
         ),
       );
     });

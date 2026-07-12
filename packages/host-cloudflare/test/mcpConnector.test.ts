@@ -33,7 +33,10 @@ describe("Cloudflare MCP connector layers", () => {
                 cwd: Option.none(),
               }),
             })
-            .pipe(Effect.either);
+            .pipe(
+              Effect.provide(makeTestAuthCoordinatorLayer({ providerFor: 0 })),
+              Effect.either,
+            );
         }).pipe(
           Effect.provide(
             CloudflareMcpConnectorLayer.pipe(
@@ -72,14 +75,11 @@ describe("Cloudflare MCP connector layers", () => {
                 auth: Option.some(emptyAuthConfig()),
               }),
             })
-            .pipe(Effect.either);
-        }).pipe(
-          Effect.provide(
-            CloudflareHttpMcpConnectorLayer.pipe(
-              Layer.provide(makeTestAuthCoordinatorLayer(calls)),
-            ),
-          ),
-        ),
+            .pipe(
+              Effect.provide(makeTestAuthCoordinatorLayer(calls)),
+              Effect.either,
+            );
+        }).pipe(Effect.provide(CloudflareHttpMcpConnectorLayer)),
       ),
     );
 
@@ -106,14 +106,11 @@ describe("Cloudflare MCP connector layers", () => {
                   auth: Option.none(),
                 }),
               })
-              .pipe(Effect.either);
-          }).pipe(
-            Effect.provide(
-              CloudflareHttpMcpConnectorLayer.pipe(
-                Layer.provide(makeTestAuthCoordinatorLayer(calls)),
-              ),
-            ),
-          ),
+              .pipe(
+                Effect.provide(makeTestAuthCoordinatorLayer(calls)),
+                Effect.either,
+              );
+          }).pipe(Effect.provide(CloudflareHttpMcpConnectorLayer)),
         ),
       );
     });

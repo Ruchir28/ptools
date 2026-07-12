@@ -1,9 +1,11 @@
-export { NodeConfigDiscoveryContext, NodeConfigDiscoveryContextLive } from "./configDiscoveryContext.js";
-export { NodeHostIdentity, NodeHostIdentityLive } from "./hostIdentity.js";
+export {
+  NodeConfigDiscoveryContext,
+  NodeConfigDiscoveryContextLive,
+} from "./configDiscoveryContext.js";
 export { NodeHostSettings, NodeHostSettingsLive } from "./hostSettings.js";
 export {
-  NodeFileHostStateStorageLive,
-  NodeKeyringHostSecretStorageLive,
+  NodeFileHostStateStorageBackendLayer,
+  NodeKeyringHostSecretStorageBackendLayer,
   encodeHostId,
 } from "./hostStorage.js";
 export {

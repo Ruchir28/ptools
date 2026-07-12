@@ -106,9 +106,9 @@ describe("host-cloudflare import boundaries", () => {
   });
 
   it("does not keep old generic Host API compatibility modules", async () => {
-    const workerFiles = (await sourceFiles(join(packageRoot, "src/worker"))).map(
-      (path) => path.slice(packageRoot.length + 1),
-    );
+    const workerFiles = (
+      await sourceFiles(join(packageRoot, "src/worker"))
+    ).map((path) => path.slice(packageRoot.length + 1));
 
     expect(workerFiles).not.toContain("src/worker/hostApiHttpAdapter.ts");
     expect(workerFiles).not.toContain("src/worker/hostServer.ts");
@@ -176,71 +176,61 @@ describe("host-cloudflare import boundaries", () => {
     expect(testContents).not.toContain("CodeModeObjectNamespace");
   });
 
-  it("keeps Durable Object OAuth flow separate from the shared AuthCoordinator service", async () => {
-    const authEntry = await readFile(
-      join(packageRoot, "src/layers/auth.ts"),
-      "utf8",
-    );
-    const auth = [
-      authEntry,
-      await readSources(join(packageRoot, "src/layers/auth")),
-    ].join("\n");
+  it("delegates auth/runtime assembly to shared host packages", async () => {
     const codeModeObject = await readFile(
       join(packageRoot, "src/objects/CodeModeObject.ts"),
       "utf8",
     );
-    const codeModeRuntime = await readFile(
-      join(packageRoot, "src/layers/codeModeRuntime.ts"),
+    const platform = await readFile(
+      join(packageRoot, "src/layers/platform.ts"),
       "utf8",
     );
-    const resolvedConfigWiring = [codeModeObject, codeModeRuntime].join("\n");
+    const authPackage = await readSources(join(repoRoot, "packages/auth/src"));
+    const hostRuntimePackage = await readSources(
+      join(repoRoot, "packages/host-runtime/src"),
+    );
+    const resolvedConfigWiring = codeModeObject;
 
-    expect(auth).toContain("CloudflareOAuthFlow");
-    expect(auth).toContain("DurableObjectAuthLayer");
-    expect(codeModeRuntime).not.toContain("McpOAuthStateStore.Default");
-    expect(auth).not.toContain("McpOAuthStateStore.Default");
-    expect(auth).toContain("yield* CodeModeObjectIdentity");
-    expect(auth).toContain("AuthCoordinatorCore");
-    expect(auth).toContain("AuthCoordinatorCore.Default");
-    expect(auth).toContain("AuthProviderFactory");
-    expect(auth).toContain("AuthCoordinatorPolicy");
-    expect(auth).toContain("CloudflareOAuthPlatform");
-    expect(auth).toContain("Requires:");
-    expect(auth).toContain("Provides:");
-    expect(authEntry).toContain('export * from "./auth/index.js"');
-    expect(auth).not.toContain("DurableObjectAuthLayer = (options");
-    expect(auth).not.toContain("DurableObjectCredentialsStoreLayer = (options");
-    expect(auth).not.toContain("codeModeObjectCredential");
-    expect(auth).not.toContain("CODE_MODE_OBJECT_CREDENTIAL");
-    expect(auth).not.toContain("readonly records: Ref.Ref");
-    expect(auth).not.toContain("readonly providers: Ref.Ref");
-    expect(auth).not.toContain("readonly oauthServers: Ref.Ref");
-    expect(auth).not.toContain("authorizedHandler: Ref.Ref");
-    expect(auth).not.toContain("refreshHandler: Ref.Ref");
-    expect(auth).not.toContain("CloudflareAuthStateService");
-    expect(auth).not.toContain("CloudflareAuthStateLayer");
-    expect(auth).not.toContain("CloudflareAuthStateSnapshot");
-    expect(resolvedConfigWiring).toContain("ResolvedPtoolsConfigSource.Default");
-    expect(resolvedConfigWiring).not.toContain("DurableObjectResolvedPtoolsConfigSourceLayer");
-    expect(resolvedConfigWiring).not.toContain("resolvePtoolsConfigWithSecrets");
-    expect(resolvedConfigWiring).not.toContain("CODE_MODE_OBJECT_CONFIG_BLOB_KEY");
+    expect(authPackage).toContain("McpOAuthFlow");
+    expect(authPackage).toContain("McpOAuthProviderFactoryLayer");
+    expect(hostRuntimePackage).toContain("HostAuthCoordinatorPolicyLayer");
+    expect(hostRuntimePackage).toContain("ConfiguredHostContextRunner");
+    expect(hostRuntimePackage).toContain("ScopedCache.makeWith");
+    expect(platform).toContain("HostIdentity");
+    expect(platform).not.toContain("CodeModeObjectIdentity");
+    expect(platform).not.toContain("CodeModeObjectRequestOrigin");
+    expect(resolvedConfigWiring).toContain(
+      "ResolvedPtoolsConfigSource.Default",
+    );
+    expect(resolvedConfigWiring).not.toContain(
+      "DurableObjectResolvedPtoolsConfigSourceLayer",
+    );
+    expect(resolvedConfigWiring).not.toContain(
+      "resolvePtoolsConfigWithSecrets",
+    );
+    expect(resolvedConfigWiring).not.toContain(
+      "CODE_MODE_OBJECT_CONFIG_BLOB_KEY",
+    );
     expect(resolvedConfigWiring).not.toContain("StoredConfigBlob");
     expect(resolvedConfigWiring).not.toContain("ConfiguredSecretIndexJson");
     expect(resolvedConfigWiring).not.toContain("loadConfiguredSecretIndex");
-    expect(auth).not.toContain("CloudflareAuthManager");
-    expect(auth).not.toContain("CloudflareAuthCoordinatorHooks");
-    expect(auth).not.toContain("AuthCoordinatorService &");
-    expect(codeModeObject).toContain("CodeModeObjectPlatformLayer");
-    expect(codeModeObject).toContain("#hostRuntime");
-    expect(codeModeObject).toContain("ManagedRuntime.make");
-    expect(codeModeObject).toContain("initializeConfiguredMcpAuth");
-    expect(codeModeObject).not.toContain("withAuthCoordinator");
-    expect(codeModeObject).not.toContain(
-      "AuthCoordinatorServiceWithCloudflareHooks",
+    expect(codeModeObject).toContain("#stableRuntime");
+    expect(codeModeObject).toContain("HostStableRuntimeLayer");
+    expect(codeModeObject).toContain("ConfiguredHostContextRunner");
+    expect(codeModeObject).not.toContain("#hostRuntime");
+    expect(codeModeObject).not.toContain("CloudflareOAuthFlow");
+    expect(await sourceFiles(join(packageRoot, "src/layers"))).not.toContain(
+      join(packageRoot, "src/layers/codeModeRuntime.ts"),
     );
-    expect(codeModeObject).not.toContain("beginAuthorization?:");
-    expect(codeModeObject).not.toContain("finishAuthorization?:");
-    expect(codeModeObject).not.toContain("DurableObjectAuthCoordinatorLayer");
+    expect(await sourceFiles(join(packageRoot, "src/layers"))).not.toContain(
+      join(packageRoot, "src/layers/codeModeServer.ts"),
+    );
+    expect(codeModeObject).not.toContain(
+      "Effect.provide(ConfiguredHostConfigStore.Default)",
+    );
+    expect(codeModeObject).not.toContain(
+      "Effect.provide(ConfiguredSecretStore.Default)",
+    );
   });
 });
 

@@ -1,17 +1,18 @@
 /**
- * Storage capabilities for configured host instances.
+ * Host-scoped storage services and the platform backends that open them.
  *
- * These primitives are intentionally boring: they store and load string values by
- * exact key, return `Option.none()` for missing keys, and do not know which keys
- * represent config blobs, configured secrets, credentials, or OAuth state. The
- * services that consume storage own their schemas, key names, and replacement
- * protocols.
+ * Platforms provide only backend ports capable of selecting physical storage
+ * for a requested host ID. The package-owned `Effect.Service` defaults combine
+ * those backends with `HostIdentity`, producing final storage capabilities that
+ * have already closed over exactly one host. Semantic stores therefore use only
+ * logical exact keys and never participate in host selection.
  */
-import { Context, Data, Effect, Option } from "effect";
+import { HostIdentity } from "@ptools/host-context";
+import { Context, Data, Effect, Option, Scope } from "effect";
 
 export class HostStorageError extends Data.TaggedError("HostStorageError")<{
   readonly storage: "state" | "secret";
-  readonly operation: "get" | "put" | "delete";
+  readonly operation: "open" | "get" | "put" | "delete";
   readonly key: string;
   readonly cause?: unknown;
 }> {}
@@ -31,18 +32,82 @@ export interface HostStorageOperations {
   readonly delete: (key: string) => Effect.Effect<void, HostStorageError>;
 }
 
-/** Non-secret configured host state such as stored config blobs and indexes. */
-export interface HostStateStorageService extends HostStorageOperations {}
+/**
+ * Platform port that opens non-secret physical storage for one requested host.
+ * The returned operations omit host metadata; the shared final service adds it
+ * from the same `HostIdentity` used for selection.
+ */
+export interface HostStateStorageBackendService {
+  readonly forHost: (
+    hostId: string,
+  ) => Effect.Effect<HostStorageOperations, HostStorageError, Scope.Scope>;
+}
 
-/** Secret configured host values such as resolved config secrets and credentials. */
-export interface HostSecretStorageService extends HostStorageOperations {}
+/** Platform implementation required by `HostStateStorage.Default`. */
+export class HostStateStorageBackend extends Context.Tag(
+  "@ptools/HostStateStorageBackend",
+)<HostStateStorageBackend, HostStateStorageBackendService>() {}
 
-export class HostStateStorage extends Context.Tag("@ptools/HostStateStorage")<
-  HostStateStorage,
-  HostStateStorageService
->() {}
+/** Platform port that opens secret physical storage for one requested host. */
+export interface HostSecretStorageBackendService {
+  readonly forHost: (
+    hostId: string,
+  ) => Effect.Effect<HostStorageOperations, HostStorageError, Scope.Scope>;
+}
 
-export class HostSecretStorage extends Context.Tag("@ptools/HostSecretStorage")<
-  HostSecretStorage,
-  HostSecretStorageService
->() {}
+/** Platform implementation required by `HostSecretStorage.Default`. */
+export class HostSecretStorageBackend extends Context.Tag(
+  "@ptools/HostSecretStorageBackend",
+)<HostSecretStorageBackend, HostSecretStorageBackendService>() {}
+
+/** Non-secret exact-key storage selected for one stable host identity. */
+export interface HostStateStorageService extends HostStorageOperations {
+  /** Host selected by the shared service during construction. */
+  readonly hostId: string;
+}
+
+/**
+ * Final non-secret host storage service.
+ *
+ * Its generated `.Default` layer requires `HostIdentity` and the platform's
+ * `HostStateStorageBackend`, making host selection part of shared composition
+ * rather than a convention repeated by each platform.
+ */
+export class HostStateStorage extends Effect.Service<HostStateStorage>()(
+  "@ptools/HostStateStorage",
+  {
+    scoped: Effect.gen(function* () {
+      const identity = yield* HostIdentity;
+      const backend = yield* HostStateStorageBackend;
+      const operations = yield* backend.forHost(identity.hostId);
+
+      return {
+        ...operations,
+        hostId: identity.hostId,
+      } satisfies HostStateStorageService;
+    }),
+  },
+) {}
+
+/** Secret exact-key storage selected for one stable host identity. */
+export interface HostSecretStorageService extends HostStorageOperations {
+  /** Host selected by the shared service during construction. */
+  readonly hostId: string;
+}
+
+/** Shared final secret storage; `.Default` performs identity-based selection. */
+export class HostSecretStorage extends Effect.Service<HostSecretStorage>()(
+  "@ptools/HostSecretStorage",
+  {
+    scoped: Effect.gen(function* () {
+      const identity = yield* HostIdentity;
+      const backend = yield* HostSecretStorageBackend;
+      const operations = yield* backend.forHost(identity.hostId);
+
+      return {
+        ...operations,
+        hostId: identity.hostId,
+      } satisfies HostSecretStorageService;
+    }),
+  },
+) {}

@@ -20,12 +20,45 @@ import {
 import {
   ConfiguredHostConfigStore,
   HostSecretStorage,
+  HostSecretStorageBackend,
   HostStateStorage,
+  HostStateStorageBackend,
   ResolvedPtoolsConfigSource,
   type HostStorageOperations,
 } from "../src/services/index.js";
+import { HostIdentityLayer } from "@ptools/host-context";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+describe("host storage construction", () => {
+  it("selects the backend with HostIdentity and publishes that host ID", async () => {
+    const storage = makeMemoryHostStorage();
+    let requestedHostId: string | undefined;
+    const layer = HostStateStorage.Default.pipe(
+      Layer.provide(
+        Layer.merge(
+          HostIdentityLayer("host-a"),
+          Layer.succeed(HostStateStorageBackend, {
+            forHost: (hostId) => {
+              requestedHostId = hostId;
+              return Effect.succeed(storage);
+            },
+          }),
+        ),
+      ),
+    );
+
+    const hostId = await Effect.runPromise(
+      Effect.gen(function* () {
+        const selected = yield* HostStateStorage;
+        return selected.hostId;
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(requestedHostId).toBe("host-a");
+    expect(hostId).toBe("host-a");
+  });
+});
 
 describe("config source layout", () => {
   it("keeps contracts and Effect services in semantic source folders", async () => {
@@ -66,7 +99,10 @@ describe("config source layout", () => {
     const sources = await Promise.all([
       readFile(join(packageRoot, "src/services/hostStorage.ts"), "utf8"),
       readFile(join(packageRoot, "src/services/configuredSecrets.ts"), "utf8"),
-      readFile(join(packageRoot, "src/services/configuredHostConfig.ts"), "utf8"),
+      readFile(
+        join(packageRoot, "src/services/configuredHostConfig.ts"),
+        "utf8",
+      ),
     ]);
 
     for (const source of sources) {
@@ -440,7 +476,9 @@ describe("server config", () => {
         const configStore = yield* ConfiguredHostConfigStore;
         const secretStore = yield* ConfiguredSecretStore;
         yield* configStore.replace({ config: unresolvedConfig });
-        yield* secretStore.replaceAll({ secrets: { API_TOKEN: "stored-token" } });
+        yield* secretStore.replaceAll({
+          secrets: { API_TOKEN: "stored-token" },
+        });
       }).pipe(Effect.provide(configuredHostStoreTestLayer(storage))),
     );
 
@@ -448,7 +486,9 @@ describe("server config", () => {
       Effect.gen(function* () {
         const source = yield* ResolvedPtoolsConfigSource;
         return yield* source.load;
-      }).pipe(Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage))),
+      }).pipe(
+        Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage)),
+      ),
     );
 
     expect(httpServer(resolved, "remote").headers).toEqual(
@@ -699,7 +739,7 @@ const makeMemoryHostStorage = (): HostStorageOperations => {
   const values = new Map<string, string>();
 
   return {
-    get: (key) => Effect.succeed(Option.fromNullable(values.get(key))),
+    get: (key) => Effect.sync(() => Option.fromNullable(values.get(key))),
     put: (key, value) =>
       Effect.sync(() => {
         values.set(key, value);
@@ -711,20 +751,31 @@ const makeMemoryHostStorage = (): HostStorageOperations => {
   };
 };
 
+const hostStorageTestLayer = (storage: HostStorageOperations) =>
+  Layer.merge(HostStateStorage.Default, HostSecretStorage.Default).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        HostIdentityLayer("test-host"),
+        Layer.succeed(HostStateStorageBackend, {
+          forHost: () => Effect.succeed(storage),
+        }),
+        Layer.succeed(HostSecretStorageBackend, {
+          forHost: () => Effect.succeed(storage),
+        }),
+      ),
+    ),
+  );
+
 const configuredSecretStoreTestLayer = (storage: HostStorageOperations) =>
   ConfiguredSecretStore.Default.pipe(
-    Layer.provide(Layer.succeed(HostStateStorage, storage)),
-    Layer.provide(Layer.succeed(HostSecretStorage, storage)),
+    Layer.provide(hostStorageTestLayer(storage)),
   );
 
 const configuredHostStoreTestLayer = (storage: HostStorageOperations) =>
   Layer.merge(
     ConfiguredHostConfigStore.Default,
     ConfiguredSecretStore.Default,
-  ).pipe(
-    Layer.provide(Layer.succeed(HostStateStorage, storage)),
-    Layer.provide(Layer.succeed(HostSecretStorage, storage)),
-  );
+  ).pipe(Layer.provide(hostStorageTestLayer(storage)));
 
 const configuredHostResolvedConfigSourceTestLayer = (
   storage: HostStorageOperations,
@@ -732,8 +783,7 @@ const configuredHostResolvedConfigSourceTestLayer = (
   ResolvedPtoolsConfigSource.Default.pipe(
     Layer.provide(ConfiguredHostConfigStore.Default),
     Layer.provide(ConfiguredSecretStore.Default),
-    Layer.provide(Layer.succeed(HostStateStorage, storage)),
-    Layer.provide(Layer.succeed(HostSecretStorage, storage)),
+    Layer.provide(hostStorageTestLayer(storage)),
   );
 
 const stdioServer = (

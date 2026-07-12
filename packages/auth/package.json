@@ -49,6 +49,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
     "@ptools/config": "workspace:*",
+    "@ptools/host-context": "workspace:*",
     "effect": "3.21.2"
   }
 }

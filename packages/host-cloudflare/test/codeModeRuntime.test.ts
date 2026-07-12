@@ -3,8 +3,9 @@
 /**
  * Cloudflare Code Mode runtime layer integration tests.
  *
- * This file builds `CloudflareCodeModeRuntimeLayer` directly with in-memory
- * Durable Object storage and a recording `CodeModeObjectWorkerLoader`. It is
+ * This file builds the shared `ConfiguredHostContextLayer` with Cloudflare
+ * primitives, in-memory Durable Object storage, and a recording
+ * `CodeModeObjectWorkerLoader`. It is
  * meant to prove the Effect layer graph: stored config loading, request-origin
  * wiring, HTTP MCP connector/registry behavior, Code Mode search/schema
  * assembly, real declaration generation, and provider callback dispatch through
@@ -29,30 +30,39 @@ import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import {
   CONFIGURED_HOST_CONFIG_BLOB_KEY,
   ConfiguredHostConfigBlob,
+  HostSecretStorageBackend,
+  HostStateStorageBackend,
   PtoolsConfig,
 } from "@ptools/config";
 import type { SandboxCompletion } from "@ptools/executor";
+import { HostIdentityLayer, HostPublicOriginLayer } from "@ptools/host-context";
+import {
+  ConfiguredHostContextLayer,
+  HostStableSharedStoresLayer,
+  type ConfiguredHostOperationServices,
+} from "@ptools/host-runtime";
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { CloudflareDynamicWorkerSandboxRuntimeLayer } from "../src/layers/executor/dynamicWorkerRuntimeLayer.js";
 import {
-  CloudflareCodeModeRuntimeLayer,
-  type CloudflareCodeModeRuntimeServices,
-} from "../src/layers/codeModeRuntime.js";
-import type { CodeModeObjectWorkerLoaderService } from "../src/layers/executor/workerLoaderService.js";
+  CloudflareHttpMcpConnectorLayer,
+  CloudflareMcpConnectorLayer,
+} from "../src/layers/mcpConnector.js";
 import {
-  CodeModeObjectPlatformLayer,
-  CodeModeObjectRequestOriginLayer,
-} from "../src/layers/platform.js";
+  CodeModeObjectWorkerLoader,
+  type CodeModeObjectWorkerLoaderService,
+} from "../src/layers/executor/workerLoaderService.js";
+import { makeDurableObjectHostStorage } from "../src/layers/platform.js";
 
 const runtimes: Array<
-  ManagedRuntime.ManagedRuntime<CloudflareCodeModeRuntimeServices, unknown>
+  ManagedRuntime.ManagedRuntime<ConfiguredHostOperationServices, unknown>
 > = [];
 
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
 });
 
-describe("CloudflareCodeModeRuntimeLayer", () => {
+describe("ConfiguredHostContextLayer with Cloudflare primitives", () => {
   it("serves Code Mode operations through the configured Cloudflare runtime", async () => {
     const storage = makeMemoryStorage(
       new Map([
@@ -247,29 +257,42 @@ const makeConfiguredHostConfigBlob = (options: {
 const makeRuntime = (options: {
   readonly storage: ReturnType<typeof makeMemoryStorage>;
   readonly workerLoader: CodeModeObjectWorkerLoaderService;
-}): ManagedRuntime.ManagedRuntime<
-  CloudflareCodeModeRuntimeServices,
-  unknown
-> => {
+}): ManagedRuntime.ManagedRuntime<ConfiguredHostOperationServices, unknown> => {
+  const platformLayer = Layer.mergeAll(
+    HostIdentityLayer("demo"),
+    Layer.succeed(HostStateStorageBackend, {
+      forHost: () =>
+        Effect.succeed(makeDurableObjectHostStorage(options.storage, "state")),
+    }),
+    Layer.succeed(HostSecretStorageBackend, {
+      forHost: () =>
+        Effect.succeed(makeDurableObjectHostStorage(options.storage, "secret")),
+    }),
+    Layer.succeed(CodeModeObjectWorkerLoader, options.workerLoader),
+  );
+  const cloudflarePrimitiveLayer = Layer.mergeAll(
+    CloudflareMcpConnectorLayer.pipe(
+      Layer.provide(CloudflareHttpMcpConnectorLayer),
+    ),
+    CloudflareDynamicWorkerSandboxRuntimeLayer,
+  ).pipe(Layer.provideMerge(platformLayer));
   const runtime = ManagedRuntime.make(
-    CloudflareCodeModeRuntimeLayer.pipe(
-      Layer.provide(
-        CodeModeObjectPlatformLayer({
-          storage: options.storage,
-          hostId: "demo",
-          workerLoader: options.workerLoader,
-        }),
-      ),
-      Layer.provide(CodeModeObjectRequestOriginLayer("https://ptools.example")),
+    ConfiguredHostContextLayer.pipe(
+      Layer.provide(HostStableSharedStoresLayer),
+      Layer.provide(cloudflarePrimitiveLayer),
+      Layer.provide(HostPublicOriginLayer("https://ptools.example")),
     ),
   );
   runtimes.push(runtime);
   return runtime;
 };
 
-const makeMemoryStorage = (values: Map<string, unknown>): DurableObjectStorage =>
+const makeMemoryStorage = (
+  values: Map<string, unknown>,
+): DurableObjectStorage =>
   ({
-    get: ((key: string) => Promise.resolve(values.get(key))) as DurableObjectStorage["get"],
+    get: ((key: string) =>
+      Promise.resolve(values.get(key))) as DurableObjectStorage["get"],
     put: ((key: string, value: unknown) => {
       values.set(key, value);
       return Promise.resolve();
@@ -289,7 +312,9 @@ const makeMemoryStorage = (values: Map<string, unknown>): DurableObjectStorage =
       Promise.resolve(
         new Map(
           [...values.entries()].filter(([key]) =>
-            options?.prefix === undefined ? true : key.startsWith(options.prefix),
+            options?.prefix === undefined
+              ? true
+              : key.startsWith(options.prefix),
           ),
         ),
       )) as DurableObjectStorage["list"],

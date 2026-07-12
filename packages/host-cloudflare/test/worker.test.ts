@@ -892,7 +892,7 @@ describe("Cloudflare Worker ingress", () => {
               serverName: "example",
               jsServerName: "example",
               transport: "http",
-              status: "static_credentials",
+              status: "auth_failed",
               authUrl: `https://ptools.example/hosts/${hostId}/auth`,
             },
           ],
@@ -924,7 +924,7 @@ describe("Cloudflare Worker ingress", () => {
         ok: true,
         status: {
           authUrl: `https://ptools.example/hosts/${hostId}/auth`,
-          servers: [{ serverName: "example", status: "static_credentials" }],
+          servers: [{ serverName: "example", status: "auth_failed" }],
         },
       },
     });
@@ -941,7 +941,7 @@ describe("Cloudflare Worker ingress", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       operation: "start_mcp_auth",
-      result: { ok: false, error: { code: "auth_unavailable" } },
+      result: { ok: false, error: { code: "invalid_config" } },
     });
   });
 
@@ -1170,9 +1170,7 @@ const configBody = (
       mcpServers: {
         example: {
           url: server.url ?? "https://mcp.example",
-          ...(server.headers === undefined
-            ? {}
-            : { headers: server.headers }),
+          ...(server.headers === undefined ? {} : { headers: server.headers }),
         },
       },
     },

@@ -4,12 +4,13 @@ import {
   AuthError,
   McpOAuthCredentialStore,
 } from "@ptools/auth";
+import { HostIdentity } from "@ptools/host-context";
 import { Effect, Layer } from "effect";
 import { NodeMcpAuthFlow } from "./oauthFlow.js";
 import { NodeOAuthFlowLayer } from "./oauthFlowLayer.js";
 import { NodeAuthPolicyLayer } from "./policy.js";
 import { NodeAuthProviderFactoryLayer } from "./providerFactory.js";
-import { NodeHostIdentity, NodeHostSettings } from "../platform/index.js";
+import { NodeHostSettings } from "../platform/index.js";
 
 /**
  * Node MCP auth composition layer.
@@ -22,11 +23,11 @@ import { NodeHostIdentity, NodeHostSettings } from "../platform/index.js";
 export const NodeAuthCoordinatorLive = (): Layer.Layer<
   AuthCoordinator | NodeMcpAuthFlow,
   AuthError,
-  McpOAuthCredentialStore | NodeHostIdentity | NodeHostSettings
+  McpOAuthCredentialStore | HostIdentity | NodeHostSettings
 > =>
   Layer.unwrapEffect(
     Effect.gen(function* () {
-      const identity = yield* NodeHostIdentity;
+      const identity = yield* HostIdentity;
       const coreLayer = AuthCoordinatorCore.Default.pipe(
         Layer.provide(
           Layer.mergeAll(NodeAuthProviderFactoryLayer, NodeAuthPolicyLayer),

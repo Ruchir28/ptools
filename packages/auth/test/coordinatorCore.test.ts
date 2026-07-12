@@ -279,6 +279,36 @@ describe("AuthCoordinatorCore.Default", () => {
     expect(status.servers[0]?.lastError).toBeUndefined();
   });
 
+  it("runs the authorized handler as a sequenced Effect after publishing connected state", async () => {
+    const observedStatuses: Array<string | undefined> = [];
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const core = yield* AuthCoordinatorCore;
+        yield* core.noteConfigured(
+          "github",
+          "github",
+          httpConfig("https://github.example/mcp"),
+        );
+        yield* core.setAuthorizedHandler(() =>
+          core.status.pipe(
+            Effect.tap((status) =>
+              Effect.sync(() => {
+                observedStatuses.push(status.servers[0]?.status);
+              }),
+            ),
+            Effect.asVoid,
+          ),
+        );
+
+        yield* core.markAuthorized("github");
+        observedStatuses.push("handler-completed");
+      }).pipe(Effect.provide(makeCoreLayer())),
+    );
+
+    expect(observedStatuses).toEqual(["connected", "handler-completed"]);
+  });
+
   it("keeps public authorizeUrl separate from the captured provider authorization URL", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {

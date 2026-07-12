@@ -1,4 +1,7 @@
-import { parseCodeModeRequest, type CodeModeResponse } from "@ptools/code-mode-api";
+import {
+  parseCodeModeRequest,
+  type CodeModeResponse,
+} from "@ptools/code-mode-api";
 import { McpOAuthStatePayload, McpOAuthStateStore } from "@ptools/auth";
 import type { CodeModeObjectCallInput } from "../src/objects/codeModeObject/rpc.js";
 import {
@@ -6,9 +9,11 @@ import {
   CONFIGURED_SECRET_VALUE_KEY_PREFIX,
   ConfiguredHostConfigBlob,
   HostSecretStorage,
+  HostSecretStorageBackend,
   ResolvedPtoolsConfig,
 } from "@ptools/config";
-import { Effect, Schema } from "effect";
+import { HostIdentityLayer } from "@ptools/host-context";
+import { Effect, Layer, Schema } from "effect";
 import { makeDurableObjectHostStorage } from "../src/layers/platform.js";
 import { CodeModeObject } from "../src/objects/CodeModeObject.js";
 import worker from "../src/worker/entry.js";
@@ -67,7 +72,10 @@ export class TestCodeModeObject extends CodeModeObject {
     } catch (cause) {
       return {
         ok: false,
-        error: cause instanceof Error ? (cause.stack ?? cause.message) : String(cause),
+        error:
+          cause instanceof Error
+            ? (cause.stack ?? cause.message)
+            : String(cause),
       };
     }
   }
@@ -98,7 +106,9 @@ export class TestCodeModeObject extends CodeModeObject {
     const secrets: Record<string, string> = {};
 
     for (const [key, value] of stored) {
-      secrets[decodeURIComponent(key.slice(CONFIGURED_SECRET_VALUE_KEY_PREFIX.length))] = value;
+      secrets[
+        decodeURIComponent(key.slice(CONFIGURED_SECRET_VALUE_KEY_PREFIX.length))
+      ] = value;
     }
 
     return secrets;
@@ -137,10 +147,21 @@ export class TestCodeModeObject extends CodeModeObject {
         const store = yield* McpOAuthStateStore;
         return yield* store.sign({ payload });
       }).pipe(
-        Effect.provide(McpOAuthStateStore.Default),
-        Effect.provideService(
-          HostSecretStorage,
-          makeDurableObjectHostStorage(this.ctx.storage, "secret"),
+        Effect.provide(
+          McpOAuthStateStore.Default.pipe(
+            Layer.provide(HostSecretStorage.Default),
+            Layer.provide(
+              Layer.merge(
+                HostIdentityLayer(this.ctx.id.name ?? "test-host"),
+                Layer.succeed(HostSecretStorageBackend, {
+                  forHost: () =>
+                    Effect.succeed(
+                      makeDurableObjectHostStorage(this.ctx.storage, "secret"),
+                    ),
+                }),
+              ),
+            ),
+          ),
         ),
       ),
     );

@@ -1,8 +1,11 @@
-import { AuthCoordinator, McpOAuthStateStore } from "@ptools/auth";
+import {
+  AuthCoordinator,
+  McpOAuthFlow,
+  McpOAuthStateStore,
+} from "@ptools/auth";
 import type { McpAuthStatus } from "@ptools/auth/contracts";
-import { ResolvedPtoolsConfigSource, ServerConfigError } from "@ptools/config";
+import { ServerConfigError } from "@ptools/config";
 import { Data, Effect, Option } from "effect";
-import { CloudflareOAuthFlow } from "../../layers/index.js";
 import type {
   CodeModeObjectMcpAuthError,
   CompleteMcpOAuthCallbackResult,
@@ -38,10 +41,10 @@ export const startMcpAuth = (input: {
 }): Effect.Effect<
   { readonly authorizeUrl: string },
   CodeModeObjectMcpAuthError,
-  CloudflareOAuthFlow
+  McpOAuthFlow
 > =>
   Effect.gen(function* () {
-    const flow = yield* CloudflareOAuthFlow;
+    const flow = yield* McpOAuthFlow;
     const authorizeUrl = yield* flow.beginAuthorization(input).pipe(
       Effect.mapError((cause) => ({
         code: "auth_unavailable" as const,
@@ -108,9 +111,9 @@ export const parseCompleteMcpOAuthCallback = (input: {
 export const finishMcpOAuthCallback = (input: {
   readonly serverName: string;
   readonly code: string;
-}): Effect.Effect<void, CodeModeObjectMcpAuthError, CloudflareOAuthFlow> =>
+}): Effect.Effect<void, CodeModeObjectMcpAuthError, McpOAuthFlow> =>
   Effect.gen(function* () {
-    const flow = yield* CloudflareOAuthFlow;
+    const flow = yield* McpOAuthFlow;
 
     yield* flow.finishAuthorization(input).pipe(
       Effect.mapError((cause) => ({
@@ -120,23 +123,6 @@ export const finishMcpOAuthCallback = (input: {
     );
   });
 
-export const initializeConfiguredMcpAuth = (): Effect.Effect<
-  void,
-  ServerConfigError,
-  AuthCoordinator | ResolvedPtoolsConfigSource
-> =>
-  Effect.gen(function* () {
-    const source = yield* ResolvedPtoolsConfigSource;
-    const auth = yield* AuthCoordinator;
-    const config = yield* source.load;
-
-    for (const [serverName, serverConfig] of Object.entries(
-      config.mcpServers,
-    )) {
-      yield* auth.noteConfigured(serverName, serverName, serverConfig);
-    }
-  });
-
 export const codeModeObjectMcpAuthErrorFromCause = (
   cause: unknown,
 ): CodeModeObjectMcpAuthError => {
@@ -144,10 +130,11 @@ export const codeModeObjectMcpAuthErrorFromCause = (
     return cause;
   }
 
-  if (cause instanceof ServerConfigError) {
+  const configError = findServerConfigError(cause);
+  if (Option.isSome(configError)) {
     return {
       code: "invalid_config",
-      message: cause.message,
+      message: configError.value.message,
     };
   }
 
@@ -203,6 +190,20 @@ const isCodeModeObjectMcpAuthError = (
     cause.code === "invalid_oauth_callback" ||
     cause.code === "oauth_failed") &&
   typeof cause.message === "string";
+
+const findServerConfigError = (
+  cause: unknown,
+): Option.Option<ServerConfigError> => {
+  if (cause instanceof ServerConfigError) {
+    return Option.some(cause);
+  }
+
+  if (typeof cause === "object" && cause !== null && "cause" in cause) {
+    return findServerConfigError(cause.cause);
+  }
+
+  return Option.none();
+};
 
 const escapeHtml = (value: string): string =>
   value

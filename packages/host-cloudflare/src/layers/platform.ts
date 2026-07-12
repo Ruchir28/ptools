@@ -1,76 +1,95 @@
-import { McpOAuthStateStore } from "@ptools/auth";
+import { HostIdentity, HostIdentityLayer } from "@ptools/host-context";
 import {
-  HostSecretStorage,
-  HostStateStorage,
+  HostSecretStorageBackend,
+  HostStateStorageBackend,
   HostStorageError,
   type HostStorageOperations,
 } from "@ptools/config";
-import { Context, Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option } from "effect";
 import {
   CodeModeObjectWorkerLoader,
   type CodeModeObjectWorkerLoaderService,
 } from "./executor/workerLoaderService.js";
 
-export class CodeModeObjectIdentity extends Context.Tag(
-  "@ptools/host-cloudflare/CodeModeObjectIdentity",
-)<
-  CodeModeObjectIdentity,
-  {
-    readonly hostId: string;
-  }
->() {}
-
-export class CodeModeObjectRequestOrigin extends Context.Tag(
-  "@ptools/host-cloudflare/CodeModeObjectRequestOrigin",
-)<
-  CodeModeObjectRequestOrigin,
-  {
-    readonly origin: string;
-  }
->() {}
-
 /**
- * Supplies stable, object-lifetime platform values.
+ * Supplies stable, object-lifetime Cloudflare primitive values.
  *
- * `CodeModeObject` constructs stable storage/loader adapters once and reuses
- * this platform graph for platform-only workflows and the config-derived host
- * runtime. Shared services derived from those adapters, such as
- * `McpOAuthStateStore.Default`, are composed here with `Layer.provideMerge` so
- * callers do not wire them ad hoc. Request-derived values such as public origin
- * stay in separate request-scoped layers.
+ * Identity and both storage backends derive from one `DurableObjectState`, so a
+ * caller cannot pair one host ID with another object's storage. Shared
+ * `HostStateStorage.Default` and `HostSecretStorage.Default` later validate and
+ * select these backends using the same `HostIdentity`.
  */
 export const CodeModeObjectPlatformLayer = (options: {
-  readonly storage: DurableObjectStorage;
-  readonly hostId: string;
+  readonly state: DurableObjectState;
   readonly workerLoader: CodeModeObjectWorkerLoaderService;
 }): Layer.Layer<
-  | HostStateStorage
-  | HostSecretStorage
-  | McpOAuthStateStore
-  | CodeModeObjectIdentity
+  | HostStateStorageBackend
+  | HostSecretStorageBackend
+  | HostIdentity
   | CodeModeObjectWorkerLoader
 > => {
-  const stateStorage = makeDurableObjectHostStorage(options.storage, "state");
-  const secretStorage = makeDurableObjectHostStorage(options.storage, "secret");
+  const hostId = requireDurableObjectHostId(options.state);
 
-  const stablePlatformLayer = Layer.mergeAll(
-    Layer.succeed(HostStateStorage, stateStorage),
-    Layer.succeed(HostSecretStorage, secretStorage),
-    Layer.succeed(CodeModeObjectIdentity, {
-      hostId: options.hostId,
-    }),
+  return Layer.mergeAll(
+    HostIdentityLayer(hostId),
+    CodeModeObjectHostStorageBackendLayer(options.state),
     Layer.succeed(CodeModeObjectWorkerLoader, options.workerLoader),
-  );
-
-  return McpOAuthStateStore.Default.pipe(
-    Layer.provideMerge(stablePlatformLayer),
   );
 };
 
-export const CodeModeObjectRequestOriginLayer = (
-  origin: string,
-): Layer.Layer<CodeModeObjectRequestOrigin> =>
-  Layer.succeed(CodeModeObjectRequestOrigin, { origin });
+/** Fail fast unless the Durable Object was selected by a stable host name. */
+export const requireDurableObjectHostId = (state: DurableObjectState): string =>
+  Option.fromNullable(state.id.name).pipe(
+    Option.getOrThrowWith(
+      () => new Error("CodeModeObject must be addressed by name."),
+    ),
+  );
+
+/**
+ * Cloudflare implementations of both physical storage backend ports.
+ *
+ * A Durable Object cannot dynamically open another object's storage. Each
+ * backend therefore accepts only the ID of the current object and fails if
+ * shared storage construction requests another host.
+ */
+export const CodeModeObjectHostStorageBackendLayer = (
+  state: DurableObjectState,
+): Layer.Layer<HostStateStorageBackend | HostSecretStorageBackend> => {
+  const objectHostId = requireDurableObjectHostId(state);
+
+  return Layer.merge(
+    Layer.succeed(HostStateStorageBackend, {
+      forHost: (hostId) =>
+        requireCurrentObjectHost(hostId, objectHostId, "state").pipe(
+          Effect.as(makeDurableObjectHostStorage(state.storage, "state")),
+        ),
+    }),
+    Layer.succeed(HostSecretStorageBackend, {
+      forHost: (hostId) =>
+        requireCurrentObjectHost(hostId, objectHostId, "secret").pipe(
+          Effect.as(makeDurableObjectHostStorage(state.storage, "secret")),
+        ),
+    }),
+  );
+};
+
+const requireCurrentObjectHost = (
+  requestedHostId: string,
+  objectHostId: string,
+  storage: "state" | "secret",
+): Effect.Effect<void, HostStorageError> =>
+  requestedHostId === objectHostId
+    ? Effect.void
+    : Effect.fail(
+        new HostStorageError({
+          storage,
+          operation: "open",
+          key: requestedHostId,
+          cause: new Error(
+            `Durable Object ${objectHostId} cannot provide storage for ${requestedHostId}.`,
+          ),
+        }),
+      );
 
 /** Durable Object implementation of the shared host storage operations. */
 export const makeDurableObjectHostStorage = (

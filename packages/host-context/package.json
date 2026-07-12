@@ -1,0 +1,48 @@
+{
+  "name": "@ptools/host-context",
+  "version": "0.1.0-alpha.0",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ruchir28/ptools.git",
+    "directory": "packages/host-context"
+  },
+  "homepage": "https://github.com/Ruchir28/ptools#readme",
+  "bugs": {
+    "url": "https://github.com/Ruchir28/ptools/issues"
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.js.map",
+    "dist/*.d.ts",
+    "dist/*.d.ts.map",
+    "dist/services/*.js",
+    "dist/services/*.js.map",
+    "dist/services/*.d.ts",
+    "dist/services/*.d.ts.map",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./effect": {
+      "types": "./dist/services/index.d.ts",
+      "default": "./dist/services/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run --passWithNoTests --exclude \"**/dist/**\""
+  },
+  "dependencies": {
+    "effect": "3.21.2"
+  }
+}

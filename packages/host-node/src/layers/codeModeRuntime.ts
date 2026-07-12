@@ -13,38 +13,31 @@ import {
 } from "@ptools/code-mode";
 import { CodeModeServer } from "@ptools/code-mode-api/effect";
 import {
+  HostSecretStorage,
   ResolvedPtoolsConfigSource,
   ServerConfigError,
 } from "@ptools/config";
 import { ExecutorStartError, type ExecutorError } from "@ptools/executor";
+import { HostIdentity } from "@ptools/host-context";
 import {
   makeMcpRegistryLive,
   type NameCollisionError,
 } from "@ptools/mcp-registry";
 import { Effect, Layer, Option } from "effect";
-import {
-  NodeAuthCoordinatorLive,
-  NodeMcpAuthFlow,
-} from "./auth/index.js";
+import { NodeAuthCoordinatorLive, NodeMcpAuthFlow } from "./auth/index.js";
 import {
   FileResolvedPtoolsConfigSourceLive,
   NodeResolvedPtoolsConfigSourceLive,
 } from "../config.js";
-import {
-  HostNodeError,
-  type NodeCodeModeHostOptions,
-} from "../options.js";
-import {
-  LocalSandboxExecutorLayer,
-} from "../executor/localExecutor.js";
+import { HostNodeError, type NodeCodeModeHostOptions } from "../options.js";
+import { LocalSandboxExecutorLayer } from "../executor/localExecutor.js";
 import { NodeMcpConnectorLive } from "../mcpConnector.js";
 import {
   NodeConfigDiscoveryContext,
-  NodeHostIdentity,
   NodeHostPlatformLive,
   NodeHostRuntimePlatformLive,
   NodeHostSettings,
-  NodeKeyringHostSecretStorageLive,
+  NodeKeyringHostSecretStorageBackendLayer,
   type NodeHostProcessPlatform,
 } from "./platform/index.js";
 
@@ -92,9 +85,9 @@ export const NodeCodeModeRuntimeLiveForHost = (input: {
     hostId: input.hostId,
     processPlatformLayer: input.processPlatformLayer,
   });
-  const configSourceLayer = makeResolvedPtoolsConfigSourceLayer(input.configPath).pipe(
-    Layer.provide(platformLayer),
-  );
+  const configSourceLayer = makeResolvedPtoolsConfigSourceLayer(
+    input.configPath,
+  ).pipe(Layer.provide(platformLayer));
   const authLayer = makeNodeAuthCoordinatorLive().pipe(
     Layer.provide(platformLayer),
   );
@@ -124,12 +117,14 @@ export const NodeCodeModeServerLive = (
     processPlatformLayer: NodeHostPlatformLive(options),
   });
 
-const NodeCodeModeLiveFromResolvedPtoolsConfigSource = (options: {
-  readonly denoExecutable?: string;
-} = {}): Layer.Layer<
+const NodeCodeModeLiveFromResolvedPtoolsConfigSource = (
+  options: {
+    readonly denoExecutable?: string;
+  } = {},
+): Layer.Layer<
   CodeMode,
   HostNodeError | ServerConfigError,
-  ResolvedPtoolsConfigSource | NodeHostIdentity | NodeHostSettings
+  ResolvedPtoolsConfigSource | HostIdentity | NodeHostSettings
 > =>
   Layer.unwrapEffect(
     Effect.gen(function* () {
@@ -173,7 +168,7 @@ const NodeCodeModeLiveFromResolvedPtoolsConfigSource = (options: {
 const makeNodeAuthCoordinatorLive = (): Layer.Layer<
   AuthCoordinator | NodeMcpAuthFlow,
   HostNodeError,
-  NodeHostIdentity | NodeHostSettings
+  HostIdentity | NodeHostSettings
 > =>
   Layer.unwrapEffect(
     Effect.gen(function* () {
@@ -182,8 +177,9 @@ const makeNodeAuthCoordinatorLive = (): Layer.Layer<
       return NodeAuthCoordinatorLive().pipe(
         Layer.provide(
           McpOAuthCredentialStore.Default.pipe(
+            Layer.provide(HostSecretStorage.Default),
             Layer.provide(
-              NodeKeyringHostSecretStorageLive({
+              NodeKeyringHostSecretStorageBackendLayer({
                 serviceName: settings.auth.serviceName,
               }),
             ),
@@ -221,8 +217,6 @@ const makeResolvedPtoolsConfigSourceLayer = (
       });
     }),
   );
-
-
 
 export const toHostNodeError = (
   message: string,

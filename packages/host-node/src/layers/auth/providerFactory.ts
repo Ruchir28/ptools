@@ -16,40 +16,41 @@ import {
   type McpOAuthCredentialIdentity,
   type UpstreamHttpAuthConfig,
 } from "@ptools/auth";
+import { HostIdentity } from "@ptools/host-context";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Effect, Layer, Option } from "effect";
-import { NodeHostIdentity, NodeHostSettings } from "../platform/index.js";
+import { NodeHostSettings } from "../platform/index.js";
 import { oauthCallbackUrl, type NodeAuthRouteOptions } from "./policy.js";
 
 /** Builds MCP SDK OAuth providers using Node keyring-backed credentials. */
 export const NodeAuthProviderFactoryLayer: Layer.Layer<
   AuthProviderFactory,
   never,
-  McpOAuthCredentialStore | NodeHostIdentity | NodeHostSettings
+  McpOAuthCredentialStore | HostIdentity | NodeHostSettings
 > = Layer.effect(
-    AuthProviderFactory,
-    Effect.gen(function* () {
-      const oauthCredentials = yield* McpOAuthCredentialStore;
-      const identity = yield* NodeHostIdentity;
-      const settings = yield* NodeHostSettings;
+  AuthProviderFactory,
+  Effect.gen(function* () {
+    const oauthCredentials = yield* McpOAuthCredentialStore;
+    const identity = yield* HostIdentity;
+    const settings = yield* NodeHostSettings;
 
-      return AuthProviderFactory.of({
-        makeProvider: (input) =>
-          Effect.succeed(
-            new PtoolsOAuthProvider({
-              oauthCredentials,
-              origin: settings.publicOrigin,
-              hostId: identity.hostId,
-              autoOpen: settings.auth.autoOpen ?? false,
-              serverName: input.serverName,
-              config: input.config,
-              onAuthorizationUrl: input.onAuthorizationUrl,
-            }),
-          ),
-      });
-    }),
-  );
+    return AuthProviderFactory.of({
+      makeProvider: (input) =>
+        Effect.succeed(
+          new PtoolsOAuthProvider({
+            oauthCredentials,
+            origin: settings.publicOrigin,
+            hostId: identity.hostId,
+            autoOpen: settings.auth.autoOpen ?? false,
+            serverName: input.serverName,
+            config: input.config,
+            onAuthorizationUrl: input.onAuthorizationUrl,
+          }),
+        ),
+    });
+  }),
+);
 
 class PtoolsOAuthProvider implements AuthCoordinatorOAuthProvider {
   readonly #oauthCredentials: typeof McpOAuthCredentialStore.Service;
@@ -168,7 +169,9 @@ class PtoolsOAuthProvider implements AuthCoordinatorOAuthProvider {
   }
 
   hasStoredCredentials() {
-    return this.#oauthCredentials.hasStoredCredentials(this.#credentialIdentity());
+    return this.#oauthCredentials.hasStoredCredentials(
+      this.#credentialIdentity(),
+    );
   }
 
   redirectToAuthorization(authorizationUrl: URL): void {

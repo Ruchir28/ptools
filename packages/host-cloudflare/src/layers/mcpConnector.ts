@@ -15,21 +15,10 @@ import { Context, Effect, Layer, Option, Scope } from "effect";
 
 type AuthCoordinatorService = Context.Tag.Service<typeof AuthCoordinator>;
 
-export const CloudflareHttpMcpConnectorLayer: Layer.Layer<
-  HttpMcpConnector,
-  never,
-  AuthCoordinator
-> = Layer.effect(
-  HttpMcpConnector,
-  Effect.gen(function* () {
-    const authCoordinator = yield* AuthCoordinator;
-
-    return {
-      connect: (input: ConnectMcpInput) =>
-        connectCloudflareHttpMcp(input, authCoordinator),
-    };
-  }),
-);
+export const CloudflareHttpMcpConnectorLayer: Layer.Layer<HttpMcpConnector> =
+  Layer.succeed(HttpMcpConnector, {
+    connect: connectCloudflareHttpMcp,
+  });
 
 export const CloudflareMcpConnectorLayer: Layer.Layer<
   McpConnector,
@@ -55,17 +44,26 @@ export const CloudflareMcpConnectorLayer: Layer.Layer<
 
 function connectCloudflareHttpMcp(
   input: ConnectMcpInput,
-  authCoordinator: AuthCoordinatorService,
-): Effect.Effect<ConnectedMcpClient, McpConnectionError, Scope.Scope> {
+): Effect.Effect<
+  ConnectedMcpClient,
+  McpConnectionError,
+  Scope.Scope | AuthCoordinator
+> {
   if (input.config.transport !== "http") {
     return unsupportedTransport(input);
   }
 
-  return createHttpTransport(
-    input.serverName,
-    input.config,
-    authCoordinator,
-  ).pipe(
+  const config = input.config;
+
+  return Effect.gen(function* () {
+    const authCoordinator = yield* AuthCoordinator;
+
+    return yield* createHttpTransport(
+      input.serverName,
+      config,
+      authCoordinator,
+    );
+  }).pipe(
     Effect.mapError(
       (cause) =>
         new McpConnectionError({ serverName: input.serverName, cause }),

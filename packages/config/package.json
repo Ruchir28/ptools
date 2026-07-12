@@ -51,6 +51,7 @@
     "test": "vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
+    "@ptools/host-context": "workspace:*",
     "effect": "3.21.2"
   }
 }

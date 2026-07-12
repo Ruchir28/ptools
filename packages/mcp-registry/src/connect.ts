@@ -54,7 +54,10 @@ export const connectConfiguredMcpClients = (
           jsServerName,
           config,
         })
-        .pipe(Effect.either);
+        .pipe(
+          Effect.provideService(AuthCoordinator, authCoordinator),
+          Effect.either,
+        );
 
       if (result._tag === "Left") {
         yield* authCoordinator.noteConnectionError(

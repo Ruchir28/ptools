@@ -1,12 +1,12 @@
 import { auth as sdkAuth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { AuthCoordinator, McpOAuthCredentialStore } from "@ptools/auth";
 import { HostSecretStorage, ResolvedHttpMcpConfig } from "@ptools/config";
+import { HostIdentityLayer } from "@ptools/host-context";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { NodeAuthCoordinatorLive, NodeMcpAuthFlow } from "../src/auth.js";
 import {
   NodeConfigDiscoveryContextLive,
-  NodeHostIdentityLive,
   NodeHostSettingsLive,
 } from "../src/layers/platform/index.js";
 
@@ -150,7 +150,7 @@ const makeTestNodeAuthCoordinatorLive = () => {
     publicOrigin: "http://127.0.0.1:18080",
     auth: { autoOpen: false },
   }).pipe(Layer.provide(discoveryLayer));
-  const identityLayer = NodeHostIdentityLive("test");
+  const identityLayer = HostIdentityLayer("test");
 
   return NodeAuthCoordinatorLive().pipe(
     Layer.provide(makeMemoryOAuthCredentialStoreLive()),
@@ -160,8 +160,10 @@ const makeTestNodeAuthCoordinatorLive = () => {
 
 const makeMemoryOAuthCredentialStoreLive = () => {
   const values = new Map<string, string>();
-  const storage = {
-    get: (key: string) => Effect.succeed(Option.fromNullable(values.get(key))),
+  const storage = HostSecretStorage.make({
+    hostId: "test",
+    get: (key: string) =>
+      Effect.sync(() => Option.fromNullable(values.get(key))),
     put: (key: string, value: string) =>
       Effect.sync(() => {
         values.set(key, value);
@@ -170,7 +172,7 @@ const makeMemoryOAuthCredentialStoreLive = () => {
       Effect.sync(() => {
         values.delete(key);
       }),
-  };
+  });
 
   return McpOAuthCredentialStore.Default.pipe(
     Layer.provide(Layer.succeed(HostSecretStorage, storage)),

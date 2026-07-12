@@ -35,6 +35,12 @@ export interface CallToolRequest {
 
 export type McpRegistryDiagnostic =
   | {
+      readonly code: "McpRegistryRefreshFailed";
+      readonly severity: "error";
+      readonly serverName: string;
+      readonly message: string;
+    }
+  | {
       readonly code: "McpConnectionFailed";
       readonly severity: "error";
       readonly serverName: string;

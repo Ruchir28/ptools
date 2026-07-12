@@ -9,6 +9,7 @@
     { "path": "../config" },
     { "path": "../executor" },
     { "path": "../host-api" },
+    { "path": "../host-context" },
     { "path": "../mcp-registry" }
   ],
   "compilerOptions": {

@@ -1,63 +1,75 @@
 /**
- * Node platform adapters for shared host storage primitives.
+ * Node implementations of the shared physical host-storage backend ports.
  *
- * The primitives keep logical keys exact and platform-neutral. Node owns the
- * physical filesystem/keyring namespace, including host-id scoping for secret
- * values.
+ * These adapters receive a host ID through `forHost(...)`, derive Node-specific
+ * filesystem/keyring namespaces, and return exact-key operations. Shared
+ * `HostStateStorage.Default` and `HostSecretStorage.Default` own the step that
+ * obtains `HostIdentity` and invokes these backends.
  */
 import * as KeyValueStore from "@effect/platform/KeyValueStore";
 import * as NodeKeyValueStore from "@effect/platform-node/NodeKeyValueStore";
 import { AsyncEntry } from "@napi-rs/keyring";
 import {
-  HostSecretStorage,
-  HostStateStorage,
+  HostSecretStorageBackend,
+  HostStateStorageBackend,
   HostStorageError,
   type HostStorageOperations,
 } from "@ptools/config";
-import { Effect, Layer, Option } from "effect";
-import { NodeHostIdentity } from "./hostIdentity.js";
+import { join } from "node:path";
+import { Context, Effect, Layer, Option } from "effect";
 
-export const NodeFileHostStateStorageLive = (directory: string): Layer.Layer<
-  HostStateStorage,
-  HostStorageError
-> =>
-  Layer.effect(
-    HostStateStorage,
-    Effect.gen(function* () {
-      const store = yield* KeyValueStore.KeyValueStore;
-      return makeKeyValueStoreHostStorage(store, "state");
-    }),
-  ).pipe(
-    Layer.provide(
-      NodeKeyValueStore.layerFileSystem(directory).pipe(
+/**
+ * File-backed state backend rooted under `<root>/<encodedHostId>`.
+ *
+ * Callers provide the common host-state root. The shared final storage service
+ * supplies the selected host ID to this backend.
+ */
+export const NodeFileHostStateStorageBackendLayer = (
+  rootDirectory: string,
+): Layer.Layer<HostStateStorageBackend> =>
+  Layer.succeed(HostStateStorageBackend, {
+    forHost: (hostId) => {
+      const hostDirectory = join(rootDirectory, encodeHostId(hostId));
+
+      return NodeKeyValueStore.layerFileSystem(hostDirectory).pipe(
         Layer.mapError(
           (cause) =>
             new HostStorageError({
               storage: "state",
-              operation: "get",
-              key: directory,
+              operation: "open",
+              key: hostDirectory,
               cause,
             }),
         ),
-      ),
-    ),
-  );
+        Layer.build,
+        Effect.map((context) =>
+          makeKeyValueStoreHostStorage(
+            Context.get(context, KeyValueStore.KeyValueStore),
+            "state",
+          ),
+        ),
+      );
+    },
+  });
 
-/** Keyring-backed secret storage scoped by Node host id. */
-export const NodeKeyringHostSecretStorageLive = (options: {
+/** Keyring backend that physically prefixes secrets by the requested host ID. */
+export const NodeKeyringHostSecretStorageBackendLayer = (options: {
   readonly serviceName: string;
-}): Layer.Layer<HostSecretStorage, never, NodeHostIdentity> =>
-  Layer.effect(
-    HostSecretStorage,
-    Effect.gen(function* () {
-      const identity = yield* NodeHostIdentity;
-      const hostKeyPrefix = `hosts/${encodeHostId(identity.hostId)}/`;
-      const physicalKey = (logicalKey: string) => `${hostKeyPrefix}${logicalKey}`;
+}): Layer.Layer<HostSecretStorageBackend> =>
+  Layer.succeed(HostSecretStorageBackend, {
+    forHost: (hostId) => {
+      const hostKeyPrefix = `hosts/${encodeHostId(hostId)}/`;
+      const physicalKey = (logicalKey: string) =>
+        `${hostKeyPrefix}${logicalKey}`;
 
-      return HostSecretStorage.of({
+      return Effect.succeed({
         get: (key) =>
           Effect.tryPromise({
-            try: () => new AsyncEntry(options.serviceName, physicalKey(key)).getPassword(),
+            try: () =>
+              new AsyncEntry(
+                options.serviceName,
+                physicalKey(key),
+              ).getPassword(),
             catch: (cause) =>
               new HostStorageError({
                 storage: "secret",
@@ -95,28 +107,32 @@ export const NodeKeyringHostSecretStorageLive = (options: {
                 cause,
               }),
           }),
-      });
-    }),
-  );
+      } satisfies HostStorageOperations);
+    },
+  });
 
 const makeKeyValueStoreHostStorage = (
   store: KeyValueStore.KeyValueStore,
   storage: "state",
 ): HostStorageOperations => ({
   get: (key) =>
-    store.get(key).pipe(
-      Effect.mapError(
-        (cause) =>
-          new HostStorageError({ storage, operation: "get", key, cause }),
+    store
+      .get(key)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new HostStorageError({ storage, operation: "get", key, cause }),
+        ),
       ),
-    ),
   put: (key, value) =>
-    store.set(key, value).pipe(
-      Effect.mapError(
-        (cause) =>
-          new HostStorageError({ storage, operation: "put", key, cause }),
+    store
+      .set(key, value)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new HostStorageError({ storage, operation: "put", key, cause }),
+        ),
       ),
-    ),
   delete: (key) =>
     store.has(key).pipe(
       Effect.flatMap((exists) => (exists ? store.remove(key) : Effect.void)),
@@ -127,5 +143,6 @@ const makeKeyValueStoreHostStorage = (
     ),
 });
 
+/** Encode one host ID for filesystem and keyring namespace components. */
 export const encodeHostId = (hostId: string): string =>
-  encodeURIComponent(hostId);
+  encodeURIComponent(hostId).replaceAll(".", "%2E");

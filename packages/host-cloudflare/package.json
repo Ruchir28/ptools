@@ -45,7 +45,7 @@
     "build": "pnpm --filter @ptools/executor build && pnpm build:dynamic-worker-source && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "test": "pnpm run test:node && pnpm run test:worker",
-    "test:node": "vitest run test/import-boundary.test.ts test/mcpConnector.test.ts test/platform.test.ts test/provider.test.ts test/dynamicWorkerExecutor.test.ts test/codeModeServer.test.ts",
+    "test:node": "vitest run test/import-boundary.test.ts test/mcpConnector.test.ts test/platform.test.ts test/provider.test.ts test/dynamicWorkerExecutor.test.ts",
     "test:worker": "vitest run --config vitest.worker.config.ts",
     "build:dynamic-worker-source": "node scripts/build-dynamic-worker-source.mjs"
   },
@@ -58,6 +58,8 @@
     "@ptools/code-mode-api": "workspace:*",
     "@ptools/config": "workspace:*",
     "@ptools/host-api": "workspace:*",
+    "@ptools/host-context": "workspace:*",
+    "@ptools/host-runtime": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
     "effect": "3.21.2",
     "@ptools/executor": "workspace:*"

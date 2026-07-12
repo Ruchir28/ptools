@@ -5,8 +5,8 @@ import {
   type PtoolsConfig,
 } from "@ptools/config";
 import { PtoolsSecretValues } from "@ptools/config/contracts";
+import { HostIdentity } from "@ptools/host-context";
 import { Effect, Option, Schema } from "effect";
-import { CodeModeObjectIdentity } from "../../layers/index.js";
 import type {
   ConfigureCodeModeObjectError,
   ConfigureCodeModeObjectResult,
@@ -20,11 +20,11 @@ export const configureCodeModeObject = (input: {
 }): Effect.Effect<
   ConfigureCodeModeObjectResult,
   ConfigureCodeModeObjectError,
-  ConfiguredHostConfigStore | CodeModeObjectIdentity
+  ConfiguredHostConfigStore | HostIdentity
 > =>
   Effect.gen(function* () {
     const configStore = yield* ConfiguredHostConfigStore;
-    const identity = yield* CodeModeObjectIdentity;
+    const identity = yield* HostIdentity;
     const parsed = yield* parsePtoolsConfigJson(
       input.rawConfigJson,
       `Cloudflare host ${identity.hostId} config`,
@@ -53,11 +53,11 @@ export const configureCodeModeObjectSecrets = (input: {
 }): Effect.Effect<
   ConfigureCodeModeObjectSecretsResult,
   ConfigureCodeModeObjectError,
-  ConfiguredSecretStore | CodeModeObjectIdentity
+  ConfiguredSecretStore | HostIdentity
 > =>
   Effect.gen(function* () {
     const configuredSecrets = yield* ConfiguredSecretStore;
-    const identity = yield* CodeModeObjectIdentity;
+    const identity = yield* HostIdentity;
     const secrets = yield* parseSecretsJson(input.rawSecretsJson);
     const result = yield* configuredSecrets
       .replaceAll({ secrets })

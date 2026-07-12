@@ -1,7 +1,11 @@
-import { HostStorageError } from "@ptools/config";
-import { Effect, Either, Option } from "effect";
+import { HostStateStorage, HostStorageError } from "@ptools/config";
+import { HostIdentityLayer } from "@ptools/host-context";
+import { Effect, Either, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
-import { makeDurableObjectHostStorage } from "../src/layers/platform.js";
+import {
+  CodeModeObjectHostStorageBackendLayer,
+  makeDurableObjectHostStorage,
+} from "../src/layers/platform.js";
 import { requestOrigin } from "../src/worker/request.js";
 
 describe("makeDurableObjectHostStorage", () => {
@@ -43,6 +47,32 @@ describe("makeDurableObjectHostStorage", () => {
         operation: "get",
         key: "key",
         cause,
+      });
+    }
+  });
+});
+
+describe("CodeModeObjectHostStorageBackendLayer", () => {
+  it("rejects a host identity that differs from the current object", async () => {
+    const state = {
+      id: { name: "object-a" },
+      storage: makeDurableObjectStorage({}),
+    } as unknown as DurableObjectState;
+    const layer = HostStateStorage.Default.pipe(
+      Layer.provide(CodeModeObjectHostStorageBackendLayer(state)),
+      Layer.provide(HostIdentityLayer("object-b")),
+    );
+
+    const result = await Effect.runPromise(
+      HostStateStorage.pipe(Effect.provide(layer), Effect.either),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toMatchObject({
+        storage: "state",
+        operation: "open",
+        key: "object-b",
       });
     }
   });

@@ -1,11 +1,19 @@
+import { HostIdentity, HostIdentityLayer } from "@ptools/host-context";
 import { Layer } from "effect";
-import type { NodeCodeModeHostOptions } from "../../options.js";
-import { NodeConfigDiscoveryContext, NodeConfigDiscoveryContextLive } from "./configDiscoveryContext.js";
-import { NodeHostIdentity, NodeHostIdentityLive } from "./hostIdentity.js";
+import {
+  DEFAULT_HOST_ID,
+  type NodeCodeModeHostOptions,
+} from "../../options.js";
+import {
+  NodeConfigDiscoveryContext,
+  NodeConfigDiscoveryContextLive,
+} from "./configDiscoveryContext.js";
 import { NodeHostSettings, NodeHostSettingsLive } from "./hostSettings.js";
 
-export type NodeHostProcessPlatform = NodeConfigDiscoveryContext | NodeHostSettings;
-export type NodeHostRuntimePlatform = NodeHostProcessPlatform | NodeHostIdentity;
+export type NodeHostProcessPlatform =
+  | NodeConfigDiscoveryContext
+  | NodeHostSettings;
+export type NodeHostRuntimePlatform = NodeHostProcessPlatform | HostIdentity;
 
 /** Process-level Node platform context shared by the HTTP listener and all per-host runtimes. */
 export const NodeHostPlatformLive = (
@@ -32,5 +40,5 @@ export const NodeHostRuntimePlatformLive = (input: {
 }): Layer.Layer<NodeHostRuntimePlatform> =>
   Layer.merge(
     input.processPlatformLayer,
-    NodeHostIdentityLive(input.hostId),
+    HostIdentityLayer(input.hostId ?? DEFAULT_HOST_ID),
   );

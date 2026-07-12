@@ -1,6 +1,7 @@
 import { AuthCoordinatorPolicy } from "@ptools/auth";
+import { HostIdentity } from "@ptools/host-context";
 import { Effect, Layer } from "effect";
-import { NodeHostIdentity, NodeHostSettings } from "../platform/index.js";
+import { NodeHostSettings } from "../platform/index.js";
 
 export interface NodeAuthRouteOptions {
   readonly origin: string;
@@ -24,11 +25,11 @@ export const oauthCallbackUrl = (
 export const NodeAuthPolicyLayer: Layer.Layer<
   AuthCoordinatorPolicy,
   never,
-  NodeHostIdentity | NodeHostSettings
+  HostIdentity | NodeHostSettings
 > = Layer.effect(
   AuthCoordinatorPolicy,
   Effect.gen(function* () {
-    const identity = yield* NodeHostIdentity;
+    const identity = yield* HostIdentity;
     const settings = yield* NodeHostSettings;
     const options = {
       origin: settings.publicOrigin,

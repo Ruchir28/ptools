@@ -4,7 +4,10 @@ import { Effect } from "effect";
 import type { McpAuthStatus } from "../contracts/index.js";
 import type { AuthError } from "../authErrors.js";
 import type { HttpMcpConfig, UpstreamMcpConfig } from "../authTypes.js";
-import { AuthCoordinatorCore } from "../coordinatorCore.js";
+import {
+  AuthCoordinatorCore,
+  type AuthServerHandler,
+} from "../coordinatorCore.js";
 
 export interface AuthCoordinatorService {
   readonly origin: Effect.Effect<string, AuthError>;
@@ -36,10 +39,7 @@ export interface AuthCoordinatorService {
   ) => Effect.Effect<OAuthClientProvider, AuthError>;
   readonly status: Effect.Effect<McpAuthStatus, never>;
   readonly setAuthorizedHandler?: (
-    handler: (serverName: string) => Promise<void>,
-  ) => Effect.Effect<void, never>;
-  readonly setRefreshHandler?: (
-    handler: (serverName: string) => Promise<void>,
+    handler: AuthServerHandler,
   ) => Effect.Effect<void, never>;
   readonly handleAuthRequest?: (request: Request) => Promise<Response>;
 }
@@ -76,7 +76,6 @@ function makeAuthCoordinator(): Effect.Effect<
       providerFor: core.providerFor,
       status: core.status,
       setAuthorizedHandler: core.setAuthorizedHandler,
-      setRefreshHandler: core.setRefreshHandler,
     } satisfies AuthCoordinatorService;
   });
 }

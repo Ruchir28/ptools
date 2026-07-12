@@ -8,10 +8,7 @@ import {
   isDynamicClientRegistrationUnsupported,
   safeErrorMessage,
 } from "./authErrors.js";
-import type {
-  McpAuthServerStatus,
-  McpAuthStatus,
-} from "./contracts/index.js";
+import type { McpAuthServerStatus, McpAuthStatus } from "./contracts/index.js";
 import type {
   HttpMcpConfig,
   UpstreamHttpAuthConfig,
@@ -94,11 +91,18 @@ export class AuthProviderFactory extends Context.Tag(
   }
 >() {}
 
+/** Effect-native work invoked after one server completes authorization. */
+export type AuthServerHandler = (
+  serverName: string,
+) => Effect.Effect<void, never>;
+
 export interface AuthCoordinatorCoreService {
   /** Return AuthCoordinatorPolicy.origin. */
   readonly origin: Effect.Effect<string, AuthError>;
   /** Build callback URL for serverName through policy.callbackUrl. */
-  readonly callbackUrl: (serverName: string) => Effect.Effect<string, AuthError>;
+  readonly callbackUrl: (
+    serverName: string,
+  ) => Effect.Effect<string, AuthError>;
   /** Return the configured HTTP MCP config for host OAuth flows. */
   readonly httpConfigFor: (
     serverName: string,
@@ -117,14 +121,18 @@ export interface AuthCoordinatorCoreService {
     config: UpstreamMcpConfig,
   ) => Effect.Effect<void>;
   /** Mark an HTTP server connected and clear pending auth fields. */
-  readonly noteConnected: (serverName: string) => Effect.Effect<void, AuthError>;
+  readonly noteConnected: (
+    serverName: string,
+  ) => Effect.Effect<void, AuthError>;
   /** Record an HTTP connection/auth error. */
   readonly noteConnectionError: (
     serverName: string,
     error: unknown,
   ) => Effect.Effect<void, AuthError>;
   /** Return true when the HTTP connector should attach an OAuth provider. */
-  readonly shouldAttachAuthProvider: (serverName: string) => Effect.Effect<boolean>;
+  readonly shouldAttachAuthProvider: (
+    serverName: string,
+  ) => Effect.Effect<boolean>;
   /** Ask the host OAuth provider whether credentials are already stored. */
   readonly hasStoredCredentials: (
     serverName: string,
@@ -139,11 +147,7 @@ export interface AuthCoordinatorCoreService {
   readonly status: Effect.Effect<McpAuthStatus>;
   /** Register callback invoked after a server finishes authorization. */
   readonly setAuthorizedHandler: (
-    handler: (serverName: string) => Promise<void>,
-  ) => Effect.Effect<void>;
-  /** Register callback invoked when a server should be refreshed/reloaded. */
-  readonly setRefreshHandler: (
-    handler: (serverName: string) => Promise<void>,
+    handler: AuthServerHandler,
   ) => Effect.Effect<void>;
   /** Store latest authorization URL and mark server requires_auth. */
   readonly setAuthorizationUrl: (
@@ -151,13 +155,17 @@ export interface AuthCoordinatorCoreService {
     authorizationUrl: URL,
   ) => Effect.Effect<void, AuthError>;
   /** Return the latest IdP/provider authorization URL captured for a server. */
-  readonly authorizationUrlFor: (serverName: string) => Effect.Effect<string, AuthError>;
+  readonly authorizationUrlFor: (
+    serverName: string,
+  ) => Effect.Effect<string, AuthError>;
   /** Mark a server as waiting for the browser/provider authorization step. */
   readonly markAuthorizationInProgress: (
     serverName: string,
   ) => Effect.Effect<void, AuthError>;
   /** Mark OAuth complete for serverName and invoke authorized handler. */
-  readonly markAuthorized: (serverName: string) => Effect.Effect<void, AuthError>;
+  readonly markAuthorized: (
+    serverName: string,
+  ) => Effect.Effect<void, AuthError>;
 }
 
 /**
@@ -226,8 +234,7 @@ interface AuthCoordinatorCoreSnapshot {
    * HTTP-auth no-op from an invalid lifecycle event for an unknown server.
    */
   readonly ignoredServers: ReadonlySet<string>;
-  readonly authorizedHandler?: (serverName: string) => Promise<void>;
-  readonly refreshHandler?: (serverName: string) => Promise<void>;
+  readonly authorizedHandler?: AuthServerHandler;
 }
 
 /**
@@ -300,11 +307,6 @@ function makeAuthCoordinatorCore(): Effect.Effect<
         SynchronizedRef.update(snapshot, (state) => ({
           ...state,
           authorizedHandler: handler,
-        })),
-      setRefreshHandler: (handler) =>
-        SynchronizedRef.update(snapshot, (state) => ({
-          ...state,
-          refreshHandler: handler,
         })),
       setAuthorizationUrl: (serverName, authorizationUrl) =>
         updateAuthState(
@@ -623,7 +625,7 @@ const markAuthorized = (
     // or refresh. The handler runs outside the synchronized state update and
     // may safely call back into the coordinator.
     if (handler !== undefined) {
-      yield* Effect.promise(() => handler(serverName));
+      yield* handler(serverName);
     }
   });
 

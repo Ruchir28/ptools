@@ -9,9 +9,10 @@ import type {
   CompleteHostMcpOAuthCallbackInput,
   HostMcpOAuthCallbackBrowserResponse,
 } from "@ptools/host-api";
+import { HostIdentity } from "@ptools/host-context";
 import { Effect, Layer, Option } from "effect";
 import { browserHtmlResponse, renderMessagePage } from "./browserHtml.js";
-import { NodeHostIdentity, NodeHostSettings } from "../platform/index.js";
+import { NodeHostSettings } from "../platform/index.js";
 import { NodeMcpAuthFlow } from "./oauthFlow.js";
 import { authStatusUrl, setupUrl } from "./policy.js";
 
@@ -22,7 +23,7 @@ type AuthCoordinatorCoreService = typeof AuthCoordinatorCore.Service;
  * decoded a route such as `/hosts/:hostId/auth/:serverName`.
  *
  * This layer is created inside one Node code-mode runtime. That runtime's
- * `NodeHostIdentity.hostId` is the host id selected by the dispatcher for the
+ * `HostIdentity.hostId` is the host id selected by the dispatcher for the
  * current request path, not a host id baked into the HTTP listener. The service
  * uses that host id plus the configured public origin to create callback/status
  * URLs, delegates auth state to `AuthCoordinatorCore`, and wraps the MCP SDK's
@@ -31,32 +32,32 @@ type AuthCoordinatorCoreService = typeof AuthCoordinatorCore.Service;
 export const NodeOAuthFlowLayer: Layer.Layer<
   NodeMcpAuthFlow,
   never,
-  AuthCoordinatorCore | NodeHostIdentity | NodeHostSettings
+  AuthCoordinatorCore | HostIdentity | NodeHostSettings
 > = Layer.effect(
-    NodeMcpAuthFlow,
-    Effect.gen(function* () {
-      const core = yield* AuthCoordinatorCore;
-      const identity = yield* NodeHostIdentity;
-      const settings = yield* NodeHostSettings;
+  NodeMcpAuthFlow,
+  Effect.gen(function* () {
+    const core = yield* AuthCoordinatorCore;
+    const identity = yield* HostIdentity;
+    const settings = yield* NodeHostSettings;
 
-      return NodeMcpAuthFlow.of({
-        beginAuthorization: (input) =>
-          beginNodeOAuthAuthorization({
-            core,
-            origin: settings.publicOrigin,
-            hostId: identity.hostId,
-            serverName: input.serverName,
-            force: input.force,
-          }).pipe(Effect.map((authorizeUrl) => ({ authorizeUrl }))),
-        completeCallback: (input) =>
-          completeNodeOAuthCallback({
-            core,
-            origin: settings.publicOrigin,
-            input,
-          }),
-      });
-    }),
-  );
+    return NodeMcpAuthFlow.of({
+      beginAuthorization: (input) =>
+        beginNodeOAuthAuthorization({
+          core,
+          origin: settings.publicOrigin,
+          hostId: identity.hostId,
+          serverName: input.serverName,
+          force: input.force,
+        }).pipe(Effect.map((authorizeUrl) => ({ authorizeUrl }))),
+      completeCallback: (input) =>
+        completeNodeOAuthCallback({
+          core,
+          origin: settings.publicOrigin,
+          input,
+        }),
+    });
+  }),
+);
 
 const beginNodeOAuthAuthorization = (input: {
   readonly core: AuthCoordinatorCoreService;
@@ -153,7 +154,10 @@ const completeNodeOAuthCallback = (input: {
     const error = params.get("error");
 
     if (error !== null) {
-      yield* input.core.noteConnectionError(callback.provider, new Error(error));
+      yield* input.core.noteConnectionError(
+        callback.provider,
+        new Error(error),
+      );
       return browserHtmlResponse(
         400,
         renderMessagePage("Authorization failed", error),

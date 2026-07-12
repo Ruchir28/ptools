@@ -1,20 +1,20 @@
 import {
+  McpOAuthProvider,
   mcpOAuthCredentialKey,
   type HttpMcpConfig,
   type McpOAuthCredentialIdentity,
   type McpOAuthCredentialSlot,
   type McpOAuthCredentialStoreService,
+  type McpOAuthProviderDependencies,
 } from "@ptools/auth";
 import {
   ResolvedHttpMcpAuthConfig,
   ResolvedHttpMcpConfig,
 } from "@ptools/config";
-import { Effect, Option } from "effect";
+import { Effect, Option, Runtime } from "effect";
 import { describe, expect, it } from "vitest";
-import { CloudflareOAuthProvider } from "../src/layers/auth/provider.js";
-import type { CloudflareOAuthPlatform } from "../src/layers/auth/types.js";
 
-describe("CloudflareOAuthProvider", () => {
+describe("McpOAuthProvider", () => {
   it("models missing auth config as dynamic client registration", async () => {
     const provider = makeProvider(httpConfig("https://mcp.example"));
 
@@ -80,7 +80,7 @@ describe("CloudflareOAuthProvider", () => {
     ]);
     const provider = makeProvider(
       httpConfig("https://mcp.example"),
-      makePlatform(credentials),
+      makeDependencies(credentials),
     );
 
     await expect(provider.tokens()).rejects.toThrow();
@@ -89,10 +89,10 @@ describe("CloudflareOAuthProvider", () => {
 
 const makeProvider = (
   config: HttpMcpConfig,
-  platform = makePlatform(),
-): CloudflareOAuthProvider =>
-  new CloudflareOAuthProvider({
-    platform,
+  dependencies = makeDependencies(),
+): McpOAuthProvider =>
+  new McpOAuthProvider({
+    dependencies,
     serverName: "server/name",
     config,
     onAuthorizationUrl: () => Effect.void,
@@ -138,8 +138,10 @@ const makeMemoryOAuthCredentialStore = (
     readJson(credentials, identity, "client") as ReturnType<
       McpOAuthCredentialStoreService["getClientInformation"]
     >,
-  setClientInformation: (identity: McpOAuthCredentialIdentity, value: unknown) =>
-    writeJson(credentials, identity, "client", value),
+  setClientInformation: (
+    identity: McpOAuthCredentialIdentity,
+    value: unknown,
+  ) => writeJson(credentials, identity, "client", value),
   getTokens: (identity: McpOAuthCredentialIdentity) =>
     readJson(credentials, identity, "tokens") as ReturnType<
       McpOAuthCredentialStoreService["getTokens"]
@@ -148,7 +150,8 @@ const makeMemoryOAuthCredentialStore = (
     writeJson(credentials, identity, "tokens", value),
   getCodeVerifier: (identity: McpOAuthCredentialIdentity) =>
     Effect.succeed(
-      credentials.get(makeCredentialKey(identity, "pkce-verifier")) ?? "verifier",
+      credentials.get(makeCredentialKey(identity, "pkce-verifier")) ??
+        "verifier",
     ),
   setCodeVerifier: (identity: McpOAuthCredentialIdentity, value: string) =>
     Effect.sync(() => {
@@ -164,8 +167,17 @@ const makeMemoryOAuthCredentialStore = (
     Effect.succeed(credentials.has(makeCredentialKey(identity, "tokens"))),
   invalidate: (identity, scope) =>
     Effect.sync(() => {
-      for (const slot of ["client", "tokens", "pkce-verifier", "discovery"] as const) {
-        if (scope === "all" || scope === slot || (scope === "verifier" && slot === "pkce-verifier")) {
+      for (const slot of [
+        "client",
+        "tokens",
+        "pkce-verifier",
+        "discovery",
+      ] as const) {
+        if (
+          scope === "all" ||
+          scope === slot ||
+          (scope === "verifier" && slot === "pkce-verifier")
+        ) {
           credentials.delete(makeCredentialKey(identity, slot));
         }
       }
@@ -177,9 +189,13 @@ const readJson = (
   identity: McpOAuthCredentialIdentity,
   slot: McpOAuthCredentialSlot,
 ) =>
-  Effect.sync(() => Option.fromNullable(credentials.get(makeCredentialKey(identity, slot)))).pipe(
+  Effect.sync(() =>
+    Option.fromNullable(credentials.get(makeCredentialKey(identity, slot))),
+  ).pipe(
     Effect.flatMap(
-      Effect.transposeMapOption((value) => Effect.sync(() => JSON.parse(value) as unknown)),
+      Effect.transposeMapOption((value) =>
+        Effect.sync(() => JSON.parse(value) as unknown),
+      ),
     ),
   );
 
@@ -193,16 +209,18 @@ const writeJson = (
     credentials.set(makeCredentialKey(identity, slot), JSON.stringify(value));
   });
 
-const makePlatform = (
+const makeDependencies = (
   credentials = new Map<string, string>(),
-): CloudflareOAuthPlatform => {
+): McpOAuthProviderDependencies => {
   return {
     oauthStateStore: {
       sign: () => Effect.succeed("signed-state"),
       verifyAndConsume: () => Effect.die("not used in provider tests"),
     },
     hostId: "host id",
-    origin: "https://ptools.example",
+    callbackUrl: (serverName) =>
+      `https://ptools.example/hosts/host%20id/oauth/callback/${encodeURIComponent(serverName)}`,
     oauthCredentials: makeMemoryOAuthCredentialStore(credentials),
+    runtime: Runtime.defaultRuntime,
   };
 };

@@ -26,33 +26,17 @@ export const NodeStdioMcpConnectorLive: Layer.Layer<
   connect: connectNodeStdioMcp,
 });
 
-export const NodeHttpMcpConnectorLive: Layer.Layer<
-  HttpMcpConnector,
-  never,
-  AuthCoordinator
-> = Layer.effect(
-  HttpMcpConnector,
-  Effect.gen(function* () {
-    const authCoordinator = yield* AuthCoordinator;
-
-    return {
-      connect: (input: ConnectMcpInput) =>
-        connectNodeHttpMcp(input, authCoordinator),
-    };
-  }),
-);
+export const NodeHttpMcpConnectorLive: Layer.Layer<HttpMcpConnector> =
+  Layer.succeed(HttpMcpConnector, {
+    connect: connectNodeHttpMcp,
+  });
 
 export const NodeMcpTransportConnectorsLive: Layer.Layer<
-  StdioMcpConnector | HttpMcpConnector,
-  never,
-  AuthCoordinator
+  StdioMcpConnector | HttpMcpConnector
 > = Layer.mergeAll(NodeStdioMcpConnectorLive, NodeHttpMcpConnectorLive);
 
-export const NodeMcpConnectorLive: Layer.Layer<
-  McpConnector,
-  never,
-  AuthCoordinator
-> = BaseMcpConnectorLive.pipe(Layer.provide(NodeMcpTransportConnectorsLive));
+export const NodeMcpConnectorLive: Layer.Layer<McpConnector> =
+  BaseMcpConnectorLive.pipe(Layer.provide(NodeMcpTransportConnectorsLive));
 
 function connectNodeStdioMcp(
   input: ConnectMcpInput,
@@ -66,17 +50,26 @@ function connectNodeStdioMcp(
 
 function connectNodeHttpMcp(
   input: ConnectMcpInput,
-  authCoordinator: AuthCoordinatorService,
-): Effect.Effect<ConnectedMcpClient, McpConnectionError, Scope.Scope> {
+): Effect.Effect<
+  ConnectedMcpClient,
+  McpConnectionError,
+  Scope.Scope | AuthCoordinator
+> {
   if (input.config.transport !== "http") {
     return unsupportedTransport(input);
   }
 
-  return createHttpTransport(
-    input.serverName,
-    input.config,
-    authCoordinator,
-  ).pipe(
+  const config = input.config;
+
+  return Effect.gen(function* () {
+    const authCoordinator = yield* AuthCoordinator;
+
+    return yield* createHttpTransport(
+      input.serverName,
+      config,
+      authCoordinator,
+    );
+  }).pipe(
     Effect.mapError(
       (cause) =>
         new McpConnectionError({ serverName: input.serverName, cause }),

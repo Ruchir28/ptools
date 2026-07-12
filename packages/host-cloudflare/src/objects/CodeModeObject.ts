@@ -1,35 +1,38 @@
+import { McpOAuthFlow } from "@ptools/auth";
 import type { CodeModeResponse } from "@ptools/code-mode-api";
 import { CodeModeServer } from "@ptools/code-mode-api/effect";
-import { AuthCoordinator, McpOAuthStateStore } from "@ptools/auth";
 import {
   ResolvedPtoolsConfigSource,
-  ConfiguredHostConfigStore,
-  ConfiguredSecretStore,
-  HostSecretStorage,
-  HostStateStorage,
   ServerConfigError,
   type ResolvedPtoolsConfig,
 } from "@ptools/config";
+import {
+  ConfiguredHostContextError,
+  ConfiguredHostContextRunner,
+  HostStableRuntimeLayer,
+  type ConfiguredHostOperationServices,
+  type HostStableRuntimeServices,
+} from "@ptools/host-runtime";
 import { DurableObject } from "cloudflare:workers";
-import { Effect, Layer, ManagedRuntime, Option } from "effect";
-import { CloudflareOAuthFlow } from "../layers/auth.js";
-import { CloudflareCodeModeRuntimeLayer } from "../layers/codeModeRuntime.js";
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Option } from "effect";
 import {
-  CodeModeObjectIdentity,
-  CodeModeObjectPlatformLayer,
-  CodeModeObjectRequestOriginLayer,
-} from "../layers/platform.js";
-import {
+  CloudflareDynamicWorkerSandboxRuntimeLayer,
   makeCodeModeObjectWorkerLoader,
-  type CodeModeObjectWorkerLoader,
-} from "../layers/executor/workerLoaderService.js";
+} from "../layers/executor/index.js";
+import {
+  CloudflareHttpMcpConnectorLayer,
+  CloudflareMcpConnectorLayer,
+} from "../layers/mcpConnector.js";
+import {
+  CodeModeObjectPlatformLayer,
+  requireDurableObjectHostId,
+} from "../layers/platform.js";
 import type { PtoolsWorkerEnv } from "../worker/ingress.js";
 import {
   ParsedCompleteMcpOAuthCallback,
   codeModeObjectMcpAuthErrorFromCause,
   finishMcpOAuthCallback,
   getMcpAuthStatus,
-  initializeConfiguredMcpAuth,
   parseCompleteMcpOAuthCallback,
   renderOAuthMessage,
   startMcpAuth,
@@ -73,133 +76,75 @@ export type {
   StartMcpAuthResponse,
 } from "./codeModeObject/rpc.js";
 
-type HostRuntime = ManagedRuntime.ManagedRuntime<
-  CodeModeServer | AuthCoordinator | CloudflareOAuthFlow | ResolvedPtoolsConfigSource,
+type StableHostRuntime = ManagedRuntime.ManagedRuntime<
+  HostStableRuntimeServices,
   unknown
 >;
 
-interface CachedHostRuntime {
-  readonly origin: string;
-  readonly runtime: HostRuntime;
-}
-
 export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
-  /**
-   * Platform services are passive values owned by this Durable Object instance.
-   *
-   * The storage and Worker Loader adapters are constructed once in the
-   * constructor and wrapped with `Layer.succeed`. In Effect, `Layer.succeed`
-   * captures the already-created value; providing this layer into a later
-   * `ManagedRuntime` does not call the adapter constructors again. By contrast,
-   * `Layer.effect` / `Layer.scoped` services are built by the runtime and are
-   * memoized by that runtime's `MemoMap`.
-   *
-   * This means each origin-specific host runtime receives the same stable
-   * Durable Object platform values, while config/auth/MCP/Code Mode services
-   * built with effectful layers are rebuilt when the cached ManagedRuntime is
-   * replaced. A separate platform ManagedRuntime or shared MemoMap would only be
-   * needed if these platform services later acquire scoped resources, start
-   * background fibers, or require runtime-specific configuration.
-   */
-  readonly #platformLayer: Layer.Layer<
-    | HostStateStorage
-    | HostSecretStorage
-    | McpOAuthStateStore
-    | CodeModeObjectIdentity
-    | CodeModeObjectWorkerLoader
-  >;
-
   readonly #hostId: string;
-  #hostRuntime: Option.Option<CachedHostRuntime> = Option.none();
+  readonly #stableRuntime: StableHostRuntime;
 
   constructor(ctx: DurableObjectState, env: PtoolsWorkerEnv) {
     super(ctx, env);
 
-    this.#hostId = requireHostId(ctx);
-    this.#platformLayer = CodeModeObjectPlatformLayer({
-      storage: ctx.storage,
-      hostId: this.#hostId,
+    this.#hostId = requireDurableObjectHostId(ctx);
+    const cloudflarePlatformLayer = CodeModeObjectPlatformLayer({
+      state: ctx,
       workerLoader: makeCodeModeObjectWorkerLoader(env.PTOOLS_EXECUTION_LOADER),
     });
+    const cloudflarePrimitiveLayer = Layer.mergeAll(
+      CloudflareMcpConnectorLayer.pipe(
+        Layer.provide(CloudflareHttpMcpConnectorLayer),
+      ),
+      CloudflareDynamicWorkerSandboxRuntimeLayer,
+    ).pipe(Layer.provideMerge(cloudflarePlatformLayer));
+
+    this.#stableRuntime = ManagedRuntime.make(
+      HostStableRuntimeLayer.pipe(Layer.provide(cloudflarePrimitiveLayer)),
+    );
   }
 
-  /**
-   * Serves one schema-backed Code Mode request through the configured host
-   * runtime for this Durable Object and public request origin.
-   *
-   * The Worker already handled HTTP auth, JSON parsing, and origin derivation.
-   * This method crosses the Durable Object RPC boundary, selects the cached
-   * origin-aware ManagedRuntime, and delegates operation dispatch to
-   * CodeModeServer inside that runtime.
-   *
-   * Per request this only looks up services already registered in that runtime's
-   * Effect `Context`; it does not construct a new CodeModeServer, reload config,
-   * or rebuild MCP/executor layers. Those are created once when
-   * `#createHostRuntime` materializes the shared CodeModeServerLayer and caches
-   * it until the origin changes or `configure` / `configureSecrets` disposes
-   * the runtime.
-   */
+  /** Run one schema-backed Code Mode request through the shared configured context. */
   call(input: CodeModeObjectCallInput): Promise<CodeModeResponse> {
-    return this.runInHostRuntime(
+    return this.runConfiguredHostOperation(
       input.origin,
       Effect.gen(function* () {
-        // Context lookup for the service built by CodeModeServerLayer during
-        // ManagedRuntime startup, not a per-request server initialization.
         const server = yield* CodeModeServer;
-
         return yield* server.handle(input.request);
       }),
     );
   }
 
-  /**
-   * Stores a new unresolved host config using only stable platform services.
-   *
-   * This intentionally does not run inside `#hostRuntime`. The configured host
-   * runtime is built from the config stored by this method, so requiring that
-   * runtime here would create a circular dependency and would also risk using
-   * stale config. The workflow only needs Durable Object storage from
-   * `#platformLayer`, then disposes any cached runtime so the next runtime-backed
-   * operation rebuilds from the newly stored config.
-   */
+  /** Persist host config through stable shared stores, then invalidate cached contexts. */
   configure(
     input: ConfigureCodeModeObjectInput,
   ): Promise<ConfigureCodeModeObjectResponse> {
-    return Effect.runPromise(
-      Effect.gen(this, function* () {
+    return this.runStableRpc(
+      Effect.gen(function* () {
         const result = yield* configureCodeModeObject({
           rawConfigJson: input.rawConfigJson,
-        }).pipe(Effect.provide(ConfiguredHostConfigStore.Default));
-        yield* this.disposeHostRuntimeEffect();
-
+        });
+        const contexts = yield* ConfiguredHostContextRunner;
+        yield* contexts.invalidateAll;
         return result;
-      }).pipe(Effect.provide(this.#platformLayer), toRpcResponse),
+      }),
     );
   }
 
-  /**
-   * Stores per-host secrets using only stable platform services.
-   *
-   * Like `configure(...)`, this is a one-off `Effect.runPromise` workflow, not a
-   * call through the cached `ManagedRuntime`. It only needs
-   * `ConfiguredSecretStore.Default` plus host-scoped storage from
-   * `#platformLayer` to replace configured secret values. After the write, the cached runtime is disposed because its
-   * `ResolvedPtoolsConfigSource` may already have resolved old secret values; the next
-   * Code Mode/auth operation will build a fresh runtime and resolve secrets from
-   * storage again.
-   */
+  /** Persist host secrets through stable shared stores, then invalidate cached contexts. */
   configureSecrets(
     input: ConfigureCodeModeObjectSecretsInput,
   ): Promise<ConfigureCodeModeObjectSecretsResponse> {
-    return Effect.runPromise(
-      Effect.gen(this, function* () {
+    return this.runStableRpc(
+      Effect.gen(function* () {
         const result = yield* configureCodeModeObjectSecrets({
           rawSecretsJson: input.rawSecretsJson,
-        }).pipe(Effect.provide(ConfiguredSecretStore.Default));
-        yield* this.disposeHostRuntimeEffect();
-
+        });
+        const contexts = yield* ConfiguredHostContextRunner;
+        yield* contexts.invalidateAll;
         return result;
-      }).pipe(Effect.provide(this.#platformLayer), toRpcResponse),
+      }),
     );
   }
 
@@ -222,21 +167,13 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
   }
 
   /**
-   * Handles the browser redirect after an upstream MCP OAuth provider
-   * authorizes a server. The Worker forwards the raw callback request here;
-   * this method returns an HTML page the user sees in the browser.
-   *
-   * The flow is split into two phases:
-   * 1. Parse + verify state through stable platform services. This reuses the
-   *    `McpOAuthStateStore` value captured in `#platformLayer` without starting
-   *    the full config-derived host runtime for invalid callbacks.
-   * 2. Exchange code for tokens through the full host runtime, only when state
-   *    is valid and the provider returned an authorization code.
+   * Verify OAuth callback state in the stable runtime, then start the configured
+   * context only when a valid authorization code must be exchanged.
    */
   completeMcpOAuthCallback(
     input: CompleteMcpOAuthCallbackInput,
   ): Promise<CompleteMcpOAuthCallbackResponse> {
-    return Effect.runPromise(
+    return this.runStableRpc(
       parseCompleteMcpOAuthCallback({
         provider: input.provider,
         method: input.method,
@@ -244,35 +181,27 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
         bodyText: Option.fromNullable(input.bodyText),
         expectedHostId: this.#hostId,
       }).pipe(
-        Effect.provide(this.#platformLayer),
         Effect.flatMap(
           ParsedCompleteMcpOAuthCallback.$match({
-            // Provider returned ?error=... — HTML response is already built.
             Complete: ({ result }) => Effect.succeed(result),
-            // Valid code + state — exchange the code and render a success page.
             Finish: (finish) =>
-              Effect.tryPromise({
-                try: () =>
-                  this.runInHostRuntime(
-                    input.origin,
-                    finishMcpOAuthCallback(finish).pipe(
-                      Effect.map(() => ({
-                        status: 200,
-                        headers: {
-                          "content-type": "text/html; charset=utf-8",
-                        },
-                        body: renderOAuthMessage(
-                          "Authorization complete",
-                          `${finish.serverName} is connected. You can return to your MCP client and retry.`,
-                        ),
-                      })),
+              this.runConfiguredHostOperationEffect(
+                input.origin,
+                finishMcpOAuthCallback(finish).pipe(
+                  Effect.map(() => ({
+                    status: 200,
+                    headers: {
+                      "content-type": "text/html; charset=utf-8",
+                    },
+                    body: renderOAuthMessage(
+                      "Authorization complete",
+                      `${finish.serverName} is connected. You can return to your MCP client and retry.`,
                     ),
-                  ),
-                catch: codeModeObjectMcpAuthErrorFromCause,
-              }),
+                  })),
+                ),
+              ).pipe(Effect.mapError(codeModeObjectMcpAuthErrorFromCause)),
           }),
         ),
-        toRpcResponse,
       ),
     );
   }
@@ -281,47 +210,62 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     ResolvedPtoolsConfig,
     ServerConfigError
   > {
-    return Effect.gen(function* () {
+    const load = Effect.gen(function* () {
       const source = yield* ResolvedPtoolsConfigSource;
-
       return yield* source.load;
-    }).pipe(
-      Effect.provide(
-        this.configLayer().pipe(Layer.provide(this.#platformLayer)),
+    }).pipe(Effect.provide(ResolvedPtoolsConfigSource.Default));
+
+    return Effect.promise(() => this.#stableRuntime.runPromiseExit(load)).pipe(
+      Effect.flatMap(
+        Exit.match({
+          onSuccess: Effect.succeed,
+          onFailure: (cause) =>
+            Cause.failureOption(cause).pipe(
+              Option.match({
+                onSome: (failure) =>
+                  Effect.fail(
+                    failure instanceof ServerConfigError
+                      ? failure
+                      : new ServerConfigError({
+                          message: "Failed to load resolved host config.",
+                          cause: failure,
+                        }),
+                  ),
+                onNone: () =>
+                  Effect.fail(
+                    new ServerConfigError({
+                      message: "Failed to load resolved host config.",
+                      cause,
+                    }),
+                  ),
+              }),
+            ),
+        }),
       ),
     );
   }
 
-  /**
-   * Runs operations that need the configured host graph.
-   *
-   * Use this path for behavior that depends on loaded config, resolved secrets,
-   * OAuth/auth state, MCP connections, or Code Mode runtime services. Unlike the
-   * setup methods above, this goes through the cached origin-aware
-   * `ManagedRuntime`, whose layer graph is built from persisted config plus the
-   * stable `#platformLayer` and request-derived origin.
-   *
-   * Effects passed here may `yield*` any of the runtime's exported services
-   * (`CodeModeServer`, `AuthCoordinator`, `CloudflareOAuthFlow`,
-   * `ResolvedPtoolsConfigSource`).
-   * Those tags resolve against the runtime `Context` built in
-   * `#createHostRuntime`; `runtime.runPromise` does not re-run layer construction
-   * on each call unless the cached runtime was disposed and recreated.
-   */
-  private async runInHostRuntime<A, E>(
+  private runConfiguredHostOperation<A, E>(
     origin: string,
-    effect: Effect.Effect<
-      A,
-      E,
-      | CodeModeServer
-      | AuthCoordinator
-      | CloudflareOAuthFlow
-      | ResolvedPtoolsConfigSource
-    >,
+    effect: Effect.Effect<A, E, ConfiguredHostOperationServices>,
   ): Promise<A> {
-    const runtime = await this.getOrCreateHostRuntime(origin);
+    return this.#stableRuntime.runPromise(
+      this.runConfiguredHostOperationEffect(origin, effect),
+    );
+  }
 
-    return runtime.runPromise(effect);
+  private runConfiguredHostOperationEffect<A, E>(
+    origin: string,
+    effect: Effect.Effect<A, E, ConfiguredHostOperationServices>,
+  ): Effect.Effect<
+    A,
+    E | ConfiguredHostContextError,
+    ConfiguredHostContextRunner
+  > {
+    return Effect.gen(function* () {
+      const contexts = yield* ConfiguredHostContextRunner;
+      return yield* contexts.run({ origin }, effect);
+    });
   }
 
   private runHostMcpAuthRpc<A>(
@@ -329,138 +273,36 @@ export class CodeModeObject extends DurableObject<PtoolsWorkerEnv> {
     effect: Effect.Effect<
       A,
       CodeModeObjectMcpAuthError,
-      AuthCoordinator | CloudflareOAuthFlow | ResolvedPtoolsConfigSource
+      McpOAuthFlow | ConfiguredHostOperationServices
     >,
   ): Promise<
     | { readonly ok: true; readonly result: A }
     | { readonly ok: false; readonly error: CodeModeObjectMcpAuthError }
   > {
-    return Effect.runPromise(
-      Effect.tryPromise({
-        try: () => this.runInHostRuntime(origin, effect),
-        catch: codeModeObjectMcpAuthErrorFromCause,
-      }).pipe(toRpcResponse),
+    return this.runStableRpc(
+      this.runConfiguredHostOperationEffect(origin, effect).pipe(
+        Effect.mapError(codeModeObjectMcpAuthErrorFromCause),
+      ),
     );
   }
 
-  private getOrCreateHostRuntime(origin: string): Promise<HostRuntime> {
-    return Option.match(this.#hostRuntime, {
-      onNone: () => this.createHostRuntime(origin),
-      onSome: (cached) =>
-        cached.origin === origin
-          ? Promise.resolve(cached.runtime)
-          : this.replaceHostRuntime(cached, origin),
-    });
-  }
-
-  /**
-   * Materializes the configured host layer graph once and caches the resulting
-   * `ManagedRuntime` for this origin.
-   *
-   * `runtime.runtime()` is where Effect builds services such as `ResolvedPtoolsConfigSource`,
-   * `AuthCoordinator`, internal `CodeMode`, and `CodeModeServer`. Later RPC
-   * handlers only look those services up from the runtime context.
-   */
-  private async createHostRuntime(origin: string): Promise<HostRuntime> {
-    const runtime = ManagedRuntime.make(this.hostRuntimeLayer(origin));
-
-    try {
-      await runtime.runtime();
-      await runtime.runPromise(initializeConfiguredMcpAuth());
-      this.#hostRuntime = Option.some({ origin, runtime });
-      return runtime;
-    } catch (cause) {
-      await runtime.dispose();
-      throw cause;
-    }
-  }
-
-  private async replaceHostRuntime(
-    cached: CachedHostRuntime,
-    origin: string,
-  ): Promise<HostRuntime> {
-    this.#hostRuntime = Option.none();
-    await cached.runtime.dispose();
-
-    return this.createHostRuntime(origin);
-  }
-
-  /**
-   * Builds the configured host runtime layer for one public request origin.
-   *
-   * `#platformLayer` is not a separate runtime. It is a stable set of
-   * `Layer.succeed` services constructed once from Durable Object `ctx/env` and
-   * then provided into this runtime graph. `CodeModeObjectRequestOriginLayer` is
-   * rebuilt per origin because OAuth URLs and auth-provider behavior can depend
-   * on the public origin that reached the Worker.
-   */
-  private hostRuntimeLayer(
-    origin: string,
-  ): Layer.Layer<
-    | CodeModeServer
-    | AuthCoordinator
-    | CloudflareOAuthFlow
-    | ResolvedPtoolsConfigSource,
-    unknown
+  private runStableRpc<A, E>(
+    effect: Effect.Effect<A, E, HostStableRuntimeServices>,
+  ): Promise<
+    | { readonly ok: true; readonly result: A }
+    | { readonly ok: false; readonly error: E }
   > {
-    const requestOrigin = CodeModeObjectRequestOriginLayer(origin);
-
-    // The host runtime is the only cached ManagedRuntime because these services
-    // contain config-derived state. The stable platform values are supplied as
-    // inputs, while request origin is kept separate because it is not an
-    // intrinsic Durable Object identity. The cache records the origin used to
-    // construct these URL-producing services and is rebuilt before serving a
-    // request from a different origin.
-    return CloudflareCodeModeRuntimeLayer.pipe(
-      Layer.provide(this.#platformLayer),
-      Layer.provide(requestOrigin),
-    );
-  }
-
-  private configLayer(): Layer.Layer<
-    ResolvedPtoolsConfigSource,
-    never,
-    HostStateStorage | HostSecretStorage
-  > {
-    return ResolvedPtoolsConfigSource.Default.pipe(
-      Layer.provide(ConfiguredSecretStore.Default),
-      Layer.provide(ConfiguredHostConfigStore.Default),
-    );
-  }
-
-  /**
-   * Clears and disposes the cached configured runtime after persisted inputs
-   * change.
-   *
-   * Config and secret setup methods run outside `#hostRuntime`, but they mutate
-   * storage read by that runtime's `ResolvedPtoolsConfigSource`, `ConfiguredSecretStore`, auth, and
-   * MCP services. Disposing here is what connects those one-off storage writes
-   * to the next runtime-backed request: the next call rebuilds the ManagedRuntime
-   * from current Durable Object storage instead of reusing stale services.
-   */
-  private disposeHostRuntimeEffect(): Effect.Effect<void> {
-    const runtime = this.#hostRuntime;
-    this.#hostRuntime = Option.none();
-
-    return Option.match(runtime, {
-      onNone: () => Effect.void,
-      onSome: (cached) => Effect.promise(() => cached.runtime.dispose()),
-    });
+    return this.#stableRuntime.runPromise(effect.pipe(toRpcResponse));
   }
 }
 
-const requireHostId = (ctx: DurableObjectState): string =>
-  Option.fromNullable(ctx.id.name).pipe(
-    Option.getOrThrowWith(
-      () => new Error("CodeModeObject must be addressed by name."),
-    ),
-  );
-
-const toRpcResponse = <A, E>(
-  effect: Effect.Effect<A, E>,
+const toRpcResponse = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<
   | { readonly ok: true; readonly result: A }
-  | { readonly ok: false; readonly error: E }
+  | { readonly ok: false; readonly error: E },
+  never,
+  R
 > =>
   Effect.match(effect, {
     onFailure: (error) => ({ ok: false as const, error }),

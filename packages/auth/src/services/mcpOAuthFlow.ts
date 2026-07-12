@@ -1,67 +1,67 @@
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
+import { Effect, Option } from "effect";
 import {
   AuthCoordinatorCore,
+  type AuthCoordinatorCoreService,
+} from "../coordinatorCore.js";
+import {
   AuthError,
+  CredentialError,
   isDynamicClientRegistrationUnsupported,
   safeErrorMessage,
-  type AuthCoordinatorCoreService,
-  type HttpMcpConfig,
-} from "@ptools/auth";
-import { Effect, Layer, Option } from "effect";
-import { CodeModeObjectIdentity } from "../platform.js";
-import { CloudflareOAuthFlow } from "./oauthFlow.js";
+} from "../authErrors.js";
+import type { HttpMcpConfig } from "../authTypes.js";
+
+export interface McpOAuthFlowService {
+  /** Start browser authorization for one configured HTTP MCP server. */
+  readonly beginAuthorization: (input: {
+    readonly serverName: string;
+    readonly force: boolean;
+  }) => Effect.Effect<string, AuthError | CredentialError>;
+  /** Finish browser authorization after the provider redirects back with a code. */
+  readonly finishAuthorization: (input: {
+    readonly serverName: string;
+    readonly code: string;
+  }) => Effect.Effect<void, AuthError | CredentialError>;
+}
 
 /**
- * Cloudflare-only route-facing OAuth service for Worker/DO browser OAuth.
+ * Shared route-facing MCP OAuth flow.
  *
- * Worker routes call typed CodeModeObject RPC methods. The Durable Object uses
- * this service to begin or finish OAuth while sharing AuthCoordinatorCore with
- * the MCP connector-facing AuthCoordinator.
- *
- * Requires:
- * - AuthCoordinatorCore
- * - CodeModeObjectIdentity
- *
- * Provides:
- * - CloudflareOAuthFlow
+ * Host route/RPC code calls this service to begin or finish browser OAuth. The
+ * service delegates provider creation and status transitions to
+ * `AuthCoordinatorCore`; it does not know about Cloudflare, Node, or HTTP
+ * routing.
  */
-export const CloudflareOAuthFlowLayer: Layer.Layer<
-  CloudflareOAuthFlow,
-  never,
-  AuthCoordinatorCore | CodeModeObjectIdentity
-> = Layer.effect(
-  CloudflareOAuthFlow,
-  Effect.gen(function* () {
-    const core = yield* AuthCoordinatorCore;
+export class McpOAuthFlow extends Effect.Service<McpOAuthFlow>()(
+  "@ptools/McpOAuthFlow",
+  {
+    effect: Effect.gen(function* () {
+      const core = yield* AuthCoordinatorCore;
 
-    return CloudflareOAuthFlow.of({
-      beginAuthorization: (input) =>
-        beginCloudflareOAuthAuthorization({
-          core,
-          serverName: input.serverName,
-          force: input.force,
-        }),
-      finishAuthorization: (input) =>
-        finishCloudflareOAuthAuthorization({
-          core,
-          serverName: input.serverName,
-          code: input.code,
-        }),
-    });
-  }),
-);
+      return {
+        beginAuthorization: (input) =>
+          beginMcpOAuthAuthorization({
+            core,
+            serverName: input.serverName,
+            force: input.force,
+          }),
+        finishAuthorization: (input) =>
+          finishMcpOAuthAuthorization({
+            core,
+            serverName: input.serverName,
+            code: input.code,
+          }),
+      } satisfies McpOAuthFlowService;
+    }),
+  },
+) {}
 
-/**
- * Begins an OAuth authorization flow for a specific MCP server.
- *
- * This function is designed to be called by a Cloudflare Worker redirect route.
- * It always returns a URL string that the Worker should use for a 302 Redirect.
- */
-const beginCloudflareOAuthAuthorization = (input: {
+const beginMcpOAuthAuthorization = (input: {
   readonly core: AuthCoordinatorCoreService;
   readonly serverName: string;
   readonly force: boolean;
-}): Effect.Effect<string, AuthError> =>
+}): Effect.Effect<string, AuthError | CredentialError> =>
   Effect.gen(function* () {
     const config = yield* input.core.httpConfigFor(input.serverName);
     const provider = yield* input.core.providerFor(input.serverName, config);
@@ -70,7 +70,7 @@ const beginCloudflareOAuthAuthorization = (input: {
       yield* Effect.tryPromise({
         try: () => provider.invalidateCredentials?.("all") ?? Promise.resolve(),
         catch: (cause) =>
-          new AuthError({
+          new CredentialError({
             message: `Failed to clear OAuth credentials for ${input.serverName}.`,
             cause,
           }),
@@ -96,26 +96,17 @@ const beginCloudflareOAuthAuthorization = (input: {
       ),
     );
 
-    // auth() returned AUTHORIZED without calling redirectToAuthorization — typically
-    // because stored credentials were refreshed non-interactively. Return the Host
-    // Auth Dashboard URL so the caller can send the user back to the auth center.
     if (result === "AUTHORIZED") {
       yield* input.core.markAuthorized(input.serverName);
       const status = yield* input.core.status;
       return status.authUrl;
     }
 
-    // Standard case: Return the Identity Provider's authorization URL (e.g. GitHub login).
     yield* input.core.markAuthorizationInProgress(input.serverName);
     return yield* input.core.authorizationUrlFor(input.serverName);
   });
 
-/**
- * Finishes an OAuth authorization flow after the user is redirected back from the IdP.
- *
- * It exchanges the authorization code for tokens and persists them via the provider.
- */
-const finishCloudflareOAuthAuthorization = (input: {
+const finishMcpOAuthAuthorization = (input: {
   readonly core: AuthCoordinatorCoreService;
   readonly serverName: string;
   readonly code: string;
@@ -143,14 +134,14 @@ const finishCloudflareOAuthAuthorization = (input: {
 
 const oauthRequestOptions = (config: HttpMcpConfig) => ({
   ...Option.match(
-    Option.flatMap(config.auth, (auth) => auth.scope),
+    Option.flatMap(config.auth, (authConfig) => authConfig.scope),
     {
       onNone: () => ({}),
       onSome: (scope) => ({ scope }),
     },
   ),
   ...Option.match(
-    Option.flatMap(config.auth, (auth) => auth.resourceMetadataUrl),
+    Option.flatMap(config.auth, (authConfig) => authConfig.resourceMetadataUrl),
     {
       onNone: () => ({}),
       onSome: (resourceMetadataUrl) => ({

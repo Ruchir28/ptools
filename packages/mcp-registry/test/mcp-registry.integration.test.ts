@@ -1,4 +1,9 @@
-import { AuthCoordinator, AuthError } from "@ptools/auth";
+import {
+  AuthCoordinator,
+  AuthError,
+  type AuthCoordinatorService,
+  type AuthServerHandler,
+} from "@ptools/auth";
 import { ResolvedStdioMcpConfig } from "@ptools/config";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
@@ -134,6 +139,54 @@ describe("McpRegistry connector integration", () => {
         serverName: "unavailable",
       }),
     ]);
+  });
+
+  it("records an Effect-native authorized refresh failure as a diagnostic", async () => {
+    const callbacks: { authorized?: AuthServerHandler } = {};
+    let connectedCalls = 0;
+    const authLayer = makeTestAuthCoordinatorLive({
+      setAuthorizedHandler: (handler) =>
+        Effect.sync(() => {
+          callbacks.authorized = handler;
+        }),
+      noteConnected: () =>
+        Effect.suspend(() => {
+          connectedCalls += 1;
+          return connectedCalls === 1
+            ? Effect.void
+            : Effect.fail(
+                new AuthError({ message: "refresh coordination failed" }),
+              );
+        }),
+    });
+
+    const diagnostics = await Effect.runPromise(
+      Effect.gen(function* () {
+        const registry = yield* McpRegistry;
+        const handler = callbacks.authorized;
+
+        if (handler === undefined) {
+          return yield* Effect.die("Authorized handler was not registered");
+        }
+
+        yield* handler("fixture");
+        return yield* registry.diagnostics;
+      }).pipe(
+        Effect.provide(
+          makeMcpRegistryLive({ fixture: stdioConfig() }).pipe(
+            Layer.provide(makeFakeMcpConnectorLive()),
+            Layer.provide(authLayer),
+          ),
+        ),
+      ),
+    );
+
+    expect(diagnostics).toContainEqual({
+      code: "McpRegistryRefreshFailed",
+      severity: "error",
+      serverName: "fixture",
+      message: "refresh coordination failed",
+    });
   });
 
   it("warns for a broken optional output schema while keeping the tool callable", async () => {
@@ -307,7 +360,11 @@ const textInputSchema = {
   required: ["text"],
 };
 
-const makeTestAuthCoordinatorLive = () =>
+const makeTestAuthCoordinatorLive = (
+  overrides: Partial<
+    Pick<AuthCoordinatorService, "setAuthorizedHandler" | "noteConnected">
+  > = {},
+) =>
   Layer.succeed(
     AuthCoordinator,
     AuthCoordinator.make({
@@ -317,7 +374,7 @@ const makeTestAuthCoordinatorLive = () =>
           `http://127.0.0.1/oauth/callback/${encodeURIComponent(serverName)}`,
         ),
       noteConfigured: () => Effect.void,
-      noteConnected: () => Effect.void,
+      noteConnected: overrides.noteConnected ?? (() => Effect.void),
       noteConnectionError: () => Effect.void,
       shouldAttachAuthProvider: () => Effect.succeed(false),
       hasStoredCredentials: () => Effect.succeed(false),
@@ -331,5 +388,8 @@ const makeTestAuthCoordinatorLive = () =>
         authUrl: "http://127.0.0.1/auth",
         servers: [],
       }),
+      ...(overrides.setAuthorizedHandler === undefined
+        ? {}
+        : { setAuthorizedHandler: overrides.setAuthorizedHandler }),
     }),
   );

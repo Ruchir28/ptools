@@ -207,6 +207,9 @@ importers:
       '@ptools/config':
         specifier: workspace:*
         version: link:../config
+      '@ptools/host-context':
+        specifier: workspace:*
+        version: link:../host-context
       effect:
         specifier: 3.21.2
         version: 3.21.2
@@ -259,6 +262,9 @@ importers:
 
   packages/config:
     dependencies:
+      '@ptools/host-context':
+        specifier: workspace:*
+        version: link:../host-context
       effect:
         specifier: 3.21.2
         version: 3.21.2
@@ -318,6 +324,12 @@ importers:
       '@ptools/host-api':
         specifier: workspace:*
         version: link:../host-api
+      '@ptools/host-context':
+        specifier: workspace:*
+        version: link:../host-context
+      '@ptools/host-runtime':
+        specifier: workspace:*
+        version: link:../host-runtime
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
@@ -334,6 +346,12 @@ importers:
       zod:
         specifier: 4.4.3
         version: 4.4.3
+
+  packages/host-context:
+    dependencies:
+      effect:
+        specifier: 3.21.2
+        version: 3.21.2
 
   packages/host-node:
     dependencies:
@@ -367,6 +385,9 @@ importers:
       '@ptools/host-api':
         specifier: workspace:*
         version: link:../host-api
+      '@ptools/host-context':
+        specifier: workspace:*
+        version: link:../host-context
       '@ptools/mcp-registry':
         specifier: workspace:*
         version: link:../mcp-registry
@@ -377,6 +398,33 @@ importers:
       esbuild:
         specifier: ^0.27.0
         version: 0.27.3
+
+  packages/host-runtime:
+    dependencies:
+      '@ptools/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@ptools/code-mode':
+        specifier: workspace:*
+        version: link:../code-mode
+      '@ptools/code-mode-api':
+        specifier: workspace:*
+        version: link:../code-mode-api
+      '@ptools/config':
+        specifier: workspace:*
+        version: link:../config
+      '@ptools/executor':
+        specifier: workspace:*
+        version: link:../executor
+      '@ptools/host-context':
+        specifier: workspace:*
+        version: link:../host-context
+      '@ptools/mcp-registry':
+        specifier: workspace:*
+        version: link:../mcp-registry
+      effect:
+        specifier: 3.21.2
+        version: 3.21.2
 
   packages/mcp-registry:
     dependencies:

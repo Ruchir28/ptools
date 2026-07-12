@@ -1,10 +1,12 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/host-context" },
     { "path": "./packages/auth" },
     { "path": "./packages/config" },
     { "path": "./packages/core" },
     { "path": "./packages/host-api" },
+    { "path": "./packages/host-runtime" },
     { "path": "./packages/host-cloudflare" },
     { "path": "./packages/host-node" },
     { "path": "./packages/mcp-registry" },
