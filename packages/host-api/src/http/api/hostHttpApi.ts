@@ -3,7 +3,7 @@
  *
  * This file owns only route names, methods, paths, payload schemas, response
  * schemas, and middleware placement. Platform packages mount these groups and
- * provide the middleware/dispatcher layers.
+ * provide middleware plus their `HostInstanceDiscovery` implementation.
  */
 import {
   HttpApi,

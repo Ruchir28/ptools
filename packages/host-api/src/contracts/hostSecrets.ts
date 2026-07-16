@@ -38,7 +38,10 @@ export const ConfigureHostSecretsResult = Schema.Union(
   Schema.Struct({
     ok: Schema.Literal(false),
     error: Schema.Struct({
-      code: Schema.Literal("invalid_secrets", "secrets_storage_unavailable"),
+      // Structural invalidity is rejected while decoding HostOperationRequest,
+      // before the typed HostInstanceHandler runs. Operation execution can fail
+      // here only after a valid secret map reaches the backing store.
+      code: Schema.Literal("secrets_storage_unavailable"),
       message: Schema.String,
     }),
   }),

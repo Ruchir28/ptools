@@ -65,8 +65,17 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["test/worker.test.ts", "test/codeModeRuntime.test.ts"],
+    include: ["test/*.integration.test.ts", "test/codeModeRuntime.test.ts"],
+    // Start one SDK-backed HTTP MCP/OAuth fixture for the complete workerd run.
+    // Individual files use unique host IDs, so the fixture can safely serve them
+    // concurrently without repeated port binding or server startup.
     globalSetup: ["./test/fixtureMcpGlobalSetup.ts"],
-    testTimeout: 10_000,
+    // Stateful tests use unique host IDs and receiving-DO instrumentation is
+    // partitioned by host, so files are safe to run concurrently. Cap concurrent
+    // files at four because starting every workerd/Durable Object/Dynamic Worker
+    // graph at once causes cold-start contention and timeout flakes; this retains
+    // most of the speedup without serializing the suite.
+    maxWorkers: 4,
+    testTimeout: 20_000,
   },
 });

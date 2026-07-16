@@ -212,10 +212,12 @@ export const CodeModeClientFromHostHttpClientLive: Layer.Layer<
 
     return {
       call: (request) =>
-        host.codeMode(request).pipe(
-          Effect.mapError(toCodeModeClientTransportError),
-          Effect.flatMap(unwrapHostCodeModeResponse),
-        ),
+        host
+          .codeMode(request)
+          .pipe(
+            Effect.mapError(toCodeModeClientTransportError),
+            Effect.flatMap(unwrapHostCodeModeResponse),
+          ),
     };
   }),
 );

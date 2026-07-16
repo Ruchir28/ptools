@@ -2,9 +2,8 @@
  * Shared adapter from typed Host HTTP endpoint contexts to host operations.
  *
  * Handlers stay thin: they pass their HttpApi context here. This service builds
- * the decoded host operation request and calls the platform-owned
- * HostOperationDispatcher. It owns no Cloudflare, Node, Hono, or Durable Object
- * behavior.
+ * the decoded host operation request and resolves a platform-owned instance
+ * handle. It owns no Cloudflare, Node, Hono, or Durable Object behavior.
  */
 import type { CodeModeRequest } from "@ptools/code-mode-api/contracts";
 import type {
@@ -16,16 +15,14 @@ import type {
   HostOperationProtocolFailureResponse,
   HostOperationRequest,
   HostOperationResponse,
+  HostOperationDispatchInput,
   HostCodeModeResponse,
   HostMcpAuthStatusResponse,
   StartHostMcpAuthResponse,
 } from "../contracts/index.js";
 import { Context, Effect, Layer, Option } from "effect";
-import {
-  HostOperationDispatchError,
-  HostOperationDispatcher,
-  type HostOperationDispatchInput,
-} from "./hostOperationDispatcher.js";
+import { HostOperationDispatchError } from "./hostOperationDispatchError.js";
+import { HostInstanceDiscovery } from "./hostInstanceDiscovery.js";
 import {
   HostHttpBadRequest,
   type HostHttpError,
@@ -142,15 +139,15 @@ export class HostHttpOperationAdapter extends Context.Tag(
   }
 >() {}
 
-/** Live adapter that delegates operation execution to HostOperationDispatcher. */
+/** Live adapter that resolves and dispatches through a selected host handle. */
 export const HostHttpOperationAdapterLive: Layer.Layer<
   HostHttpOperationAdapter,
   never,
-  HostOperationDispatcher
+  HostInstanceDiscovery
 > = Layer.effect(
   HostHttpOperationAdapter,
   Effect.gen(function* () {
-    const dispatcher = yield* HostOperationDispatcher;
+    const discovery = yield* HostInstanceDiscovery;
 
     const dispatchExpected = <
       Operation extends HostOperationRequest["operation"],
@@ -163,9 +160,12 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
         >;
       },
     ) =>
-      dispatcher.dispatch(input).pipe(
+      discovery.resolve(input.hostId).pipe(
+        Effect.flatMap((handle) => handle.dispatch(input)),
         Effect.mapError(toHostHttpError),
-        Effect.flatMap((response) => unwrapExpectedResponse(operation, response)),
+        Effect.flatMap((response) =>
+          unwrapExpectedResponse(operation, response),
+        ),
       );
 
     const credentialed = <A>(
@@ -254,7 +254,7 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
                 origin: ingress.publicOrigin,
                 provider: ctx.path.provider,
                 method: ctx.request.method,
-                url: ctx.request.url,
+                url: new URL(ctx.request.url, ingress.publicOrigin).toString(),
                 bodyText: Option.getOrUndefined(ctx.bodyText),
               },
             },
@@ -280,7 +280,7 @@ const unwrapExpectedResponse = <
   if (response.operation !== operation) {
     return Effect.fail(
       new HostHttpInternalError({
-        message: `Host dispatcher returned ${response.operation} for ${operation}.`,
+        message: `Host instance returned ${response.operation} for ${operation}.`,
       }),
     );
   }

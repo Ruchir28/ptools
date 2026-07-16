@@ -7,13 +7,10 @@
  * without teaching shared Host API code about Node directories, Cloudflare
  * Durable Objects, configured runtimes, or storage.
  */
+import type { HostOperationDispatchInput } from "../contracts/hostOperationDispatch.js";
 import type { HostOperationResponse } from "../contracts/hostOperationEnvelope.js";
-import { Context, Effect, Layer } from "effect";
-import {
-  HostOperationDispatchError,
-  HostOperationDispatcher,
-  type HostOperationDispatchInput,
-} from "./hostOperationDispatcher.js";
+import { Context, Effect } from "effect";
+import { HostOperationDispatchError } from "./hostOperationDispatchError.js";
 
 /**
  * Callable handle for one platform-selected host instance.
@@ -46,29 +43,3 @@ export class HostInstanceDiscovery extends Context.Tag(
     ) => Effect.Effect<HostInstanceHandle, HostOperationDispatchError>;
   }
 >() {}
-
-/**
- * Shared `HostOperationDispatcher` implementation backed by host discovery.
- *
- * This layer is the reusable dispatch path for platforms that have migrated to
- * `HostInstanceDiscovery`: resolve the handle using `input.hostId`, then forward
- * the same dispatch input without rebuilding or renaming caller/origin/request
- * fields.
- */
-export const HostOperationDispatcherFromInstanceDiscoveryLive: Layer.Layer<
-  HostOperationDispatcher,
-  never,
-  HostInstanceDiscovery
-> = Layer.effect(
-  HostOperationDispatcher,
-  Effect.gen(function* () {
-    const discovery = yield* HostInstanceDiscovery;
-
-    return HostOperationDispatcher.of({
-      dispatch: (input) =>
-        discovery
-          .resolve(input.hostId)
-          .pipe(Effect.flatMap((handle) => handle.dispatch(input))),
-    });
-  }),
-);

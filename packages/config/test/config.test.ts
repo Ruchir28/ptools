@@ -18,6 +18,7 @@ import {
   ConfiguredSecretStore,
 } from "../src/config.js";
 import {
+  CONFIGURED_HOST_CONFIG_BLOB_KEY,
   ConfiguredHostConfigStore,
   HostSecretStorage,
   HostSecretStorageBackend,
@@ -494,6 +495,120 @@ describe("server config", () => {
     expect(httpServer(resolved, "remote").headers).toEqual(
       Option.some({ Authorization: "Bearer stored-token" }),
     );
+  });
+
+  it("loads the newest secret value without replacing stored config", async () => {
+    const storage = makeMemoryHostStorage();
+    const unresolvedConfig = await parseConfig({
+      mcpServers: {
+        remote: {
+          url: "https://example.com/mcp",
+          headers: { Authorization: "Bearer ${env:API_TOKEN}" },
+        },
+      },
+    });
+    const stores = configuredHostStoreTestLayer(storage);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const configStore = yield* ConfiguredHostConfigStore;
+        const secretStore = yield* ConfiguredSecretStore;
+        yield* configStore.replace({ config: unresolvedConfig });
+        yield* secretStore.replaceAll({ secrets: { API_TOKEN: "first" } });
+      }).pipe(Effect.provide(stores)),
+    );
+
+    const load = () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const source = yield* ResolvedPtoolsConfigSource;
+          return yield* source.load;
+        }).pipe(
+          Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage)),
+        ),
+      );
+    expect(httpServer(await load(), "remote").headers).toEqual(
+      Option.some({ Authorization: "Bearer first" }),
+    );
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const secretStore = yield* ConfiguredSecretStore;
+        yield* secretStore.replaceAll({ secrets: { API_TOKEN: "rotated" } });
+      }).pipe(Effect.provide(stores)),
+    );
+    expect(httpServer(await load(), "remote").headers).toEqual(
+      Option.some({ Authorization: "Bearer rotated" }),
+    );
+  });
+
+  it("fails resolved-config loading with the exact missing-secret error", async () => {
+    const storage = makeMemoryHostStorage();
+    const unresolvedConfig = await parseConfig({
+      mcpServers: {
+        remote: {
+          url: "https://example.com/mcp",
+          headers: { Authorization: "Bearer ${env:MISSING_TOKEN}" },
+        },
+      },
+    });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* ConfiguredHostConfigStore;
+        yield* store.replace({ config: unresolvedConfig });
+      }).pipe(Effect.provide(configuredHostStoreTestLayer(storage))),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const source = yield* ResolvedPtoolsConfigSource;
+        return yield* Effect.either(source.load);
+      }).pipe(
+        Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage)),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(ServerConfigError);
+      expect(result.left.message).toBe(
+        "Missing environment variable MISSING_TOKEN for headers.Authorization on MCP server remote",
+      );
+    }
+  });
+
+  it("fails resolved-config loading when persisted config is malformed", async () => {
+    const storage = makeMemoryHostStorage();
+    await Effect.runPromise(
+      storage.put(
+        CONFIGURED_HOST_CONFIG_BLOB_KEY,
+        JSON.stringify({
+          config: {
+            mcpServers: {
+              remote: { transport: "http", url: 42 },
+            },
+          },
+          updatedAt: new Date().toISOString(),
+          serverCount: 1,
+        }),
+      ),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const source = yield* ResolvedPtoolsConfigSource;
+        return yield* Effect.either(source.load);
+      }).pipe(
+        Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage)),
+      ),
+    );
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(ServerConfigError);
+      expect(result.left.message).toBe(
+        "Stored configured host config is invalid.",
+      );
+    }
   });
 
   it("replaces configured secret sets and deletes stale values", async () => {

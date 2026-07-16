@@ -155,7 +155,8 @@ describe("host-cloudflare import boundaries", () => {
   it("uses Workers-pool bindings instead of fake Durable Object namespaces in tests", async () => {
     const workerTestContents = await Promise.all(
       [
-        "test/worker.test.ts",
+        "test/support/cloudflareWorkerTestClient.ts",
+        "test/worker-host-instance-rpc.integration.test.ts",
         "test/worker-entry.ts",
         "test/codeModeObjectTestState.ts",
       ].map((path) => readFile(join(packageRoot, path), "utf8")),
@@ -189,8 +190,6 @@ describe("host-cloudflare import boundaries", () => {
     const hostRuntimePackage = await readSources(
       join(repoRoot, "packages/host-runtime/src"),
     );
-    const resolvedConfigWiring = codeModeObject;
-
     expect(authPackage).toContain("McpOAuthFlow");
     expect(authPackage).toContain("McpOAuthProviderFactoryLayer");
     expect(hostRuntimePackage).toContain("HostAuthCoordinatorPolicyLayer");
@@ -199,24 +198,21 @@ describe("host-cloudflare import boundaries", () => {
     expect(platform).toContain("HostIdentity");
     expect(platform).not.toContain("CodeModeObjectIdentity");
     expect(platform).not.toContain("CodeModeObjectRequestOrigin");
-    expect(resolvedConfigWiring).toContain(
-      "ResolvedPtoolsConfigSource.Default",
-    );
-    expect(resolvedConfigWiring).not.toContain(
+    expect(hostRuntimePackage).toContain("ResolvedPtoolsConfigSource.Default");
+    expect(codeModeObject).not.toContain("ResolvedPtoolsConfigSource");
+    expect(codeModeObject).not.toContain("loadResolvedConfig");
+    expect(codeModeObject).not.toContain(
       "DurableObjectResolvedPtoolsConfigSourceLayer",
     );
-    expect(resolvedConfigWiring).not.toContain(
-      "resolvePtoolsConfigWithSecrets",
-    );
-    expect(resolvedConfigWiring).not.toContain(
-      "CODE_MODE_OBJECT_CONFIG_BLOB_KEY",
-    );
-    expect(resolvedConfigWiring).not.toContain("StoredConfigBlob");
-    expect(resolvedConfigWiring).not.toContain("ConfiguredSecretIndexJson");
-    expect(resolvedConfigWiring).not.toContain("loadConfiguredSecretIndex");
+    expect(codeModeObject).not.toContain("resolvePtoolsConfigWithSecrets");
+    expect(codeModeObject).not.toContain("CODE_MODE_OBJECT_CONFIG_BLOB_KEY");
+    expect(codeModeObject).not.toContain("StoredConfigBlob");
+    expect(codeModeObject).not.toContain("ConfiguredSecretIndexJson");
+    expect(codeModeObject).not.toContain("loadConfiguredSecretIndex");
     expect(codeModeObject).toContain("#stableRuntime");
     expect(codeModeObject).toContain("HostStableRuntimeLayer");
-    expect(codeModeObject).toContain("ConfiguredHostContextRunner");
+    expect(codeModeObject).toContain("HostInstanceHandler");
+    expect(codeModeObject).not.toContain("ConfiguredHostContextRunner");
     expect(codeModeObject).not.toContain("#hostRuntime");
     expect(codeModeObject).not.toContain("CloudflareOAuthFlow");
     expect(await sourceFiles(join(packageRoot, "src/layers"))).not.toContain(

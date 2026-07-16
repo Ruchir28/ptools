@@ -18,20 +18,14 @@ import {
 import {
   HostApiUnauthorized,
   HostHttpOperationAdapterLive,
-  HostOperationDispatchError,
-  HostOperationDispatcher,
   ProvideHostHttpIngress,
   RequireHostApiAccess,
 } from "@ptools/host-api/effect";
-import { Context, Effect, Layer, Redacted } from "effect";
+import { Effect, Layer, Redacted } from "effect";
 import type { PtoolsWorkerEnv } from "./ingress.js";
-import { handleCloudflareHostRequest } from "./hostOperationRpcDispatcher.js";
 import { verifyBearerToken } from "./publicAuth.js";
-
-/** Request/platform context supplied by the Worker entrypoint per fetch call. */
-export class WorkerIngressEnv extends Context.Tag(
-  "@ptools/host-cloudflare/WorkerIngressEnv",
-)<WorkerIngressEnv, PtoolsWorkerEnv>() {}
+import { CloudflareHostInstanceDiscoveryLive } from "./cloudflareHostInstanceDiscovery.js";
+import { WorkerIngressEnv } from "./workerIngressEnv.js";
 
 const PUBLIC_ORIGIN_HEADER = "x-ptools-public-origin";
 
@@ -105,49 +99,10 @@ const withPublicOriginHeader = (request: Request): Request => {
 };
 
 /**
- * Cloudflare dispatcher from decoded host operations to per-host Durable Object
- * RPC calls.
- *
- * Host selection and public origin come from the shared HTTP adapter's
- * `HostOperationDispatchInput`, not from route parsing in this layer. The only
- * Cloudflare-specific capability captured here is the Durable Object namespace.
- */
-export const CloudflareHostOperationDispatcherLive: Layer.Layer<
-  HostOperationDispatcher,
-  never,
-  WorkerIngressEnv
-> = Layer.effect(
-  HostOperationDispatcher,
-  Effect.gen(function* () {
-    const env = yield* WorkerIngressEnv;
-
-    return {
-      dispatch: (input) =>
-        handleCloudflareHostRequest(
-          {
-            namespace: env.PTOOLS_CODE_MODE,
-            hostId: input.hostId,
-            origin: input.publicOrigin,
-          },
-          input.request,
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new HostOperationDispatchError({
-                message: "Cloudflare host operation dispatch failed.",
-                cause,
-              }),
-          ),
-        ),
-    };
-  }),
-);
-
-/**
  * Build a Web-standard handler for one Worker environment.
  *
  * This function constructs the stable Effect application wiring: shared route
- * declarations, shared handlers, Cloudflare auth/dispatcher layers, and
+ * declarations, shared handlers, Cloudflare auth/discovery layers, and
  * `HttpServer.layerContext`. It should run once per cached Worker env, not once
  * per request.
  *
@@ -180,15 +135,15 @@ export const makeCloudflareHostHttpHandler = (env: PtoolsWorkerEnv) => {
    */
   const cloudflarePlatformServicesLayer = Layer.mergeAll(
     CloudflareRequireHostApiAccessLive,
-    CloudflareHostOperationDispatcherLive,
+    CloudflareHostInstanceDiscoveryLive,
   ).pipe(Layer.provideMerge(workerEnvBindingLayer));
 
   /**
    * Shared adapter from decoded HttpApi endpoint contexts to Host operations.
    *
-   * The adapter depends on `HostOperationDispatcher`, provided above by
-   * Cloudflare, but remains platform-neutral: it builds host operation inputs
-   * and delegates dispatch instead of calling Durable Objects directly.
+   * The adapter depends on `HostInstanceDiscovery`, provided above by
+   * Cloudflare, but remains platform-neutral: it builds host operation inputs,
+   * resolves a handle, and dispatches without calling Durable Objects directly.
    */
   const sharedHostHttpOperationAdapterLayer = HostHttpOperationAdapterLive.pipe(
     Layer.provideMerge(cloudflarePlatformServicesLayer),

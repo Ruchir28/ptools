@@ -8,6 +8,7 @@
  */
 export * from "./configureHost.js";
 export * from "./hostOperationEnvelope.js";
+export * from "./hostOperationDispatch.js";
 export * from "./hostCodeMode.js";
 export * from "./hostMcpAuth.js";
 export * from "./hostSecrets.js";

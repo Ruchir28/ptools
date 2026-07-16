@@ -416,6 +416,9 @@ importers:
       '@ptools/executor':
         specifier: workspace:*
         version: link:../executor
+      '@ptools/host-api':
+        specifier: workspace:*
+        version: link:../host-api
       '@ptools/host-context':
         specifier: workspace:*
         version: link:../host-context

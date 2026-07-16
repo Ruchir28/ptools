@@ -1,55 +1,30 @@
-import type { CodeModeRequest, CodeModeResponse } from "@ptools/code-mode-api";
+import type { CodeModeRequest } from "@ptools/code-mode-api";
+import type { HostApiCaller } from "@ptools/host-api";
 
+/** Operation facts recorded at the receiving Durable Object boundary. */
 export interface CodeModeObjectTestCall {
   readonly hostId: string | undefined;
   readonly request: CodeModeRequest;
   readonly origin: string;
+  readonly caller: HostApiCaller | undefined;
 }
 
-interface CodeModeObjectTestState {
-  readonly calls: Array<CodeModeObjectTestCall>;
-  response: CodeModeResponse;
-  failure: unknown;
-}
-
-const defaultResponse = (): CodeModeResponse => ({
-  operation: "search_providers",
-  output: { providers: [], diagnostics: [] },
-});
-
-const state: CodeModeObjectTestState = {
-  calls: [],
-  response: defaultResponse(),
-  failure: undefined,
-};
-
-export const resetCodeModeObjectTestState = (): void => {
-  state.calls.length = 0;
-  state.response = defaultResponse();
-  state.failure = undefined;
-};
+/**
+ * Calls are partitioned by the named Durable Object host ID so integration
+ * files can run concurrently without resetting or erasing each other's state.
+ * Tests use unique host IDs and inspect only the instance they invoked.
+ */
+const callsByHost = new Map<string, Array<CodeModeObjectTestCall>>();
 
 export const recordCodeModeObjectCall = (
   call: CodeModeObjectTestCall,
 ): void => {
-  state.calls.push(call);
+  if (call.hostId === undefined) return;
+  const calls = callsByHost.get(call.hostId) ?? [];
+  calls.push(call);
+  callsByHost.set(call.hostId, calls);
 };
 
-export const codeModeObjectTestCalls = (): ReadonlyArray<CodeModeObjectTestCall> =>
-  state.calls;
-
-export const codeModeObjectTestResponse = (): CodeModeResponse =>
-  state.response;
-
-export const codeModeObjectTestFailure = (): unknown => state.failure;
-
-export const setCodeModeObjectTestResponse = (
-  response: CodeModeResponse,
-): void => {
-  state.response = response;
-  state.failure = undefined;
-};
-
-export const setCodeModeObjectTestFailure = (failure: unknown): void => {
-  state.failure = failure;
-};
+export const codeModeObjectTestCallsForHost = (
+  hostId: string,
+): ReadonlyArray<CodeModeObjectTestCall> => callsByHost.get(hostId) ?? [];

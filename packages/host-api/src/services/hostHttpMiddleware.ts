@@ -23,8 +23,8 @@ import {
   HttpApiSchema,
   HttpApiSecurity,
 } from "@effect/platform";
+import type { HostApiCaller } from "../contracts/hostOperationDispatch.js";
 import { Context, Schema } from "effect";
-import type { HostApiCaller } from "./hostOperationDispatcher.js";
 
 /**
  * Caller identity produced after Host API bearer-token verification.

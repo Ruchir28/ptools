@@ -1,5 +1,7 @@
 /**
- * Service exports that live on the stable host runtime and manage configured
- * Context lifetime (`ConfiguredHostContextRunner`).
+ * Stable host-runtime services: configured Context lifecycle is owned by
+ * `ConfiguredHostContextRunner`, while normalized operations enter through
+ * `HostInstanceHandler`.
  */
 export * from "./configuredHostContextRunner.js";
+export * from "./hostInstanceHandler.js";

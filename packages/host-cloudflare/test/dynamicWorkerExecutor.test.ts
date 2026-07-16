@@ -34,10 +34,9 @@ describe("Cloudflare Dynamic Worker executor source packaging", () => {
       cpuMs: DYNAMIC_WORKER_CPU_LIMIT_MS,
       subRequests: DYNAMIC_WORKER_SUBREQUEST_LIMIT,
     });
-    expect(Object.keys(workerCode.modules).sort()).toEqual([
-      DYNAMIC_WORKER_MAIN_MODULE,
-      DYNAMIC_WORKER_GENERATED_CODE_MODULE,
-    ].sort());
+    expect(Object.keys(workerCode.modules).sort()).toEqual(
+      [DYNAMIC_WORKER_MAIN_MODULE, DYNAMIC_WORKER_GENERATED_CODE_MODULE].sort(),
+    );
     expect(workerCode.modules[DYNAMIC_WORKER_MAIN_MODULE]).toEqual({
       js: expect.stringContaining("CodeModeSandbox"),
     });
@@ -55,9 +54,13 @@ describe("Cloudflare Dynamic Worker executor source packaging", () => {
       }),
     );
 
-    expect(source).toContain('export const bindingKeys = ["id","sheets","console"]');
+    expect(source).toContain(
+      'export const bindingKeys = ["id","sheets","console"]',
+    );
     expect(source).toContain("const { id, sheets, console } = __bindings;");
-    expect(source).toContain("const generatedFunction = (async () => sheets.read({ id }));");
+    expect(source).toContain(
+      "const generatedFunction = (async () => sheets.read({ id }));",
+    );
     expect(source).not.toContain("ProviderBridge");
     expect(source).not.toContain("Mcp");
     expect(source).not.toContain("credentials");

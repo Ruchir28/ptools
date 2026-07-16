@@ -12,19 +12,21 @@ import {
   HostHttpClient,
   HostHttpClientLive,
   CodeModeClientFromHostHttpClientLive,
+  HostHttpIngress,
+  HostHttpOperationAdapter,
+  HostHttpOperationAdapterLive,
   HostInstanceDiscovery,
-  HostOperationDispatcher,
-  HostOperationDispatcherFromInstanceDiscoveryLive,
-  type HostInstanceHandle,
-  type HostOperationDispatchInput,
+  HostOperationDispatchError,
+  VerifiedHostApiCaller,
 } from "../src/services/index.js";
 import {
   parseHostOperationRequest,
+  HostCodeModeResponse,
+  HostOperationDispatchInput,
   parseHostOperationResponse,
   type HostOperationResponse,
-  type HostCodeModeResponse,
 } from "../src/index.js";
-import { Effect, Layer, Option, Redacted } from "effect";
+import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -37,9 +39,7 @@ describe("host-api source layout", () => {
     await expect(fileExists(join(packageRoot, "src/services"))).resolves.toBe(
       true,
     );
-    await expect(fileExists(join(packageRoot, "src/http"))).resolves.toBe(
-      true,
-    );
+    await expect(fileExists(join(packageRoot, "src/http"))).resolves.toBe(true);
     await expect(fileExists(join(packageRoot, "src/effect"))).resolves.toBe(
       false,
     );
@@ -113,6 +113,45 @@ describe("host-api schemas", () => {
     ).resolves.toEqual(response);
   });
 
+  it("encodes plain dispatch carrier data and restores internal Option values", async () => {
+    const base = {
+      hostId: "demo",
+      publicOrigin: "https://ptools.example",
+      request: {
+        operation: "mcp_auth_status" as const,
+        input: { origin: "https://ptools.example" },
+      },
+    };
+    const withCaller = HostOperationDispatchInput.make({
+      ...base,
+      caller: Option.some({ kind: "HostApiTokenCaller" }),
+    });
+    const withoutCaller = HostOperationDispatchInput.make({
+      ...base,
+      caller: Option.none(),
+    });
+
+    const encodedWithCaller = await Effect.runPromise(
+      Schema.encode(HostOperationDispatchInput)(withCaller),
+    );
+    const encodedWithoutCaller = await Effect.runPromise(
+      Schema.encode(HostOperationDispatchInput)(withoutCaller),
+    );
+
+    expect(encodedWithCaller).toMatchObject({
+      hostId: "demo",
+      caller: { kind: "HostApiTokenCaller" },
+    });
+    expect(encodedWithoutCaller).not.toHaveProperty("caller");
+
+    const decoded = await Effect.runPromise(
+      Schema.decodeUnknown(HostOperationDispatchInput)(encodedWithCaller),
+    );
+    expect(Option.getOrThrow(decoded.caller)).toEqual({
+      kind: "HostApiTokenCaller",
+    });
+  });
+
   it("decodes structured configure input", async () => {
     const request = await Effect.runPromise(
       parseHostOperationRequest({
@@ -163,18 +202,14 @@ describe("host-api schemas", () => {
   });
 });
 
-describe("HostOperationDispatcherFromInstanceDiscoveryLive", () => {
-  it("resolves by hostId and forwards the original dispatch input unchanged", async () => {
-    const input: HostOperationDispatchInput = {
-      hostId: "demo-host",
-      publicOrigin: "https://ptools.example",
-      caller: Option.some({ kind: "HostApiTokenCaller" }),
-      request: {
-        operation: "code_mode",
-        input: searchRequest(),
-      },
-    };
-    const response: HostOperationResponse = {
+describe("HostHttpOperationAdapterLive", () => {
+  it("resolves the route host and forwards the complete normalized input", async () => {
+    const request = searchRequest();
+    const seen: {
+      hostId?: string;
+      input?: HostOperationDispatchInput;
+    } = {};
+    const response = HostCodeModeResponse.make({
       operation: "code_mode",
       result: {
         ok: true,
@@ -183,57 +218,87 @@ describe("HostOperationDispatcherFromInstanceDiscoveryLive", () => {
           output: { actions: [], diagnostics: [] },
         },
       },
-    };
-    const seen: {
-      resolvedHostId?: string;
-      dispatchedInput?: HostOperationDispatchInput;
-    } = {};
-    const handle: HostInstanceHandle = {
-      dispatch: (dispatchInput) =>
+    });
+    const discoveryLayer = Layer.succeed(HostInstanceDiscovery, {
+      resolve: (hostId) =>
         Effect.sync(() => {
-          seen.dispatchedInput = dispatchInput;
-          return response;
+          seen.hostId = hostId;
+          return {
+            dispatch: (input: HostOperationDispatchInput) =>
+              Effect.sync(() => {
+                seen.input = input;
+                return response;
+              }),
+          };
         }),
-    };
+    });
 
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const dispatcher = yield* HostOperationDispatcher;
-        return yield* dispatcher.dispatch(input);
-      }).pipe(
+      Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+        adapter.codeMode({ path: { hostId: "demo" }, payload: request }),
+      ).pipe(
+        Effect.provideService(HostHttpIngress, {
+          publicOrigin: "https://ptools.example",
+        }),
+        Effect.provideService(VerifiedHostApiCaller, {
+          caller: { kind: "HostApiTokenCaller" },
+        }),
         Effect.provide(
-          HostOperationDispatcherFromInstanceDiscoveryLive.pipe(
-            Layer.provide(
-              Layer.succeed(HostInstanceDiscovery, {
-                resolve: (hostId) =>
-                  Effect.sync(() => {
-                    seen.resolvedHostId = hostId;
-                    return handle;
-                  }),
-              }),
-            ),
-          ),
+          HostHttpOperationAdapterLive.pipe(Layer.provide(discoveryLayer)),
         ),
       ),
     );
 
     expect(result).toEqual(response);
-    expect(seen.resolvedHostId).toBe("demo-host");
-    expect(seen.dispatchedInput).toBe(input);
+    expect(seen.hostId).toBe("demo");
+    expect(seen.input).toMatchObject({
+      hostId: "demo",
+      publicOrigin: "https://ptools.example",
+      request: { operation: "code_mode", input: request },
+    });
+    expect(Option.isSome(seen.input?.caller ?? Option.none())).toBe(true);
+  });
+
+  it("maps discovery failures to the shared HTTP internal error", async () => {
+    const discoveryLayer = Layer.succeed(HostInstanceDiscovery, {
+      resolve: () =>
+        Effect.fail(
+          new HostOperationDispatchError({ message: "Instance unavailable" }),
+        ),
+    });
+
+    const exit = await Effect.runPromiseExit(
+      Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+        adapter.codeMode({
+          path: { hostId: "demo" },
+          payload: searchRequest(),
+        }),
+      ).pipe(
+        Effect.provideService(HostHttpIngress, {
+          publicOrigin: "https://ptools.example",
+        }),
+        Effect.provideService(VerifiedHostApiCaller, {
+          caller: { kind: "HostApiTokenCaller" },
+        }),
+        Effect.provide(
+          HostHttpOperationAdapterLive.pipe(Layer.provide(discoveryLayer)),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("Instance unavailable");
   });
 });
 
 describe("HostHttpClientLive", () => {
   it("requires a platform HttpClient layer instead of owning fetch directly", () => {
-    const layer: Layer.Layer<
-      HostHttpClient,
-      never,
-      HttpClient.HttpClient
-    > = HostHttpClientLive({
-      baseUrl: "https://ptools.example",
-      hostId: "demo",
-      accessToken: Redacted.make("token"),
-    });
+    const layer: Layer.Layer<HostHttpClient, never, HttpClient.HttpClient> =
+      HostHttpClientLive({
+        baseUrl: "https://ptools.example",
+        hostId: "demo",
+        accessToken: Redacted.make("token"),
+      });
 
     expect(layer).toBeDefined();
   });
@@ -285,9 +350,7 @@ describe("HostHttpClientLive", () => {
             baseUrl: "https://ptools.example",
             hostId: "demo host",
             accessToken: Redacted.make("secret-token"),
-          }).pipe(
-            Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
-          ),
+          }).pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, http))),
         ),
       ),
     );

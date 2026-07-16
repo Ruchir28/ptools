@@ -7,8 +7,8 @@
  *
  * Cloudflare installs it once per Durable Object. Node installs it once per
  * selected local host. Platforms supply storage backends, identity, MCP
- * connector, and sandbox runtime; this layer builds shared stores and the
- * configured-context runner on top.
+ * connector, and sandbox runtime; this layer builds shared stores, the
+ * configured-context runner, and the receiver-side `HostInstanceHandler` on top.
  */
 import {
   HostSecretStorageBackend,
@@ -20,6 +20,7 @@ import { HostIdentity } from "@ptools/host-context";
 import { McpConnector } from "@ptools/mcp-registry";
 import { Layer } from "effect";
 import { ConfiguredHostContextRunner } from "../services/configuredHostContextRunner.js";
+import { HostInstanceHandler } from "../services/hostInstanceHandler.js";
 import {
   HostStableSharedStoresLayer,
   type HostStableSharedStores,
@@ -28,8 +29,9 @@ import {
 /**
  * Services directly available from the stable `ManagedRuntime`.
  *
- * Provides stable stores, `HostIdentity`, and `ConfiguredHostContextRunner`.
- * Configured operation services (`CodeModeServer`, auth flow, etc.) are
+ * Provides stable stores, `HostIdentity`, `ConfiguredHostContextRunner`, and
+ * `HostInstanceHandler`. Platforms enter the handler through their selected
+ * local/RPC carrier. Configured operation services (`CodeModeServer`, auth flow, etc.) are
  * intentionally absent — callers must enter those through
  * `ConfiguredHostContextRunner.run(...)` so cache and invalidation rules cannot
  * be bypassed.
@@ -37,25 +39,34 @@ import {
 export type HostStableRuntimeServices =
   | HostStableSharedStores
   | HostIdentity
-  | ConfiguredHostContextRunner;
+  | ConfiguredHostContextRunner
+  | HostInstanceHandler;
 
 /**
  * Shared stable host runtime graph for one host instance.
  *
- * Provides: `HostStableSharedStores`, `HostIdentity`, and
- * `ConfiguredHostContextRunner`.
+ * Provides: `HostStableSharedStores`, `HostIdentity`,
+ * `ConfiguredHostContextRunner`, and `HostInstanceHandler`.
  *
  * Requires (platform-supplied once per host):
  * - storage ports: `HostStateStorageBackend`, `HostSecretStorageBackend`
  * - host binding: `HostIdentity`
  * - platform behavior ports: `McpConnector`, `SandboxRuntime`
  *
- * `HostIdentity` is re-exposed because configure/configureSecrets run against
- * the stable runtime before any configured Context exists. `McpConnector` and
- * `SandboxRuntime` are captured by the runner for configured builds but are not
- * part of the stable caller-facing API.
+ * `HostIdentity` is re-exposed because configure/configureSecrets and receiver
+ * identity checks run against the stable runtime before any configured Context
+ * exists. `McpOAuthStateStore` remains stable so OAuth callbacks can verify and
+ * consume one-time state before provider completion enters the configured
+ * Context. `McpConnector` and `SandboxRuntime` are captured by the runner for
+ * configured builds but are not part of the stable caller-facing API.
  */
-export const HostStableRuntimeLayer: Layer.Layer<
+export interface HostStableRuntimeLayerOptions {
+  readonly supportsStdioMcp: boolean;
+}
+
+export const HostStableRuntimeLayer = (
+  options: HostStableRuntimeLayerOptions,
+): Layer.Layer<
   HostStableRuntimeServices,
   HostStorageError,
   | HostStateStorageBackend
@@ -63,9 +74,15 @@ export const HostStableRuntimeLayer: Layer.Layer<
   | HostIdentity
   | McpConnector
   | SandboxRuntime
-> = Layer.mergeAll(
-  ConfiguredHostContextRunner.Default.pipe(
+> => {
+  const stableServices = ConfiguredHostContextRunner.Default.pipe(
     Layer.provideMerge(HostStableSharedStoresLayer),
-  ),
-  Layer.service(HostIdentity),
-);
+    // Re-export the platform-owned identity: it is both captured by the runner
+    // and part of the stable runtime surface used by the handler and callers.
+    Layer.provideMerge(Layer.service(HostIdentity)),
+  );
+  const handler = HostInstanceHandler.Default(options).pipe(
+    Layer.provide(stableServices),
+  );
+  return Layer.mergeAll(stableServices, handler);
+};

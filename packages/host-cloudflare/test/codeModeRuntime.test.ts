@@ -17,8 +17,8 @@
  * and does not run generated JavaScript inside a real Dynamic Worker.
  *
  * Full local Cloudflare Dynamic Worker execution is covered in
- * `worker.test.ts`, which runs under the Worker/Vitest pool with the Wrangler
- * `worker_loaders` binding.
+ * `worker-code-mode.integration.test.ts`, which runs under the Worker/Vitest
+ * pool with the Wrangler `worker_loaders` binding.
  */
 import {
   CodeModeExecuteRequest,
@@ -43,6 +43,7 @@ import {
 } from "@ptools/host-runtime";
 import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { PUBLIC_MCP_URL } from "./support/fixtureMcpEndpoints.js";
 import { CloudflareDynamicWorkerSandboxRuntimeLayer } from "../src/layers/executor/dynamicWorkerRuntimeLayer.js";
 import {
   CloudflareHttpMcpConnectorLayer,
@@ -72,7 +73,7 @@ describe("ConfiguredHostContextLayer with Cloudflare primitives", () => {
             mcpServers: {
               fixture: {
                 transport: "http",
-                url: "http://127.0.0.1:19719/mcp",
+                url: PUBLIC_MCP_URL,
                 headers: Option.none(),
                 auth: Option.none(),
               },

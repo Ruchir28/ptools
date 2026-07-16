@@ -49,6 +49,7 @@
     "@ptools/config": "workspace:*",
     "@ptools/executor": "workspace:*",
     "@ptools/host-context": "workspace:*",
+    "@ptools/host-api": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
     "effect": "3.21.2"
   }
