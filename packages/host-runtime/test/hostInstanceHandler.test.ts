@@ -117,7 +117,7 @@ describe("HostInstanceHandler", () => {
     expect(await searchProviders(disabled)).toEqual(["remote"]);
 
     const rejected = await configure(disabled, {
-      local: { command: "node", args: ["server.js"] },
+      local: { command: "node", args: ["server.js"], cwd: "../app" },
     });
     expect(rejected).toMatchObject({
       operation: "configure",
@@ -138,6 +138,51 @@ describe("HostInstanceHandler", () => {
       operation: "configure",
       result: { ok: true, serverCount: 1 },
     });
+  });
+
+  /**
+   * Host API config has no source-file directory from which to resolve a
+   * relative stdio cwd. Admission rejects it before persistence/invalidation,
+   * while portable POSIX and Windows absolute paths remain valid regardless of
+   * the operating system running this shared test.
+   */
+  it("rejects relative stdio cwd before persistence and accepts portable absolute cwd", async () => {
+    const connections: ConnectMcpInput[] = [];
+    const runtime = makeRuntime(true, connections);
+    await configure(runtime, {
+      remote: { url: "https://remote.example/mcp" },
+    });
+    expect(await searchProviders(runtime)).toEqual(["remote"]);
+
+    for (const cwd of ["./app", "../app"]) {
+      const rejected = await configure(runtime, {
+        "local-tools": { command: "node", cwd },
+      });
+      expect(rejected).toMatchObject({
+        operation: "configure",
+        result: {
+          ok: false,
+          error: {
+            code: "invalid_config",
+            message: `MCP server "local-tools" uses relative stdio cwd "${cwd}". Host API configuration has no source config file directory, so stdio cwd must be absolute or omitted.`,
+          },
+        },
+      });
+      // Rejection neither persisted the invalid config nor invalidated the
+      // already-built configured Context.
+      expect(await searchProviders(runtime)).toEqual(["remote"]);
+    }
+    expect(connections.map(({ serverName }) => serverName)).toEqual(["remote"]);
+
+    for (const cwd of ["/srv/local-tools", "C:\\tools\\local-tools"]) {
+      const accepted = await configure(makeRuntime(true), {
+        "local-tools": { command: "node", cwd },
+      });
+      expect(accepted).toMatchObject({
+        operation: "configure",
+        result: { ok: true, serverCount: 1 },
+      });
+    }
   });
 
   /**

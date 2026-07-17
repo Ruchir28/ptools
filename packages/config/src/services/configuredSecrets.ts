@@ -102,6 +102,10 @@ export class ConfiguredSecretStore extends Effect.Service<ConfiguredSecretStore>
     effect: Effect.gen(function* () {
       const stateStorage = yield* HostStateStorage;
       const secretStorage = yield* HostSecretStorage;
+      // `replaceAll` is an index-backed, multi-write protocol. Serialize the
+      // complete protocol per host-scoped store instance so two replacements
+      // cannot interleave their index reads, value writes, and final publish.
+      const replacementSemaphore = yield* Effect.makeSemaphore(1);
 
       return {
         get: (name: string) =>
@@ -212,7 +216,7 @@ export class ConfiguredSecretStore extends Effect.Service<ConfiguredSecretStore>
               secretCount: submittedEntries.length,
               updatedAt,
             } satisfies ConfiguredSecretReplaceResult;
-          }),
+          }).pipe((effect) => replacementSemaphore.withPermits(1)(effect)),
       } satisfies ConfiguredSecretStoreService;
     }),
   },

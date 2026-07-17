@@ -15,6 +15,7 @@ import {
   ConfiguredHostConfigStore,
   ConfiguredHostConfigStoreError,
   ConfiguredSecretStore,
+  isAbsolutePortablePath,
   parsePtoolsConfigJson,
   ServerConfigError,
   type PtoolsConfig,
@@ -32,7 +33,14 @@ import {
   type HostOperationDispatchInput,
   type HostOperationResponse,
 } from "@ptools/host-api";
-import { Context, Data, Effect, Schema } from "effect";
+import {
+  Array as EffectArray,
+  Context,
+  Data,
+  Effect,
+  Option,
+  Schema,
+} from "effect";
 import { ConfiguredHostContextRunner } from "./configuredHostContextRunner.js";
 
 export interface HostInstanceHandlerOptions {
@@ -365,22 +373,51 @@ class UnsupportedConfig extends Data.TaggedError("UnsupportedConfig")<{
   readonly message: string;
 }> {}
 
-/** Reject configuration that a selected host cannot execute. */
+class InvalidHostApiConfig extends Data.TaggedError("InvalidHostApiConfig")<{
+  readonly message: string;
+}> {}
+
+/** Reject configuration that the selected host or Host API cannot execute. */
 const checkConfigCompatibility = (
   config: PtoolsConfig,
   options: HostInstanceHandlerOptions,
-): Effect.Effect<PtoolsConfig, UnsupportedConfig> => {
-  if (options.supportsStdioMcp) return Effect.succeed(config);
-  const unsupported = Object.entries(config.mcpServers).find(
-    ([, server]) => server.transport === "stdio",
-  );
-  return unsupported === undefined
-    ? Effect.succeed(config)
-    : Effect.fail(
-        new UnsupportedConfig({
-          message: `MCP server "${unsupported[0]}" uses stdio, which is not supported by this host.`,
-        }),
+): Effect.Effect<PtoolsConfig, UnsupportedConfig | InvalidHostApiConfig> => {
+  const servers = Object.entries(config.mcpServers);
+
+  const unsupportedStdio = options.supportsStdioMcp
+    ? Option.none<UnsupportedConfig>()
+    : EffectArray.findFirst(servers, ([serverName, server]) =>
+        server.transport === "stdio"
+          ? Option.some(
+              new UnsupportedConfig({
+                message: `MCP server "${serverName}" uses stdio, which is not supported by this host.`,
+              }),
+            )
+          : Option.none(),
       );
+
+  const compatibilityError = unsupportedStdio.pipe(
+    Option.orElse(() =>
+      EffectArray.findFirst(servers, ([serverName, server]) =>
+        server.transport === "stdio"
+          ? server.cwd.pipe(
+              Option.filter((cwd) => !isAbsolutePortablePath(cwd)),
+              Option.map(
+                (cwd) =>
+                  new InvalidHostApiConfig({
+                    message: `MCP server "${serverName}" uses relative stdio cwd "${cwd}". Host API configuration has no source config file directory, so stdio cwd must be absolute or omitted.`,
+                  }),
+              ),
+            )
+          : Option.none(),
+      ),
+    ),
+  );
+
+  return Option.match(compatibilityError, {
+    onNone: () => Effect.succeed(config),
+    onSome: Effect.fail,
+  });
 };
 
 /** Project configure failures into the public, operation-specific error union. */

@@ -173,7 +173,7 @@ const resolveStdioConfig = (
     const cwd = yield* Effect.transposeMapOption(config.cwd, (cwd) =>
       resolveEnvString(serverName, "cwd", cwd, lookupSecret).pipe(
         Effect.map((resolvedCwd) =>
-          options.baseDir !== undefined && !isAbsolutePath(resolvedCwd)
+          options.baseDir !== undefined && !isAbsolutePortablePath(resolvedCwd)
             ? (options.resolvePath ?? resolveRelativePath)(
                 options.baseDir,
                 resolvedCwd,
@@ -430,7 +430,11 @@ const invalidServerConfig = (
 const stableStringify = (value: unknown): string =>
   JSON.stringify(canonicalize(value));
 
-const isAbsolutePath = (path: string): boolean =>
+/**
+ * Recognize absolute paths from supported authored config dialects regardless
+ * of the operating system currently validating the config.
+ */
+export const isAbsolutePortablePath = (path: string): boolean =>
   path.startsWith("/") ||
   /^[A-Za-z]:[\\/]/.test(path) ||
   path.startsWith("\\\\");
