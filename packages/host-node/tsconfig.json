@@ -10,6 +10,7 @@
     { "path": "../executor" },
     { "path": "../host-api" },
     { "path": "../host-context" },
+    { "path": "../host-runtime" },
     { "path": "../mcp-registry" }
   ],
   "compilerOptions": {

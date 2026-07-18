@@ -57,15 +57,16 @@
     "@ptools/code-mode": "workspace:*",
     "@ptools/code-mode-api": "workspace:*",
     "@ptools/config": "workspace:*",
+    "@ptools/executor": "workspace:*",
     "@ptools/host-api": "workspace:*",
     "@ptools/host-context": "workspace:*",
     "@ptools/host-runtime": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
-    "effect": "3.21.2",
-    "@ptools/executor": "workspace:*"
+    "effect": "3.21.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.16.6",
+    "@types/node": "^26.1.1",
     "esbuild": "^0.28.0",
     "zod": "4.4.3"
   }
