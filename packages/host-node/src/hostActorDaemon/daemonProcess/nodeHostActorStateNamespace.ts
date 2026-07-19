@@ -6,7 +6,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
 import { Data, Effect, Option } from "effect";
-import type { NodeHostActorRuntimeOptions } from "./contracts/nodeHostActorRuntimeOptions.js";
+import type { NodeHostActorRuntimeOptions } from "../actorRuntime/contracts/nodeHostActorRuntimeOptions.js";
 
 export const DEFAULT_NODE_HOST_KEYRING_SERVICE_NAME = "ptools-host-secrets";
 

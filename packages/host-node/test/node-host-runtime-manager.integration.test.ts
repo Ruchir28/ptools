@@ -1,12 +1,11 @@
 /**
- * Production-shaped E-2 integration test for the Node host-actor engine.
+ * Production-shaped integration test for per-host actor runtime management.
  *
- * This deliberately stops at the E-2 ownership boundary: there is no daemon
- * process/RPC (E-3) or public HTTP discovery/handle path (E-4). Everything
- * inside that boundary is real: generated Effect.Service Layers, actor manager,
- * actor ManagedRuntime, file-backed state, shared HostInstanceHandler, Node
- * stdio MCP connector, a real fixture MCP child process, and the restricted
- * Deno sandbox.
+ * This test calls the runtime manager directly, below the daemon process, RPC,
+ * and public HTTP client boundaries. Everything inside the actor boundary is
+ * real: generated Effect.Service Layers, actor manager, actor ManagedRuntime,
+ * file-backed state, shared HostInstanceHandler, Node stdio MCP connector, a
+ * real fixture MCP child process, and the restricted Deno sandbox.
  *
  * The production keyring Layer is present but this portable integration does
  * not write OS credentials: headless Linux, macOS, and Windows CI expose
@@ -27,9 +26,9 @@ import type {
 } from "@ptools/host-api";
 import { Effect, Layer, Option, Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import type { NodeHostActorRuntimeOptions } from "../src/hostActorDaemon/contracts/nodeHostActorRuntimeOptions.js";
-import { NodeDaemonHostActorRuntimeActivator } from "../src/hostActorDaemon/services/nodeDaemonHostActorRuntimeActivator.js";
-import { NodeHostRuntimeManager } from "../src/hostActorDaemon/services/nodeHostRuntimeManager.js";
+import type { NodeHostActorRuntimeOptions } from "../src/hostActorDaemon/actorRuntime/contracts/nodeHostActorRuntimeOptions.js";
+import { NodeDaemonHostActorRuntimeActivator } from "../src/hostActorDaemon/actorRuntime/services/nodeDaemonHostActorRuntimeActivator.js";
+import { NodeHostRuntimeManager } from "../src/hostActorDaemon/actorRuntime/services/nodeHostRuntimeManager.js";
 
 const fixtureMcpServer = fileURLToPath(
   new URL(
@@ -68,8 +67,8 @@ describe.skipIf(!hasDeno)("Node host runtime manager integration", () => {
       keyringServiceName: `ptools-host-actor-integration-${process.pid}`,
       denoExecutable: "deno",
     };
-    // E-2 receives the decoded operation produced by HTTP/RPC adapters. Decode
-    // these authored fixtures during setup rather than inside manager dispatch.
+    // The runtime manager receives operations after carrier schema decoding.
+    // Decode authored fixtures during setup, not inside manager dispatch.
     const config = decodeUserConfigForTest({
       fixture: {
         command: process.execPath,

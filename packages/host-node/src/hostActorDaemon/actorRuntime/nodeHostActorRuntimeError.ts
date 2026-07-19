@@ -1,7 +1,8 @@
 /**
- * Typed daemon-internal failure at the host-actor runtime boundary.
+ * @file Typed failure at one selected actor runtime's lifecycle boundary.
  *
- * The private RPC layer may later encode/map this failure, but expected
+ * Activation, dispatch, and disposal failures use this internal error. The RPC
+ * boundary projects it to a safe schema error without `cause`; expected
  * configure, auth, and Code Mode failures remain `HostOperationResponse`
  * values and never become this error.
  */

@@ -1,0 +1,35 @@
+name: Host Node daemon platform ownership
+
+on:
+  pull_request:
+    paths:
+      - "packages/host-node/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/host-node-daemon-platform-lock.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/host-node/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/host-node-daemon-platform-lock.yml"
+
+jobs:
+  daemon-ownership:
+    name: daemon ownership (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Verify native lock and spawned daemon lifecycle
+        run: >-
+          pnpm --filter @ptools/host-node exec vitest run
+          test/node-host-actor-daemon-ownership.test.ts
+          test/node-host-actor-daemon-process.integration.test.ts

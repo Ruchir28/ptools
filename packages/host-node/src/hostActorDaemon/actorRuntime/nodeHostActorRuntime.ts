@@ -1,6 +1,12 @@
 /**
- * @file Builds one final daemon-owned Node host actor from platform primitive
- * layers and the shared stable host runtime graph.
+ * @file One stable runtime owned by one `hostId` inside the Node daemon.
+ *
+ * `NodeHostRuntimeManager` creates this value lazily and stores exactly one per
+ * active host. It combines Node storage, MCP, and Deno capabilities with the
+ * shared host runtime, then exposes only dispatch and disposal.
+ *
+ * This module does not own the daemon process, RPC listener, server leases, or
+ * cross-process ownership lock.
  */
 import type {
   HostOperationDispatchInput,
@@ -11,12 +17,12 @@ import {
   type HostStableRuntimeServices,
 } from "@ptools/host-runtime";
 import { Cause, Effect, ManagedRuntime } from "effect";
-import { DenoSandboxRuntimeLayer } from "../executor/localExecutor.js";
+import { DenoSandboxRuntimeLayer } from "../../executor/localExecutor.js";
 import {
   NodeFileHostStateStorageBackendLayer,
   NodeKeyringHostSecretStorageBackendLayer,
-} from "../layers/platform/hostStorage.js";
-import { NodeMcpConnectorLive } from "../mcpConnector.js";
+} from "../../layers/platform/hostStorage.js";
+import { NodeMcpConnectorLive } from "../../mcpConnector.js";
 import type { NodeHostActorRuntimeOptions } from "./contracts/nodeHostActorRuntimeOptions.js";
 import {
   makeNodeHostActorRuntimeLayer,
@@ -26,7 +32,7 @@ import {
   NodeHostActorRuntimeError,
   NodeHostActorRuntimePhase,
 } from "./nodeHostActorRuntimeError.js";
-import { nodeHostStateRootDirectory } from "./nodeHostActorStateNamespace.js";
+import { nodeHostStateRootDirectory } from "../daemonProcess/nodeHostActorStateNamespace.js";
 
 /**
  * Callable lifecycle boundary stored in exactly one manager entry.

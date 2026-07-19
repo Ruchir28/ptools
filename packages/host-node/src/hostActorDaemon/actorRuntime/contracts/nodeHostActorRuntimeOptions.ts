@@ -1,10 +1,9 @@
 /**
- * Resolved physical settings shared by every actor created by one Node daemon.
+ * @file Physical settings shared by actor runtimes in one Node daemon.
  *
- * `nodeHostActorStateNamespace.ts` produces this value once from explicit
- * overrides and Node process defaults. The daemon activation service captures
- * it; individual actors receive only the concrete storage/MCP/sandbox Layers
- * derived from it, not the settings object itself.
+ * `daemonProcess/nodeHostActorStateNamespace.ts` resolves this value once from
+ * explicit overrides and Node defaults. The daemon-side activator captures it;
+ * individual actors receive only derived storage, MCP, and sandbox Layers.
  */
 export interface NodeHostActorRuntimeOptions {
   /** Absolute root owned by this daemon state namespace. */

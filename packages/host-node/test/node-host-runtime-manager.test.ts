@@ -20,16 +20,16 @@ import { describe, expect, it } from "vitest";
 import {
   makeNodeHostActorRuntimeFromPlatformLayers,
   type NodeHostActorRuntime,
-} from "../src/hostActorDaemon/nodeHostActorRuntime.js";
+} from "../src/hostActorDaemon/actorRuntime/nodeHostActorRuntime.js";
 import {
   NodeHostActorRuntimeError,
   NodeHostActorRuntimePhase,
-} from "../src/hostActorDaemon/nodeHostActorRuntimeError.js";
+} from "../src/hostActorDaemon/actorRuntime/nodeHostActorRuntimeError.js";
 import {
   NodeDaemonHostActorRuntimeActivator,
   type NodeDaemonHostActorRuntimeActivatorOperations,
-} from "../src/hostActorDaemon/services/nodeDaemonHostActorRuntimeActivator.js";
-import { makeNodeHostRuntimeManager } from "../src/hostActorDaemon/services/nodeHostRuntimeManager.js";
+} from "../src/hostActorDaemon/actorRuntime/services/nodeDaemonHostActorRuntimeActivator.js";
+import { makeNodeHostRuntimeManager } from "../src/hostActorDaemon/actorRuntime/services/nodeHostRuntimeManager.js";
 
 const origin = "https://ptools.example";
 
@@ -212,8 +212,8 @@ describe("NodeHostRuntimeManager", () => {
   it("uses shared handler semantics, isolated stores, and origin-aware configured contexts", async () => {
     const actorHarness = makeInMemoryActorPlatformHarness();
     const activations: string[] = [];
-    // E-2 starts after carrier decoding. Build the already-decoded DTO as test
-    // setup rather than making schema decoding appear to be manager behavior.
+    // The runtime manager starts after carrier decoding. Build the decoded DTO
+    // during setup rather than making decoding appear to be manager behavior.
     const config = decodeUserConfigForTest({
       fixture: { url: "https://fixture.example/mcp" },
     });

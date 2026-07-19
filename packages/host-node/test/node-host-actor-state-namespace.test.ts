@@ -6,7 +6,7 @@ import {
   NodeHostActorStateNamespaceError,
   nodeHostStateRootDirectory,
   resolveNodeHostActorRuntimeOptions,
-} from "../src/hostActorDaemon/nodeHostActorStateNamespace.js";
+} from "../src/hostActorDaemon/daemonProcess/nodeHostActorStateNamespace.js";
 
 const fixtureHome = resolve("fixture-home");
 const fixtureState = resolve("fixture-state");

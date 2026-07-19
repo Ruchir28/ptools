@@ -31,6 +31,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./host-actor-daemon-entrypoint": {
+      "types": "./dist/hostActorDaemon/daemonProcess/nodeHostActorDaemonEntrypoint.d.ts",
+      "default": "./dist/hostActorDaemon/daemonProcess/nodeHostActorDaemonEntrypoint.js"
     }
   },
   "imports": {
@@ -43,11 +47,13 @@
     "test": "pnpm --filter @ptools/executor build && pnpm build:worker && vitest run --exclude \"**/dist/**\""
   },
   "devDependencies": {
+    "@types/node": "25.9.1",
     "esbuild": "^0.27.0"
   },
   "dependencies": {
     "@effect/platform": "0.96.1",
     "@effect/platform-node": "0.96.1",
+    "@effect/rpc": "0.75.1",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@napi-rs/keyring": "^1.3.0",
     "@ptools/auth": "workspace:*",
@@ -59,6 +65,7 @@
     "@ptools/host-context": "workspace:*",
     "@ptools/host-runtime": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
-    "effect": "3.21.2"
+    "effect": "3.21.2",
+    "fs-native-extensions": "1.5.0"
   }
 }
