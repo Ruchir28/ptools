@@ -16,7 +16,7 @@ import {
   HostInstanceHandler,
   type HostStableRuntimeServices,
 } from "@ptools/host-runtime";
-import { Cause, Effect, ManagedRuntime } from "effect";
+import { Cause, Effect, ManagedRuntime, Option } from "effect";
 import { DenoSandboxRuntimeLayer } from "../../executor/localExecutor.js";
 import {
   NodeFileHostStateStorageBackendLayer,
@@ -164,9 +164,31 @@ const mapRuntimeCause =
               new NodeHostActorRuntimeError({
                 hostId,
                 phase,
-                message,
+                message: appendTypedFailureMessage(message, cause),
                 cause,
               }),
             ),
       ),
     );
+
+/** Preserve actionable typed platform failures while keeping defects private. */
+const appendTypedFailureMessage = <E>(
+  message: string,
+  cause: Cause.Cause<E>,
+): string =>
+  Option.match(Cause.failureOption(cause), {
+    onNone: () => message,
+    onSome: (failure) => {
+      if (
+        typeof failure !== "object" ||
+        failure === null ||
+        !("message" in failure) ||
+        typeof failure.message !== "string" ||
+        failure.message.length === 0 ||
+        message.includes(failure.message)
+      ) {
+        return message;
+      }
+      return `${message} ${failure.message}`;
+    },
+  });

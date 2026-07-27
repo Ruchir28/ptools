@@ -1,8 +1,6 @@
-import {
-  HttpApiBuilder,
-} from "@effect/platform";
+import { HttpApiBuilder } from "@effect/platform";
 import { CodeModeClient } from "@ptools/code-mode-api/effect";
-import type { ServerConfigError } from "@ptools/config";
+import { UserPtoolsConfig } from "@ptools/config/contracts";
 import {
   CredentialedHostApiHandlers,
   HostHttpApi,
@@ -14,12 +12,14 @@ import {
   HostHttpClientFetchLive,
   HostHttpIngress,
   HostHttpOperationAdapterLive,
-  HostOperationDispatcher,
+  HostInstanceDiscovery,
   ProvideHostHttpIngress,
   RequireHostApiAccess,
 } from "@ptools/host-api/effect";
-import { Effect, Layer } from "effect";
-import { NodeHostOperationDispatcherLiveWithPlatform } from "../layers/hostOperationDispatcher.js";
+import { Effect, Layer, Schema } from "effect";
+import { readFile } from "node:fs/promises";
+import { NodeDaemonHostInstanceDiscoveryLive } from "../nodeDaemonHostInstanceDiscovery.js";
+import { resolveNodeHostActorRuntimeOptions } from "../hostActorDaemon/daemonProcess/nodeHostActorStateNamespace.js";
 import {
   NodeHostPlatformLive,
   NodeHostSettings,
@@ -29,6 +29,7 @@ import { NodeLocalHostHttpServerLive } from "./nodeLocalHostHttpServer.js";
 import {
   DEFAULT_HOST_ID,
   DEFAULT_NODE_PUBLIC_ORIGIN,
+  HostNodeError,
   NODE_INTERNAL_ACCESS_TOKEN,
   type NodeCodeModeHostOptions,
 } from "../options.js";
@@ -64,9 +65,10 @@ import {
  *   -> shared HostHttpApi server layer                 (HttpApiBuilder.serve)
  *   -> CredentialedHostApiHandlers "codeMode" route    (@ptools/host-api/http)
  *   -> HostHttpOperationAdapter.codeMode               (@ptools/host-api/effect)
- *   -> HostOperationDispatcher.dispatch                (platform seam)
- *   -> NodeHostOperationDispatcherLive.dispatch        (hostOperationDispatcher.ts)
- *   -> CodeModeServer.handle(...)                      (codeModeRuntime.ts)
+ *   -> HostInstanceDiscovery.resolve(hostId)           (Node daemon seam)
+ *   -> NodeDaemonHostInstanceHandle.dispatch
+ *   -> authenticated private daemon RPC
+ *   -> authoritative daemon actor
  * ```
  */
 
@@ -108,7 +110,6 @@ const makeNodeHostHttpServerLiveWithPlatform = (input: {
       return NodeLocalHostHttpServerLive({
         publicOrigin: settings.publicOrigin,
         apiLayer: makeNodeHostHttpApiLayer({
-          configPath: input.configPath,
           options: input.options,
           platformLayer: input.platformLayer,
         }).pipe(Layer.provide(input.platformLayer)),
@@ -144,7 +145,7 @@ export const NodeLocalHostHttpClientLive = (
     }),
   ).pipe(Layer.provide(platformLayer));
 
-  return Layer.mergeAll(
+  const hostLayer = Layer.mergeAll(
     makeNodeHostHttpServerLiveWithPlatform({
       configPath,
       options,
@@ -152,6 +153,28 @@ export const NodeLocalHostHttpClientLive = (
     }),
     clientLayer,
   );
+
+  if (configPath === undefined) return hostLayer;
+
+  // Compatibility for embedded constructors that accept an authored config
+  // path: seed that config through the same public HTTP operation used by every
+  // other caller. The HTTP process never loads it into an actor runtime.
+  const configureLayer = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const json = yield* Effect.tryPromise(() => readFile(configPath, "utf8"));
+      const unknownValue = yield* Effect.try(() => JSON.parse(json) as unknown);
+      const config = yield* Schema.decodeUnknown(UserPtoolsConfig)(unknownValue);
+      const client = yield* HostHttpClient;
+      const response = yield* client.configure({ config });
+      if (!response.result.ok) {
+        return yield* new HostNodeError({
+          message: response.result.error.message,
+        });
+      }
+    }),
+  ).pipe(Layer.provide(hostLayer), Layer.orDie);
+
+  return Layer.merge(hostLayer, configureLayer);
 };
 
 /** Focused CodeModeClient backed by Node's configured Host HttpApi wiring. */
@@ -250,20 +273,25 @@ const NodeProvideHostHttpIngressLive: Layer.Layer<
  *   lifecycle.
  */
 const makeNodeHostHttpApiLayer = (input: {
-  readonly configPath: string | undefined;
   readonly options: NodeCodeModeHostOptions;
   readonly platformLayer: Layer.Layer<NodeHostProcessPlatform>;
 }) =>
-  makeNodeHostHttpApiLayerFromPlatformLayers({
-    // This is the platform seam: it decides how a decoded "code_mode" (etc.)
-    // operation actually runs. Node's implementation forwards to the local
-    // CodeModeServer/sandbox; other platforms could dispatch elsewhere.
-    dispatcherLayer: NodeHostOperationDispatcherLiveWithPlatform({
-      configPath: input.configPath,
-      options: input.options,
-      processPlatformLayer: input.platformLayer,
-    }),
-  });
+  Layer.unwrapEffect(
+    resolveNodeHostActorRuntimeOptions(
+      {
+        ...(input.options.executor?.denoExecutable === undefined
+          ? {}
+          : { denoExecutable: input.options.executor.denoExecutable }),
+      },
+      input.options.env ?? process.env,
+    ).pipe(
+      Effect.map((daemonOptions) =>
+        makeNodeHostHttpApiLayerFromPlatformLayers({
+          discoveryLayer: NodeDaemonHostInstanceDiscoveryLive(daemonOptions),
+        }),
+      ),
+    ),
+  ).pipe(Layer.orDie);
 
 /**
  * Assembles the shared `HostHttpApi` route graph, bottom-up, into a single
@@ -271,9 +299,9 @@ const makeNodeHostHttpApiLayer = (input: {
  * needs, mirroring how a real deployed host would compose the same pieces:
  *
  * ```txt
- * platformServicesLayer   (auth verification + operation dispatch)
+ * platformServicesLayer   (auth verification + daemon discovery)
  *        |
- * adapterLayer            (typed endpoint input -> HostOperationDispatcher)
+ * adapterLayer            (typed endpoint input -> HostInstanceHandle)
  *        |
  * handlersLayer           (HostHttpApi route implementations)
  *        |
@@ -283,20 +311,16 @@ const makeNodeHostHttpApiLayer = (input: {
  * ```
  */
 const makeNodeHostHttpApiLayerFromPlatformLayers = (input: {
-  readonly dispatcherLayer: Layer.Layer<
-    HostOperationDispatcher,
-    unknown | ServerConfigError,
-    never
-  >;
+  readonly discoveryLayer: Layer.Layer<HostInstanceDiscovery, unknown, never>;
 }) => {
   // Stable platform services for this local Node host. They are below the
   // shared Host HTTP handlers so route parsing/schema decoding remains shared.
   const platformServicesLayer = Layer.mergeAll(
     NodeEmbeddedRequireHostApiAccessLive,
-    input.dispatcherLayer,
+    input.discoveryLayer,
   );
 
-  // Shared adapter turns typed endpoint input into HostOperationDispatcher calls.
+  // Shared adapter resolves one daemon-backed handle for each typed endpoint input.
   const adapterLayer = HostHttpOperationAdapterLive.pipe(
     Layer.provideMerge(platformServicesLayer),
   );

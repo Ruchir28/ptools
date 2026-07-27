@@ -1,7 +1,7 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CodeModeExecuteRequest,
@@ -36,16 +36,16 @@ const hasDeno = (() => {
 
 describe("Node Code Mode executor startup", () => {
   it("surfaces actionable Deno resolution failures", async () => {
+    const configPath = await writeConfig("missing-deno", { mcpServers: {} });
     await expect(
-      createNodeCodeModeClient(await writeConfig("missing-deno", {
-        mcpServers: {},
-      }), {
+      createNodeCodeModeClient(configPath, {
+        env: { PTOOLS_HOME: dirname(configPath) },
         executor: {
           denoExecutable: "/definitely/missing/ptools-deno",
         },
       }),
     ).rejects.toThrow(
-      'Failed to start local Node Code Mode. Deno 2 or newer was not found using the configured denoExecutable ("/definitely/missing/ptools-deno"). Install Deno, set DENO_BIN, or pass denoExecutable.',
+      'Deno 2 or newer was not found using the configured denoExecutable ("/definitely/missing/ptools-deno"). Install Deno, set DENO_BIN, or pass denoExecutable.',
     );
   });
 });
@@ -53,7 +53,9 @@ describe("Node Code Mode executor startup", () => {
 describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
   it("creates a client from an explicit config file through ResolvedPtoolsConfigSource", async () => {
     const configPath = await writeFixtureConfig("config-file");
-    const client = await createNodeCodeModeClient(configPath);
+    const client = await createNodeCodeModeClient(configPath, {
+      env: { PTOOLS_HOME: dirname(configPath) },
+    });
 
     try {
       await expect(
@@ -78,10 +80,15 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
         },
       },
     });
-    const host = await createNodeHostClient(configPath, { env: {} });
+    const host = await createNodeHostClient(configPath, {
+      env: { PTOOLS_HOME: dirname(configPath) },
+    });
 
     try {
-      const response = await host.call({ operation: "mcp_auth_status", input: { origin: "http://127.0.0.1" } });
+      const response = await host.call({
+        operation: "mcp_auth_status",
+        input: { origin: "http://127.0.0.1" },
+      });
 
       expect(response).toMatchObject({
         operation: "mcp_auth_status",
@@ -140,7 +147,7 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
         }).pipe(
           Effect.provide(
             NodeCodeModeClientLive(configPath, {
-              env: {},
+              env: { PTOOLS_HOME: dirname(configPath) },
             }),
           ),
           Effect.scoped,
@@ -151,7 +158,6 @@ describe.skipIf(!hasDeno)("Node Code Mode host assembly", () => {
       output: { actions: [{ toolId: "fixture.echo" }] },
     });
   }, 30_000);
-
 });
 
 const searchProvidersRequest = (): CodeModeSearchProvidersRequest =>
@@ -183,10 +189,7 @@ const writeFixtureConfig = async (name: string): Promise<string> =>
     },
   });
 
-const writeConfig = async (
-  name: string,
-  config: unknown,
-): Promise<string> => {
+const writeConfig = async (name: string, config: unknown): Promise<string> => {
   const dir = await mkdtemp(join(tmpdir(), `ptools-host-node-${name}-`));
   const configPath = join(dir, "ptools.config.json");
 

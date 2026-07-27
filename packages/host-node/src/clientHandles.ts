@@ -17,10 +17,7 @@ import {
   NodeLocalHostHttpClientLive,
   makeNodeHostHttpClientWithCodeModeLive,
 } from "./hostHttp.js";
-import {
-  HostNodeError,
-  type NodeCodeModeHostOptions,
-} from "./options.js";
+import { HostNodeError, type NodeCodeModeHostOptions } from "./options.js";
 
 /** Promise SDK host handle backed by Node's configured shared Host HttpApi. */
 export const createNodeHostClient = async (
@@ -38,9 +35,7 @@ export const createNodeCodeModeClient = async (
   configPath?: string,
   options: NodeCodeModeHostOptions = {},
 ): Promise<CodeModeClientHandle> =>
-  makeNodeCodeModeClientHandle(
-    NodeCodeModeClientLive(configPath, options),
-  );
+  makeNodeCodeModeClientHandle(NodeCodeModeClientLive(configPath, options));
 
 const makeNodeHostHttpClientHandle = async <E>(
   layer: Layer.Layer<HostHttpClient | CodeModeClient, E, never>,
@@ -76,7 +71,7 @@ const makeNodeHostHttpClientHandle = async <E>(
     };
   } catch (cause) {
     await managedRuntime.dispose();
-    throw cause;
+    throw await normalizeNodeStartupError(cause);
   }
 };
 
@@ -102,7 +97,8 @@ const callNodeHostHttpClient = (
       return Effect.succeed(
         makeHostOperationProtocolFailureResponse({
           code: "unknown_operation",
-          message: "Node Host HTTP client does not call browser OAuth callbacks.",
+          message:
+            "Node Host HTTP client does not call browser OAuth callbacks.",
         }),
       );
   }
@@ -131,7 +127,7 @@ const makeNodeCodeModeClientHandle = async <E>(
     };
   } catch (cause) {
     await managedRuntime.dispose();
-    throw cause;
+    throw await normalizeNodeStartupError(cause);
   }
 };
 
@@ -152,18 +148,41 @@ const warmNodeCodeModeClient = async <R>(
       }),
     );
   } catch (cause) {
-    const hostNodeError = findHostNodeError(cause);
-    if (hostNodeError !== undefined) {
-      throw hostNodeError;
-    }
-
-    const responseBody = await findHttpResponseErrorBody(cause);
-    if (responseBody?.startsWith("Failed to start local Node Code Mode.") === true) {
-      throw new HostNodeError({ message: responseBody, cause });
-    }
-
-    throw cause;
+    throw await normalizeNodeStartupError(cause);
   }
+};
+
+const normalizeNodeStartupError = async (cause: unknown): Promise<unknown> => {
+  const hostNodeError = findHostNodeError(cause);
+  if (hostNodeError !== undefined) return hostNodeError;
+
+  const responseBody = await findHttpResponseErrorBody(cause);
+  const responseMessage = parseHostHttpErrorMessage(responseBody);
+  return responseMessage === undefined
+    ? cause
+    : new HostNodeError({ message: responseMessage, cause });
+};
+
+const parseHostHttpErrorMessage = (
+  responseBody: string | undefined,
+): string | undefined => {
+  if (responseBody === undefined) return undefined;
+
+  try {
+    const decoded = JSON.parse(responseBody) as unknown;
+    if (
+      typeof decoded === "object" &&
+      decoded !== null &&
+      "message" in decoded &&
+      typeof decoded.message === "string"
+    ) {
+      return decoded.message;
+    }
+  } catch {
+    // Retain compatibility with plain-text Host HTTP errors.
+  }
+
+  return responseBody.trim() === "" ? undefined : responseBody;
 };
 
 const findHostNodeError = (
@@ -208,9 +227,13 @@ const findHttpResponseErrorBody = async (
   seen.add(value);
 
   if ((value as { readonly _tag?: unknown })._tag === "ResponseError") {
-    const response = (value as {
-      readonly response?: { readonly original?: { readonly source?: unknown } };
-    }).response?.original?.source;
+    const response = (
+      value as {
+        readonly response?: {
+          readonly original?: { readonly source?: unknown };
+        };
+      }
+    ).response?.original?.source;
 
     if (response instanceof Response) {
       return response.clone().text();

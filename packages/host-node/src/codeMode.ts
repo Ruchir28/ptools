@@ -9,7 +9,6 @@ export {
   NodeCodeModeServerLive,
   type NodeCodeModeRuntimeServices,
 } from "./codeModeRuntime.js";
-export { NodeHostOperationDispatcherLive } from "./hostOperationDispatcher.js";
 export {
   NodeCodeModeClientLive,
   NodeHostHttpServerLive,

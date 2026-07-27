@@ -97,6 +97,42 @@ describe("host-node actor-daemon import boundaries", () => {
     expect(contents).not.toContain("extends Context.Tag");
   });
 
+  // Public HTTP should only discover/proxy to the daemon, not embed actor
+  // runtime, MCP connector, Code Mode server, or the old in-process dispatcher.
+  it("keeps public HTTP assembly free of actor/runtime platform layers", async () => {
+    const httpSources = await Promise.all(
+      ["http/hostHttp.ts", "http/nodeLocalHostHttpServer.ts"].map((file) =>
+        readFile(join(packageRoot, "src", file), "utf8"),
+      ),
+    );
+    const contents = httpSources.join("\n");
+
+    for (const forbidden of [
+      "NodeHostRuntimeManager",
+      "HostStableRuntimeLayer",
+      "HostInstanceHandler",
+      "ConfiguredHostContextRunner",
+      "NodeMcpConnectorLive",
+      "DenoSandboxRuntimeLayer",
+      "CodeModeServer",
+      "AuthCoordinator",
+      "NodeHostOperationDispatcher",
+    ]) {
+      expect(contents).not.toContain(forbidden);
+    }
+    expect(contents).toContain("NodeDaemonHostInstanceDiscoveryLive");
+  });
+
+  // Guard against regressing to the pre-daemon in-process HostOperationDispatcher.
+  it("removes the legacy in-process dispatcher path", async () => {
+    await expect(
+      fileExists(join(packageRoot, "src", "hostOperationDispatcher.ts")),
+    ).resolves.toBe(false);
+    await expect(
+      fileExists(join(packageRoot, "src", "layers", "hostOperationDispatcher.ts")),
+    ).resolves.toBe(false);
+  });
+
   it("keeps operation interpretation out of the runtime manager", async () => {
     const manager = await readFile(
       join(
