@@ -40,7 +40,6 @@ describe("CloudflareHostInstanceDiscoveryLive", () => {
       caller: Option.some({ kind: "HostApiTokenCaller" }),
       request: {
         operation: "mcp_auth_status",
-        input: { origin: "https://ptools.example" },
       },
     };
 

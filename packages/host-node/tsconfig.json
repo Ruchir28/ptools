@@ -4,7 +4,6 @@
   "exclude": ["src/executor/sandbox-worker.ts"],
   "references": [
     { "path": "../auth" },
-    { "path": "../code-mode" },
     { "path": "../code-mode-api" },
     { "path": "../config" },
     { "path": "../executor" },

@@ -69,6 +69,7 @@ export const makeNodeHostActorRuntime = (
     ),
     secretStorageBackend: NodeKeyringHostSecretStorageBackendLayer({
       serviceName: options.keyringServiceName,
+      internalStateDirectory: options.internalStateDirectory,
     }),
     mcpConnector: NodeMcpConnectorLive,
     sandboxRuntime: DenoSandboxRuntimeLayer(

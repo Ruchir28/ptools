@@ -216,14 +216,14 @@ describe("worker mcp auth", () => {
     const first = await handleRequest(`/hosts/${hostId}/auth/status`, {
       method: "POST",
       headers: authHeaders(),
-      body: mcpAuthStatusBody("https://ptools.example"),
+      body: mcpAuthStatusBody(),
     });
     const second = await handleRequest(
       `https://alternate.ptools.example/hosts/${hostId}/auth/status`,
       {
         method: "POST",
         headers: authHeaders(),
-        body: mcpAuthStatusBody("https://alternate.ptools.example"),
+        body: mcpAuthStatusBody(),
       },
     );
 

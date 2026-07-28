@@ -57,7 +57,6 @@ describe("worker host instance rpc", () => {
       caller: { kind: "HostApiTokenCaller" },
       request: {
         operation: "mcp_auth_status",
-        input: { origin: "https://ptools.example" },
       },
     });
 

@@ -1,52 +1,74 @@
 # @ptools/host-node
 
-`DenoSandboxRuntimeLayer` is the Node implementation of the shared executor
-`SandboxRuntime` capability. Layer construction resolves and verifies Deno 2 or
-newer using this deterministic order:
+Daemon-backed embedded Node hosting for ptools.
+
+## Mental model
 
 ```txt
-explicit denoExecutable
--> DENO_BIN
--> ~/.deno/bin/deno (or %USERPROFILE%\.deno\bin\deno.exe)
--> deno on PATH
+startEmbeddedNodeHost({ hostId })
+  -> starts an embedded local Host HTTP listener
+  -> listener acquires a lease on the state-namespace daemon
+  -> shared HostHttpClient calls the listener
+  -> daemon selects the authoritative actor for hostId
 ```
 
-Each execution then acquires a fresh subprocess and scopes its cleanup to that
-execution. If resolution fails, the startup error explains how to install Deno
-or configure an explicit executable.
+`hostId` is required. Product entrypoints may explicitly choose `"node-local"`,
+but the library does not silently make unrelated embedders share that actor.
+Embedded ingress is loopback-only; deploy a separately authenticated Node Host
+HTTP server rather than exposing the package's internal local credential.
 
-The process starts with filesystem, network, environment, subprocess, FFI,
-system-information, and remote-import permissions explicitly denied. These
-permissions are intentionally not configurable through the public API.
+`internalStateDirectory` selects the application/profile and daemon namespace.
+File state and OS-keyring account names are both isolated by that namespace and
+`hostId`. Secrets remain in the operating-system keyring; they are not files in
+the state directory.
 
-The package builds its Deno program loader, stdio bridge, and the shared
-`@ptools/executor/sandbox` kernel into one companion
-`dist/executor/sandbox-worker.js` file. Runtime code resolves that package-owned
-artifact through the private `#sandbox-worker` package mapping; users do not
-configure its path. Applications that bundle Node dependencies should keep
-`@ptools/host-node` external so the published companion file remains beside the
-package runtime.
+## Explicit initialization
 
-Node host adapters for ptools.
-
-This package owns local Node config loading, environment-secret resolution,
-keyring-backed OAuth credentials, local MCP registry construction, local code
-execution, and Code Mode client/server assembly.
+Constructors do not read config files, discover projects, upload ambient process
+environment, or warm Code Mode. Initialize through shared Host API operations:
 
 ```ts
-import { createNodeCodeModeClient } from "@ptools/host-node";
+import { startEmbeddedNodeHost } from "@ptools/host-node";
 
-const client = await createNodeCodeModeClient(
-  "./ptools.config.json",
-);
+const host = await startEmbeddedNodeHost({ hostId: "local-main" });
 
 try {
-  const providers = await client.call({
-    operation: "search_providers",
-    input: {},
+  await host.call({
+    operation: "configure",
+    input: { config: authoredConfig },
   });
-  console.log(providers.output.providers);
+  await host.call({
+    operation: "configure_secrets",
+    input: { secrets: explicitlySelectedSecrets },
+  });
+
+  await host.codeMode.call(request);
 } finally {
-  await client.close();
+  await host.close();
 }
 ```
+
+`createNodeCodeModeClient(options)` is a focused convenience for a host that is
+already configured. It performs no initialization or warmup.
+
+Closing the handle closes its embedded ingress and releases that ingress's daemon
+lease. It does not directly dispose authoritative actors; another live ingress
+lease can continue using the same daemon and actor.
+
+## Existing or remote servers
+
+Do not use `startEmbeddedNodeHost` merely to connect to an existing URL. Use the
+shared transport constructor:
+
+```ts
+import { createHostHttpClient } from "@ptools/host-api/http";
+
+const host = await createHostHttpClient({
+  baseUrl: "https://host.example.com",
+  hostId: "main",
+  accessToken,
+});
+```
+
+That handle owns only its local client runtime and sends no remote shutdown
+operation when closed.

@@ -1,13 +1,15 @@
 # MCP host setup
 
 This example shows the user-facing path for running ptools inside MCP hosts
-such as Claude Code and OpenCode.
+such as Claude Code and OpenCode. It explicitly uses host ID
+`example-mcp-hosts`, keeping its persisted actor state and keyring secrets
+separate from the conventional personal `node-local` host.
 
 It is intentionally separate from `examples/mcp-server`, which is a repo-local
 smoke fixture. This folder shows the installed-package shape:
 
 ```bash
-npx -y @ptools/cli mcp serve --host node --config .ptools/config.json
+npx -y @ptools/cli mcp serve --host node --host-id example-mcp-hosts --config .ptools/config.json
 ```
 
 ## What This Example Loads
@@ -81,6 +83,8 @@ The ptools config starts only one MCP server from OpenCode's point of view:
         "serve",
         "--host",
         "node",
+        "--host-id",
+        "example-mcp-hosts",
         "--config",
         "./.ptools/config.json"
       ],
@@ -130,6 +134,8 @@ same shape users should add to their own project:
         "serve",
         "--host",
         "node",
+        "--host-id",
+        "example-mcp-hosts",
         "--config",
         ".ptools/config.json"
       ]
@@ -157,7 +163,7 @@ You can also add ptools with the Claude Code CLI instead of using `.mcp.json`:
 
 ```bash
 cd examples/mcp-hosts
-claude mcp add ptools --scope project -- npx -y @ptools/cli mcp serve --host node --config "$PWD/.ptools/config.json"
+claude mcp add ptools --scope project -- npx -y @ptools/cli mcp serve --host node --host-id example-mcp-hosts --config "$PWD/.ptools/config.json"
 ```
 
 Use `--scope user` instead of `--scope project` if you want the entry available
@@ -187,7 +193,7 @@ repo-local command from this example directory:
 
 ```bash
 pnpm --dir ../.. --filter @ptools/cli... build
-pnpm --dir ../.. --filter @ptools/cli dev -- mcp serve --host node --config "$PWD/.ptools/config.json"
+pnpm --dir ../.. --filter @ptools/cli dev -- mcp serve --host node --host-id example-mcp-hosts --config "$PWD/.ptools/config.json"
 ```
 
 For host config while developing from source, build once from the repo root (`pnpm build`),
@@ -202,6 +208,8 @@ then point OpenCode at the built CLI so the host keeps this example directory as
     "serve",
     "--host",
     "node",
+    "--host-id",
+    "example-mcp-hosts",
     "--config",
     ".ptools/config.json"
   ]

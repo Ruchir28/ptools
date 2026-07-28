@@ -26,7 +26,7 @@ import {
   parseHostOperationResponse,
   type HostOperationResponse,
 } from "../src/index.js";
-import { Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -113,13 +113,54 @@ describe("host-api schemas", () => {
     ).resolves.toEqual(response);
   });
 
+  it("keeps public auth requests free of ingress-owned origin", async () => {
+    await expect(
+      Effect.runPromise(
+        parseHostOperationRequest({ operation: "mcp_auth_status" }),
+      ),
+    ).resolves.toEqual({ operation: "mcp_auth_status" });
+
+    await expect(
+      Effect.runPromise(
+        parseHostOperationRequest({
+          operation: "start_mcp_auth",
+          input: { serverName: "notion", force: true },
+        }),
+      ),
+    ).resolves.toEqual({
+      operation: "start_mcp_auth",
+      input: { serverName: "notion", force: true },
+    });
+
+    // The old duplicate origin is not a compatibility input. HTTP ingress owns
+    // publicOrigin and adds it only to HostOperationDispatchInput.
+    await expect(
+      Effect.runPromise(
+        parseHostOperationRequest({
+          operation: "mcp_auth_status",
+          input: { origin: "https://caller.example" },
+        }),
+      ),
+    ).rejects.toThrow("Invalid host-api request");
+    await expect(
+      Effect.runPromise(
+        parseHostOperationRequest({
+          operation: "start_mcp_auth",
+          input: {
+            origin: "https://caller.example",
+            serverName: "notion",
+          },
+        }),
+      ),
+    ).rejects.toThrow("Invalid host-api request");
+  });
+
   it("encodes plain dispatch carrier data and restores internal Option values", async () => {
     const base = {
       hostId: "demo",
       publicOrigin: "https://ptools.example",
       request: {
         operation: "mcp_auth_status" as const,
-        input: { origin: "https://ptools.example" },
       },
     };
     const withCaller = HostOperationDispatchInput.make({
@@ -293,11 +334,14 @@ describe("HostHttpOperationAdapterLive", () => {
 
 describe("HostHttpClientLive", () => {
   it("requires a platform HttpClient layer instead of owning fetch directly", () => {
-    const layer: Layer.Layer<HostHttpClient, never, HttpClient.HttpClient> =
-      HostHttpClientLive({
+    const layer: Layer.Layer<
+      HostHttpClient,
+      unknown,
+      HttpClient.HttpClient
+    > = HostHttpClientLive({
         baseUrl: "https://ptools.example",
         hostId: "demo",
-        accessToken: Redacted.make("token"),
+        accessToken: "token",
       });
 
     expect(layer).toBeDefined();
@@ -349,7 +393,7 @@ describe("HostHttpClientLive", () => {
           HostHttpClientLive({
             baseUrl: "https://ptools.example",
             hostId: "demo host",
-            accessToken: Redacted.make("secret-token"),
+            accessToken: "secret-token",
           }).pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, http))),
         ),
       ),

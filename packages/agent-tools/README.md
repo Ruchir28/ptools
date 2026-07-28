@@ -50,13 +50,17 @@ Environment variables can be referenced explicitly:
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createNodeCodeModeClient } from "@ptools/host-node";
+import { startEmbeddedNodeHost } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
-const ptools = makePtoolsSession(
-  await createNodeCodeModeClient(),
-);
+const host = await startEmbeddedNodeHost({ hostId: "my-app" });
+await host.call({ operation: "configure", input: { config: authoredConfig } });
+await host.call({
+  operation: "configure_secrets",
+  input: { secrets: explicitlySelectedSecrets },
+});
+const ptools = makePtoolsSession(host.codeMode);
 
 try {
   const result = await generateText({
@@ -72,13 +76,10 @@ try {
 }
 ```
 
-Pass an explicit config path when the file is not named `ptools.config.json`:
-
-```ts
-const ptools = makePtoolsSession(
-  await createNodeCodeModeClient("./config/ptools.config.json"),
-);
-```
+`@ptools/host-node` does not read config files or the process environment.
+Applications that start from a file decode it with `@ptools/config`, normalize
+relative stdio working directories against that file, and submit only referenced
+secret values through the two explicit Host operations above.
 
 ## Session Lifecycle
 
@@ -86,9 +87,8 @@ Create one session for the part of your app that needs MCP-backed tools, reuse
 it for model calls, and always close it when that work is finished:
 
 ```ts
-const ptools = makePtoolsSession(
-  await createNodeCodeModeClient(),
-);
+const host = await startEmbeddedNodeHost({ hostId: "my-app" });
+const ptools = makePtoolsSession(host.codeMode);
 
 try {
   const tools = toAISDKTools(ptools);
@@ -98,8 +98,8 @@ try {
 }
 ```
 
-`close()` delegates to the provided Code Mode client handle. For the Node host,
-it shuts down the Effect runtime and releases MCP server connections.
+`close()` delegates to the provided Code Mode client handle. For the embedded Node host,
+it closes local ingress and releases that ingress's daemon lease.
 
 ## What Tools The Model Sees
 
@@ -135,11 +135,12 @@ those calls back to the original MCP servers.
 
 ## Troubleshooting
 
-`ptools.config.json` not found: create the file in your app working directory,
-or pass an explicit path to `createNodeCodeModeClient()`.
+Config bootstrap failures: explicitly decode the intended authored file and call
+`configure`; constructors perform no project/file discovery.
 
-`${env:NAME}` missing: export the environment variable before starting your app.
-ptools fails fast when an explicit env reference cannot be resolved.
+`${env:NAME}` missing: provide only the referenced value through
+`configure_secrets`. Product entrypoints such as the CLI can explicitly select
+those values from their environment.
 
 MCP server command fails: run the configured `command` and `args` manually and
 check that server package's documentation. Stdio MCP servers must start and

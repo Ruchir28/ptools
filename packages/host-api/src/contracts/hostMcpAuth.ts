@@ -8,18 +8,9 @@
 import { McpAuthStatus } from "@ptools/auth/contracts";
 import { Schema } from "effect";
 
-/** Input for reading host MCP auth status for an origin. */
-export const HostMcpAuthStatusInput = Schema.Struct({
-  origin: Schema.String,
-});
-export type HostMcpAuthStatusInput = Schema.Schema.Type<
-  typeof HostMcpAuthStatusInput
->;
-
 /** Host-api request envelope for MCP auth status. */
 export const HostMcpAuthStatusRequest = Schema.Struct({
   operation: Schema.Literal("mcp_auth_status"),
-  input: HostMcpAuthStatusInput,
 });
 export type HostMcpAuthStatusRequest = Schema.Schema.Type<
   typeof HostMcpAuthStatusRequest
@@ -53,9 +44,8 @@ export type HostMcpAuthStatusResponse = Schema.Schema.Type<
   typeof HostMcpAuthStatusResponse
 >;
 
-/** Input for starting OAuth auth for one MCP server. */
+/** Caller-owned input for starting OAuth for one MCP server. */
 export const StartHostMcpAuthInput = Schema.Struct({
-  origin: Schema.String,
   serverName: Schema.String,
   force: Schema.optional(Schema.Boolean),
 });

@@ -16,7 +16,7 @@ import {
   CodeModeResponse,
 } from "@ptools/code-mode-api/contracts";
 import { CodeModeClient } from "@ptools/code-mode-api/effect";
-import { Context, Data, Effect, Layer, Redacted, Schema } from "effect";
+import { Context, Data, Effect, Layer, Schema } from "effect";
 import {
   ConfigureHostInput,
   ConfigureHostResponse,
@@ -30,12 +30,12 @@ import {
   EmptyHttpPayload,
   StartMcpAuthHttpPayload,
 } from "../contracts/hostHttpRoutes.js";
-
-export interface HostHttpClientOptions {
-  readonly baseUrl: string;
-  readonly hostId: string;
-  readonly accessToken: Redacted.Redacted<string>;
-}
+import {
+  type HostHttpClientConfig,
+  HostHttpClientConfigError,
+  type NormalizedHostHttpClientConfig,
+  normalizeHostHttpClientConfig,
+} from "../http/hostHttpClientConfig.js";
 
 export interface StartMcpAuthClientInput {
   readonly serverName: string;
@@ -81,13 +81,27 @@ export class HostHttpClient extends Context.Tag("@ptools/HostHttpClient")<
  * provide a custom `HttpClient` whose `execute` calls the shared Web handler.
  */
 export const HostHttpClientLive = (
-  options: HostHttpClientOptions,
+  config: HostHttpClientConfig,
+): Layer.Layer<
+  HostHttpClient,
+  HostHttpClientConfigError,
+  HttpClient.HttpClient
+> =>
+  Layer.unwrapEffect(
+    normalizeHostHttpClientConfig(config).pipe(
+      Effect.map((options) => makeHostHttpClientLive(options)),
+    ),
+  );
+
+/** Build the request client only after public connection facts are validated. */
+const makeHostHttpClientLive = (
+  options: NormalizedHostHttpClientConfig,
 ): Layer.Layer<HostHttpClient, never, HttpClient.HttpClient> =>
   Layer.effect(
     HostHttpClient,
     Effect.gen(function* () {
       const http = yield* HttpClient.HttpClient;
-      const baseUrl = new URL(options.baseUrl);
+      const baseUrl = options.baseUrl;
 
       const requestJson = <
         Payload,
@@ -189,9 +203,9 @@ export const HostHttpClientLive = (
  * Effect Platform's fetch-based HTTP engine as the transport implementation.
  */
 export const HostHttpClientFetchLive = (
-  options: HostHttpClientOptions,
-): Layer.Layer<HostHttpClient, never, never> =>
-  HostHttpClientLive(options).pipe(Layer.provide(FetchHttpClient.layer));
+  config: HostHttpClientConfig,
+): Layer.Layer<HostHttpClient, HostHttpClientConfigError, never> =>
+  HostHttpClientLive(config).pipe(Layer.provide(FetchHttpClient.layer));
 
 /**
  * Derive the focused CodeModeClient consumed by agent-facing packages.

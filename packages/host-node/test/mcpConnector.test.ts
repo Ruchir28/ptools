@@ -12,7 +12,7 @@ import { HttpMcpConnector, StdioMcpConnector } from "@ptools/mcp-registry";
 import {
   NodeHttpMcpConnectorLive,
   NodeStdioMcpConnectorLive,
-} from "../src/index.js";
+} from "../src/mcpConnector.js";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 

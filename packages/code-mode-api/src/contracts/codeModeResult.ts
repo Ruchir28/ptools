@@ -21,6 +21,12 @@ export type CapturedLog = Schema.Schema.Type<typeof CapturedLog>;
 /** Diagnostic emitted while discovering or using MCP tools. */
 export const CodeModeDiagnostic = Schema.Union(
   Schema.Struct({
+    code: Schema.Literal("McpRegistryRefreshFailed"),
+    severity: Schema.Literal("error"),
+    serverName: Schema.String,
+    message: Schema.String,
+  }),
+  Schema.Struct({
     code: Schema.Literal("McpConnectionFailed"),
     severity: Schema.Literal("error"),
     serverName: Schema.String,

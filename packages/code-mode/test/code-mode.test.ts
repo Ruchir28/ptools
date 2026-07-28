@@ -494,6 +494,12 @@ describe("Code Mode context and search", () => {
         serverName: "missing",
         message: "spawn failed",
       },
+      {
+        code: "McpRegistryRefreshFailed",
+        severity: "error",
+        serverName: "notion",
+        message: "refresh failed",
+      },
     ];
     const result = await Effect.runPromise(
       Effect.gen(function* () {

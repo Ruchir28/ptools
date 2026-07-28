@@ -93,8 +93,7 @@ export const configureHost = async (
 export const secretsBody = (secrets: Record<string, string>): string =>
   JSON.stringify({ secrets });
 
-export const mcpAuthStatusBody = (_origin?: string): string =>
-  JSON.stringify({});
+export const mcpAuthStatusBody = (): string => JSON.stringify({});
 
 export const configureSecrets = async (
   hostId: string,

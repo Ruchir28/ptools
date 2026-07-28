@@ -219,7 +219,6 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
             caller: Option.some(auth.caller),
             request: {
               operation: "mcp_auth_status",
-              input: { origin: ingress.publicOrigin },
             },
           }),
         ),
@@ -233,7 +232,6 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
             request: {
               operation: "start_mcp_auth",
               input: {
-                origin: ingress.publicOrigin,
                 serverName: ctx.path.serverName,
                 force: ctx.payload.force === true,
               },

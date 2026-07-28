@@ -40,6 +40,10 @@
     "test": "vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
+    "@effect/cli": "0.75.2",
+    "@effect/platform": "0.96.1",
+    "@effect/platform-node": "0.107.0",
+    "@ptools/config": "workspace:*",
     "@ptools/host-node": "workspace:*",
     "@ptools/mcp-server": "workspace:*",
     "effect": "3.21.2"

@@ -7,5 +7,7 @@
  */
 export * from "../contracts/hostHttpErrors.js";
 export * from "../contracts/hostHttpRoutes.js";
+export * from "./hostHttpClientConfig.js";
+export * from "./hostHttpClientHandle.js";
 export * from "./api/hostHttpApi.js";
 export * from "./handlers/hostHttpHandlers.js";

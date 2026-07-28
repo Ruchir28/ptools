@@ -44,15 +44,52 @@ describe("host-node actor-daemon import boundaries", () => {
     );
   });
 
-  it("does not export daemon internals from the package root", async () => {
+  it("exports only final embedded constructors and approved Node capabilities", async () => {
     const rootIndex = await readFile(
       join(packageRoot, "src", "index.ts"),
       "utf8",
     );
+    const publicSources = await Promise.all(
+      ["index.ts", "codeMode.ts"].map((file) =>
+        readFile(join(packageRoot, "src", file), "utf8"),
+      ),
+    );
+    const contents = publicSources.join("\n");
 
-    expect(rootIndex).not.toContain("hostActorDaemon");
-    expect(rootIndex).not.toContain("NodeHostRuntimeManager");
-    expect(rootIndex).not.toContain("NodeHostActorRuntime");
+    expect(contents).not.toContain("hostActorDaemon");
+    expect(contents).not.toContain("NodeHostRuntimeManager");
+    expect(contents).not.toContain("NodeHostActorRuntime");
+    for (const removed of [
+      "NodeCodeModeRuntimeLive",
+      "NodeCodeModeRuntimeLiveForHost",
+      "NodeCodeModeServerLive",
+      "NodeResolvedPtoolsConfigSourceLive",
+      "FileResolvedPtoolsConfigSourceLive",
+      "NodeConfigDiscoveryContext",
+      "NodeAuthOptions",
+    ]) {
+      expect(contents).not.toContain(removed);
+    }
+    expect(contents).toContain("startEmbeddedNodeHost");
+    expect(contents).toContain("createNodeCodeModeClient");
+  });
+
+  it("deletes legacy config discovery, duplicate auth, and runtime modules", async () => {
+    for (const path of [
+      "auth.ts",
+      "config.ts",
+      "codeModeRuntime.ts",
+      "hostHttp.ts",
+      "layers/auth",
+      "layers/codeModeRuntime.ts",
+      "layers/platform/configDiscoveryContext.ts",
+      "layers/platform/hostSettings.ts",
+      "layers/platform/nodePlatform.ts",
+    ]) {
+      await expect(fileExists(join(packageRoot, "src", path))).resolves.toBe(
+        false,
+      );
+    }
   });
 
   it("exports only the package-owned daemon entry artifact", async () => {
@@ -121,6 +158,9 @@ describe("host-node actor-daemon import boundaries", () => {
       expect(contents).not.toContain(forbidden);
     }
     expect(contents).toContain("NodeDaemonHostInstanceDiscoveryLive");
+    expect(contents).not.toContain("readFile");
+    expect(contents).not.toContain("PTOOLS_CONFIG");
+    expect(contents).not.toContain("process.env");
   });
 
   // Guard against regressing to the pre-daemon in-process HostOperationDispatcher.
@@ -129,7 +169,9 @@ describe("host-node actor-daemon import boundaries", () => {
       fileExists(join(packageRoot, "src", "hostOperationDispatcher.ts")),
     ).resolves.toBe(false);
     await expect(
-      fileExists(join(packageRoot, "src", "layers", "hostOperationDispatcher.ts")),
+      fileExists(
+        join(packageRoot, "src", "layers", "hostOperationDispatcher.ts"),
+      ),
     ).resolves.toBe(false);
   });
 

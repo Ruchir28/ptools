@@ -1,48 +1,28 @@
-import type { CodeModeClientHandle } from "@ptools/code-mode-api";
-import { Data, Redacted } from "effect";
-import type { LocalSandboxExecutorOptions } from "./executor/localExecutor.js";
+import { Data } from "effect";
 
-export const DEFAULT_HOST_ID = "node-local";
+/** Conventional product-selected identity; public constructors do not default it. */
+export const NODE_LOCAL_HOST_ID = "node-local";
 export const DEFAULT_NODE_PUBLIC_ORIGIN = "http://127.0.0.1:19876";
-export const NODE_INTERNAL_ACCESS_TOKEN = Redacted.make("ptools-node-internal");
-export const DEFAULT_AUTH_SERVICE_NAME = "ptools-mcp-oauth";
-
-export type NodeEnv = Readonly<Record<string, string | undefined>>;
+export const NODE_INTERNAL_ACCESS_TOKEN = "ptools-node-internal";
 
 export class HostNodeError extends Data.TaggedError("HostNodeError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
 
-export interface NodeAuthOptions {
-  readonly serviceName?: string;
-  readonly autoOpen?: boolean;
-}
-
 /**
- * Node host startup options around the shared ptools config source.
+ * Embedded Node ingress and daemon namespace settings.
  *
- * MCP servers and executor timeouts come from the authored ptools config loaded
- * by `configPath`, `--config`, `PTOOLS_CONFIG`, or default config discovery.
- * These options only describe Node platform context for finding config,
- * resolving secrets, storing credentials, and mounting the local Host HTTP
- * API.
+ * Authored config and configured secrets are intentionally absent: callers
+ * initialize the selected host through shared Host API operations.
  */
-export interface NodeCodeModeHostOptions {
-  /** CLI-style arguments used for config discovery when no explicit config path is passed. */
-  readonly argv?: ReadonlyArray<string>;
-  /** Working directory for config discovery and relative explicit config paths. */
-  readonly cwd?: string;
-  /** Environment used for config discovery, `${env:...}` secret resolution, and auth defaults. */
-  readonly env?: Record<string, string | undefined>;
-  /** Logical Host API id. Defaults to `node-local`. */
-  readonly hostId?: string;
-  /** Node credential-store and local browser OAuth behavior. */
-  readonly auth?: NodeAuthOptions;
-  /** Node-local sandbox process options. Config file executor settings still own runtime timeouts. */
-  readonly executor?: Pick<LocalSandboxExecutorOptions, "denoExecutable">;
-  /** Public origin used by Host HTTP links and the Node loopback listener. */
+export interface NodeHostOptions {
+  /** Explicit logical actor identity inside the selected state namespace. */
+  readonly hostId: string;
+  /** Origin owned by the embedded local HTTP listener. */
   readonly publicOrigin?: string;
+  /** Absolute app/profile state directory; defaults through PTOOLS_HOME/home. */
+  readonly internalStateDirectory?: string;
+  /** Optional Deno executable used by daemon-owned sandbox actors. */
+  readonly denoExecutable?: string;
 }
-
-export type { CodeModeClientHandle };

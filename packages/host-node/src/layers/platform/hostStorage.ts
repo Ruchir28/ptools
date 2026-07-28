@@ -15,6 +15,7 @@ import {
   HostStorageError,
   type HostStorageOperations,
 } from "@ptools/config";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { Context, Effect, Layer, Option } from "effect";
 
@@ -52,15 +53,56 @@ export const NodeFileHostStateStorageBackendLayer = (
     },
   });
 
-/** Keyring backend that physically prefixes secrets by the requested host ID. */
+/**
+ * Opaque keyring namespace for one daemon/profile state home.
+ *
+ * File-backed state is already partitioned by `internalStateDirectory`. The OS
+ * keyring has no directory tree, so we hash that path into the account name:
+ * different state homes get different prefixes (no secret collisions across
+ * profiles), while the raw filesystem path never appears in keyring entries.
+ */
+export const nodeKeyringStateNamespaceDigest = (
+  internalStateDirectory: string,
+): string =>
+  createHash("sha256").update(internalStateDirectory, "utf8").digest("hex");
+
+/**
+ * Physical keyring account prefix for one `(state home, hostId)` pair.
+ *
+ * Mirrors filesystem isolation (`<stateRoot>/<encodedHostId>/...`) as
+ * `namespaces/v1/<digest>/hosts/<encodedHostId>/` so keyring secrets stay
+ * partitioned on the same two axes as file state.
+ */
+export const nodeKeyringHostSecretAccountPrefix = (
+  internalStateDirectory: string,
+  hostId: string,
+): string =>
+  `namespaces/v1/${nodeKeyringStateNamespaceDigest(internalStateDirectory)}/hosts/${encodeHostId(hostId)}/`;
+
+/**
+ * OS-keyring implementation of `HostSecretStorageBackend`.
+ *
+ * Shared `HostSecretStorage.Default` resolves `HostIdentity` and calls
+ * `forHost(...)`; this layer only owns Node-specific physical naming. Callers
+ * use short logical keys; `physicalKey` prefixes them before `@napi-rs/keyring`
+ * so get/put/delete stay isolated by state home and host ID without storing
+ * the raw state path in account names.
+ */
 export const NodeKeyringHostSecretStorageBackendLayer = (options: {
   readonly serviceName: string;
-}): Layer.Layer<HostSecretStorageBackend> =>
-  Layer.succeed(HostSecretStorageBackend, {
+  readonly internalStateDirectory: string;
+}): Layer.Layer<HostSecretStorageBackend> => {
+  const stateNamespaceDigest = nodeKeyringStateNamespaceDigest(
+    options.internalStateDirectory,
+  );
+
+  return Layer.succeed(HostSecretStorageBackend, {
     forHost: (hostId) => {
-      const hostKeyPrefix = `hosts/${encodeHostId(hostId)}/`;
-      const physicalKey = (logicalKey: string) =>
-        `${hostKeyPrefix}${logicalKey}`;
+      // Same prefix shape as `nodeKeyringHostSecretAccountPrefix`; inlined so
+      // the digest is computed once per backend rather than per operation.
+      const hostKeyPrefix =
+        `namespaces/v1/${stateNamespaceDigest}/hosts/${encodeHostId(hostId)}/`;
+      const physicalKey = (logicalKey: string) => `${hostKeyPrefix}${logicalKey}`;
 
       return Effect.succeed({
         get: (key) =>
@@ -110,6 +152,7 @@ export const NodeKeyringHostSecretStorageBackendLayer = (options: {
       } satisfies HostStorageOperations);
     },
   });
+};
 
 const makeKeyValueStoreHostStorage = (
   store: KeyValueStore.KeyValueStore,

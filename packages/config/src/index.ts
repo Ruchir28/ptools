@@ -7,5 +7,6 @@
  */
 export * from "./contracts/index.js";
 export * from "./config.js";
+export * from "./authoredConfigBootstrap.js";
 export * from "./configErrors.js";
 export * from "./services/index.js";

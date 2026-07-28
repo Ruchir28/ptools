@@ -1,11 +1,17 @@
 import { readFileSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { createNodeCodeModeClient } from "@ptools/host-node";
+import {
+  collectUserPtoolsConfigEnvReferences,
+  normalizeUserPtoolsConfigStdioCwds,
+  parseUserPtoolsConfigJson,
+} from "@ptools/config";
+import { NODE_LOCAL_HOST_ID, startEmbeddedNodeHost } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 import { generateText, stepCountIs } from "ai";
+import { Effect } from "effect";
 
 const SYSTEM_PROMPT = `\
 You are a data analysis agent with access to MCP-backed provider APIs through ptools Code Mode.
@@ -35,11 +41,36 @@ const main = async (): Promise<void> => {
   const prompt = readFlag("--prompt-file")
     ? readFileSync(readFlag("--prompt-file")!, "utf8")
     : "What drove the most revenue this period — which product and which seller led it, and how did performance vary across regions?";
-  const ptools = makePtoolsSession(
-    await createNodeCodeModeClient(configPath),
+  const config = normalizeUserPtoolsConfigStdioCwds(
+    await Effect.runPromise(
+      parseUserPtoolsConfigJson(readFileSync(configPath, "utf8"), configPath),
+    ),
+    (cwd) => resolve(dirname(configPath), cwd),
   );
+  const secrets = Object.fromEntries(
+    collectUserPtoolsConfigEnvReferences(config).map((name) => {
+      const value = process.env[name];
+      if (value === undefined) {
+        throw new Error(
+          `Missing environment variable ${name} referenced by ${configPath}.`,
+        );
+      }
+      return [name, value] as const;
+    }),
+  );
+  const host = await startEmbeddedNodeHost({ hostId: NODE_LOCAL_HOST_ID });
+  const ptools = makePtoolsSession(host.codeMode);
 
   try {
+    assertConfigured(
+      await host.call({ operation: "configure", input: { config } }),
+    );
+    assertConfigured(
+      await host.call({
+        operation: "configure_secrets",
+        input: { secrets },
+      }),
+    );
     const diagnostics = await ptools.diagnostics();
 
     if (diagnostics.length > 0) {
@@ -84,6 +115,20 @@ const main = async (): Promise<void> => {
   } finally {
     await ptools.close();
   }
+};
+
+const assertConfigured = (response: unknown): void => {
+  if (
+    typeof response === "object" &&
+    response !== null &&
+    "result" in response &&
+    typeof response.result === "object" &&
+    response.result !== null &&
+    "ok" in response.result &&
+    response.result.ok === true
+  )
+    return;
+  throw new Error("Failed to configure the local ptools host.");
 };
 
 const resolveConfigPath = (): string => {

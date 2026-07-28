@@ -1,20 +1,14 @@
-export type { CodeModeClientHandle } from "./options.js";
+export type { CodeModeClientHandle } from "@ptools/code-mode-api";
 export {
   HostNodeError,
-  type NodeCodeModeHostOptions,
-  type NodeAuthOptions,
+  NODE_LOCAL_HOST_ID,
+  type NodeHostOptions,
 } from "./options.js";
 export {
-  NodeCodeModeRuntimeLive,
-  NodeCodeModeServerLive,
-  type NodeCodeModeRuntimeServices,
-} from "./codeModeRuntime.js";
-export {
-  NodeCodeModeClientLive,
   NodeHostHttpServerLive,
-  NodeLocalHostHttpClientLive,
-} from "./hostHttp.js";
+  NodeEmbeddedHostHttpStackLive,
+} from "./http/hostHttp.js";
 export {
   createNodeCodeModeClient,
-  createNodeHostClient,
+  startEmbeddedNodeHost,
 } from "./clientHandles.js";

@@ -2,18 +2,16 @@
   "mcpServers": {
     "ptools": {
       "type": "stdio",
-      "command": "pnpm",
+      "command": "npx",
       "args": [
-        "--dir",
-        "../..",
-        "--filter",
+        "-y",
         "@ptools/cli",
-        "dev",
-        "--",
         "mcp",
         "serve",
         "--host",
         "node",
+        "--host-id",
+        "example-mcp-hosts",
         "--config",
         ".ptools/config.json"
       ]

@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
   NodeFileHostStateStorageBackendLayer,
   encodeHostId,
+  nodeKeyringHostSecretAccountPrefix,
+  nodeKeyringStateNamespaceDigest,
 } from "../src/layers/platform/index.js";
 
 describe("Node host storage adapters", () => {
@@ -72,5 +74,27 @@ describe("Node host storage adapters", () => {
   it("encodes host ids safely for physical Node storage namespaces", () => {
     expect(encodeHostId("host/one two")).toBe("host%2Fone%20two");
     expect(encodeHostId("..")).toBe("%2E%2E");
+  });
+
+  it("namespaces keyring accounts by state directory and host identity", () => {
+    const firstDirectory = "/profiles/first/state";
+    const secondDirectory = "/profiles/second/state";
+    const firstDigest = nodeKeyringStateNamespaceDigest(firstDirectory);
+    const firstPrefix = nodeKeyringHostSecretAccountPrefix(
+      firstDirectory,
+      "host/one",
+    );
+
+    expect(firstDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(firstPrefix).toBe(
+      `namespaces/v1/${firstDigest}/hosts/host%2Fone/`,
+    );
+    expect(firstPrefix).not.toContain(firstDirectory);
+    expect(
+      nodeKeyringHostSecretAccountPrefix(secondDirectory, "host/one"),
+    ).not.toBe(firstPrefix);
+    expect(
+      nodeKeyringHostSecretAccountPrefix(firstDirectory, "host-two"),
+    ).not.toBe(firstPrefix);
   });
 });

@@ -10,6 +10,8 @@
         "serve",
         "--host",
         "node",
+        "--host-id",
+        "example-mcp-hosts",
         "--config",
         ".ptools/config.json"
       ],

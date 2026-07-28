@@ -142,6 +142,27 @@ describe("Code Mode API response validation", () => {
     });
   });
 
+  it("decodes registry refresh diagnostics at the public response boundary", async () => {
+    const response = {
+      operation: "search_providers" as const,
+      output: {
+        providers: [],
+        diagnostics: [
+          {
+            code: "McpRegistryRefreshFailed" as const,
+            severity: "error" as const,
+            serverName: "notion",
+            message: "refresh failed",
+          },
+        ],
+      },
+    };
+
+    await expect(
+      Effect.runPromise(parseCodeModeResponse(response)),
+    ).resolves.toEqual(response);
+  });
+
   it("rejects responses for the wrong request operation", async () => {
     const result = await Effect.runPromise(
       Effect.either(

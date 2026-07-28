@@ -1,14 +1,60 @@
 # @ptools/host-api
 
-Transport-agnostic host protocol contracts and client shapes.
+Shared Host operation contracts, HTTP routes, and client capabilities.
 
-- `@ptools/host-api` exposes Host operation DTO schemas, validation helpers, codecs, protocol response helpers, and the Promise `HostClientHandle`.
-- `@ptools/host-api/contracts` exposes only the reusable host protocol DTO schemas.
-- `@ptools/host-api/effect` is the public Effect-native subpath for service tags and shared layers.
+- `@ptools/host-api` exposes transport-agnostic operation DTOs and the Promise
+  `HostClientHandle` shape.
+- `@ptools/host-api/contracts` exposes reusable host protocol schemas.
+- `@ptools/host-api/http` exposes the shared HTTP API and
+  `createHostHttpClient(...)` for ordinary JavaScript/TypeScript callers.
+- `@ptools/host-api/effect` exposes Effect services and layers.
+
+## Connect to an existing Host HTTP deployment
+
+```ts
+import { createHostHttpClient } from "@ptools/host-api/http";
+
+const host = await createHostHttpClient({
+  baseUrl: "https://host.example.com",
+  hostId: "main",
+  accessToken,
+});
+
+try {
+  await host.call({ operation: "configure", input: { config } });
+  await host.codeMode.call(request);
+} finally {
+  await host.close();
+}
+```
+
+This constructor starts no server and owns no actor. `close()` disposes only the
+calling process's client runtime.
+
+## Effect-native client
+
+```ts
+import {
+  HostHttpClient,
+  HostHttpClientFetchLive,
+} from "@ptools/host-api/effect";
+
+const program = Effect.gen(function* () {
+  const host = yield* HostHttpClient;
+  return yield* host.configure({ config });
+}).pipe(
+  Effect.provide(
+    HostHttpClientFetchLive({ baseUrl, hostId, accessToken }),
+  ),
+);
+```
+
+`HostHttpClientFetchLive` owns the single validation path. Invalid URLs, empty
+host IDs, and empty tokens fail with `HostHttpClientConfigError`; the Promise
+constructor wraps that same layer and duplicates no validation.
 
 Source organization:
 
-- `src/contracts/` owns reusable transport-agnostic DTO schemas.
-- `src/services/` owns Effect `Context.Tag` service contracts and shared Effect layers.
-- The public `./contracts` export re-exports `src/contracts/index.ts`.
-- The public `./effect` export re-exports the services surface for Effect-native SDK users.
+- `src/contracts/` owns transport-agnostic DTO schemas.
+- `src/services/` owns Effect service contracts and shared layers.
+- `src/http/` owns the shared HTTP carrier and Promise adapter.

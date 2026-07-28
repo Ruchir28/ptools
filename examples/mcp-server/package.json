@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "pnpm --dir ../.. build && node ../../packages/cli/dist/cli.js mcp serve --host node",
+    "start": "pnpm --dir ../.. build && node ../../packages/cli/dist/cli.js mcp serve --host node --host-id example-mcp-server",
     "smoke": "pnpm --dir ../.. build && tsx src/smoke-client.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

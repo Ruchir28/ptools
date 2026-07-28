@@ -37,7 +37,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { NodeLocalHostHttpClientLive } from "../src/http/hostHttp.js";
+import { NodeEmbeddedHostHttpStackLive } from "../src/http/hostHttp.js";
 import { NodeHostRuntimeManager } from "../src/hostActorDaemon/actorRuntime/services/nodeHostRuntimeManager.js";
 import {
   makeNodeHostActorDaemonLeaseManager,
@@ -102,8 +102,8 @@ it("forwards config, secrets, auth, and callback routes through the daemon", asy
           // Build a real public Node listener plus its fetch-backed client. Its
           // discovery layer reads <PTOOLS_HOME>/state and acquires one RPC lease.
           const clientContext = yield* Layer.build(
-            NodeLocalHostHttpClientLive(undefined, {
-              env: { PTOOLS_HOME: home },
+            NodeEmbeddedHostHttpStackLive({
+              internalStateDirectory,
               hostId: "route-host",
               publicOrigin,
             }),

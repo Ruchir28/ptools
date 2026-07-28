@@ -62,7 +62,6 @@ describe("HostInstanceHandler", () => {
   it("rejects an operation addressed to a different host", async () => {
     const response = await dispatch(makeRuntime(true), "other", {
       operation: "mcp_auth_status",
-      input: { origin: origin },
     });
 
     expect(response).toMatchObject({
@@ -403,7 +402,7 @@ describe("HostInstanceHandler", () => {
 
     const started = await dispatch(runtime, "demo", {
       operation: "start_mcp_auth",
-      input: { origin, serverName: "fixture", force: true },
+      input: { serverName: "fixture", force: true },
     });
     if (
       !("operation" in started) ||
@@ -489,7 +488,6 @@ describe("HostInstanceHandler", () => {
     await expect(
       dispatch(runtime, "demo", {
         operation: "mcp_auth_status",
-        input: { origin },
       }),
     ).resolves.toMatchObject({
       operation: "mcp_auth_status",
@@ -507,7 +505,7 @@ describe("HostInstanceHandler", () => {
     await expect(
       dispatch(runtime, "demo", {
         operation: "start_mcp_auth",
-        input: { origin, serverName: "missing", force: false },
+        input: { serverName: "missing", force: false },
       }),
     ).resolves.toMatchObject({
       operation: "start_mcp_auth",

@@ -2,15 +2,25 @@
 
 Command-line composition surface for ptools.
 
-The CLI owns host selection and adapter wiring. Adapter packages such as
+The Effect-native CLI owns command parsing, host selection, authored-file
+bootstrap, and adapter wiring. It uses `@effect/cli` for commands and options and
+Effect scopes for the acquired host lifetime. Adapter packages such as
 `@ptools/mcp-server` remain host-neutral; host packages such as
-`@ptools/host-node` create Code Mode clients.
+`@ptools/host-node` receive explicit configuration values and never discover
+files or environment variables.
 
 ```bash
-npx -y @ptools/cli mcp serve --host node --config ./ptools.config.json
+npx -y @ptools/cli mcp serve --host node --host-id my-project --config ./ptools.config.json
 ```
 
-The Node host supports normal config discovery when `--config` is omitted:
+`--host-id` selects the logical actor inside the Node state namespace. Omit it
+only when intentionally using the conventional personal `"node-local"` actor.
+Use distinct IDs for projects that may run concurrently.
+
+When `--config` is omitted, the CLI—not the Node host—selects
+`.ptools/config.json` or `ptools.config.json` from its working directory. It then
+decodes the file, resolves only referenced `${env:NAME}` values, and submits
+explicit `configure` and `configure_secrets` Host API operations:
 
 ```bash
 ptools mcp serve --host node

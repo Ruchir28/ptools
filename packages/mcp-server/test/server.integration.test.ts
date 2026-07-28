@@ -47,6 +47,7 @@ describe("combined Code Mode MCP server", () => {
         configPath,
       ],
       cwd: repoRoot,
+      env: testEnvironment(configPath),
       stderr: "pipe",
     });
 
@@ -62,6 +63,17 @@ describe("combined Code Mode MCP server", () => {
       "search",
       "search_providers",
     ]);
+
+    // MCP defaults embedded schemas to 2020-12. Assert the public wire
+    // projection because some clients compile outputSchema before tool calls.
+    for (const tool of tools.tools) {
+      expect(tool.inputSchema.$schema).toBe(
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+      expect(tool.outputSchema?.$schema).toBe(
+        "https://json-schema.org/draft/2020-12/schema",
+      );
+    }
 
     const providerSearch = await client.callTool({
       name: "search_providers",
@@ -166,6 +178,7 @@ describe("combined Code Mode MCP server", () => {
         configPath,
       ],
       cwd: repoRoot,
+      env: testEnvironment(configPath),
       stderr: "pipe",
     });
 
@@ -226,6 +239,7 @@ describe("combined Code Mode MCP server", () => {
         configPath,
       ],
       cwd: repoRoot,
+      env: testEnvironment(configPath),
       stderr: "pipe",
     });
 
@@ -297,6 +311,15 @@ describe("combined Code Mode MCP server", () => {
       warnings: [],
     });
   }, 30_000);
+});
+
+const testEnvironment = (configPath: string): Record<string, string> => ({
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  ),
+  PTOOLS_HOME: dirname(configPath),
 });
 
 const writeFixtureConfig = async (): Promise<string> => {

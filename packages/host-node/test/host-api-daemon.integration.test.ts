@@ -1,31 +1,29 @@
 /**
- * End-to-end coverage: public Host/Code Mode HTTP clients → shared actor daemon.
+ * End-to-end coverage: embedded Host clients → public HTTP → shared daemon.
  *
- * Background — each embedded client owns a public HTTP listener and one daemon
- * connection lease. Clients using the same PTOOLS_HOME discover the same daemon
- * process, while the shared hostId selects the same authoritative actor inside
- * it. Closing one client must release only its own listener/lease, not actor
- * ownership that another live client still depends on.
+ * Background — each embedded client owns a listener and one daemon lease. Two
+ * clients selecting the same internalStateDirectory and hostId intentionally
+ * address one authoritative actor. Configuration is explicit Host API work;
+ * neither constructor reads a config file or warms Code Mode.
  *
  * What this proves:
- *   1. Two independently started public HTTP servers (different ports/leases)
- *      can both reach the same daemon-backed actor (same hostId + PTOOLS_HOME).
- *   2. Closing the first client's lease does not take down the daemon while the
- *      second client still holds a lease — second.call still succeeds afterward.
+ *   1. Explicit configure followed by Code Mode reaches a real daemon actor.
+ *   2. Two listeners/leases share that actor, and closing one leaves the other
+ *      functional.
  *
- * Requires Deno (sandbox executor). Spawns real detached daemons via the normal
- * client/startup path; this is slower than the in-process lifecycle test.
+ * HTTP, daemon startup/RPC, MCP stdio, and Deno are real.
  */
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodeModeSearchRequest } from "@ptools/code-mode-api";
-import { Option } from "effect";
+import { UserPtoolsConfig } from "@ptools/config/contracts";
+import { Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { createNodeCodeModeClient } from "../src/clientHandles.js";
+import { startEmbeddedNodeHost } from "../src/clientHandles.js";
 
 const fixturePath = fileURLToPath(
   new URL(
@@ -44,47 +42,42 @@ const hasDeno = (() => {
 })();
 
 describe.skipIf(!hasDeno)("public Host API to daemon integration", () => {
-  it("keeps one daemon actor reachable through two independently leased HTTP servers", async () => {
-    // Isolated PTOOLS_HOME + config so this run does not collide with other
-    // local daemons or developer state.
+  it("shares one explicitly configured actor across independent ingress leases", async () => {
     const home = await mkdtemp(join(tmpdir(), "ptools-http-daemon-"));
-    const configPath = join(home, "config.json");
-    await writeFile(
-      configPath,
-      JSON.stringify({
-        mcpServers: {
-          fixture: {
-            command: process.execPath,
-            args: [fileURLToPath(import.meta.resolve("tsx/cli")), fixturePath],
-          },
+    const internalStateDirectory = join(home, "state");
+    const config = await Schema.decodeUnknownPromise(UserPtoolsConfig)({
+      mcpServers: {
+        fixture: {
+          command: process.execPath,
+          args: [fileURLToPath(import.meta.resolve("tsx/cli")), fixturePath],
         },
-      }),
-    );
-
-    // Two public origins → two HTTP server instances/leases; same hostId so
-    // both discovery paths target one shared daemon actor.
+      },
+    });
     const [firstPort, secondPort] = await Promise.all([freePort(), freePort()]);
-    const shared = {
-      env: { PTOOLS_HOME: home },
-      hostId: "shared-actor",
-    };
-    const first = await createNodeCodeModeClient(configPath, {
+    const shared = { internalStateDirectory, hostId: "shared-actor" };
+    const first = await startEmbeddedNodeHost({
       ...shared,
       publicOrigin: `http://127.0.0.1:${firstPort}`,
     });
-    const second = await createNodeCodeModeClient(configPath, {
+    const second = await startEmbeddedNodeHost({
       ...shared,
       publicOrigin: `http://127.0.0.1:${secondPort}`,
     });
 
     try {
-      // First lease can drive a real code-mode search through the daemon.
-      await expect(first.call(searchRequest())).resolves.toMatchObject({
-        output: { actions: [{ toolId: "fixture.echo" }] },
-      });
-      // Releasing the first lease must leave the daemon up for the second lease.
+      await expect(
+        first.call({ operation: "configure", input: { config } }),
+      ).resolves.toMatchObject({ result: { ok: true } });
+      await expect(first.codeMode.call(searchRequest())).resolves.toMatchObject(
+        {
+          output: { actions: [{ toolId: "fixture.echo" }] },
+        },
+      );
+
       await first.close();
-      await expect(second.call(searchRequest())).resolves.toMatchObject({
+      await expect(
+        second.codeMode.call(searchRequest()),
+      ).resolves.toMatchObject({
         output: { actions: [{ toolId: "fixture.echo" }] },
       });
     } finally {

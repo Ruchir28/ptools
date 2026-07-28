@@ -188,16 +188,24 @@ the upstream MCP servers listed in `.ptools/config.json`.
 
 ```ts
 import { Effect } from "effect";
-import { createNodeCodeModeClient } from "@ptools/host-node";
+import { startEmbeddedNodeHost } from "@ptools/host-node";
 import { serveMcpWithCodeModeClient } from "@ptools/mcp-server";
 
-const client = await createNodeCodeModeClient(undefined, {
-  argv: process.argv.slice(2),
-  cwd: process.cwd(),
-  env: process.env,
-});
+const host = await startEmbeddedNodeHost({ hostId: "my-app" });
 
-await Effect.runPromise(serveMcpWithCodeModeClient(client));
+try {
+  await host.call({
+    operation: "configure",
+    input: { config: authoredConfig },
+  });
+  await host.call({
+    operation: "configure_secrets",
+    input: { secrets: explicitlySelectedSecrets },
+  });
+  await Effect.runPromise(serveMcpWithCodeModeClient(host.codeMode));
+} finally {
+  await host.close();
+}
 ```
 
 ## Tools

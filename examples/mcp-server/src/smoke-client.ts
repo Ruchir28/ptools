@@ -14,7 +14,15 @@ const cliPath = resolve(exampleRoot, "../../packages/cli/dist/cli.js");
 
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [cliPath, "mcp", "serve", "--host", "node"],
+  args: [
+    cliPath,
+    "mcp",
+    "serve",
+    "--host",
+    "node",
+    "--host-id",
+    "example-mcp-server",
+  ],
   cwd: exampleRoot,
   stderr: "pipe",
 });

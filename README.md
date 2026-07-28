@@ -101,13 +101,17 @@ npm install @ptools/agent-tools @ptools/host-node
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createNodeCodeModeClient } from "@ptools/host-node";
+import { startEmbeddedNodeHost } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
-const ptools = makePtoolsSession(
-  await createNodeCodeModeClient(),
-);
+const host = await startEmbeddedNodeHost({ hostId: "my-app" });
+await host.call({ operation: "configure", input: { config: authoredConfig } });
+await host.call({
+  operation: "configure_secrets",
+  input: { secrets: explicitlySelectedSecrets },
+});
+const ptools = makePtoolsSession(host.codeMode);
 
 try {
   const result = await generateText({
@@ -129,7 +133,8 @@ Package docs:
 - `@ptools/mcp-server`: host-neutral MCP stdio adapter
 - `@ptools/agent-tools`: user-facing AI SDK session and adapter package
 - `@ptools/config`: shared config parsing, validation, resolution, and hashing
-- `@ptools/host-node`: Node host layers and Code Mode client factories
+- `@ptools/host-node`: embedded daemon-backed Node Host client factories
+- `@ptools/host-api/http`: client for any existing Host HTTP deployment
 - `@ptools/mcp-registry`: upstream MCP connection, discovery, and dispatch
 - `@ptools/code-mode`: Code Mode search, schema, and execute orchestration
 - `@ptools/executor`: local JavaScript execution host

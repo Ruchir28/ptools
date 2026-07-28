@@ -28,8 +28,56 @@ import {
   type HostStorageOperations,
 } from "../src/services/index.js";
 import { HostIdentityLayer } from "@ptools/host-context";
+import {
+  collectUserPtoolsConfigEnvReferences,
+  normalizeUserPtoolsConfigStdioCwds,
+  parseUserPtoolsConfigJson,
+} from "../src/authoredConfigBootstrap.js";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+describe("authored Host API bootstrap helpers", () => {
+  it("anchors stdio cwd and selects only referenced environment names", async () => {
+    const authored = await Effect.runPromise(
+      parseUserPtoolsConfigJson(
+        JSON.stringify({
+          mcpServers: {
+            local: {
+              command: "${env:NODE_BIN}",
+              cwd: "servers",
+              env: { TOKEN: "Bearer ${env:API_TOKEN}" },
+            },
+            remote: {
+              url: "https://${env:REMOTE_HOST}/mcp",
+              cwd: "must-not-be-used",
+            },
+            disabled: {
+              command: "${env:IGNORED_BIN}",
+              disabled: true,
+            },
+          },
+        }),
+        "/repo/config/ptools.json",
+      ),
+    );
+    const normalized = normalizeUserPtoolsConfigStdioCwds(
+      authored,
+      (cwd) => `/repo/config/${cwd}`,
+    );
+
+    expect(Option.getOrUndefined(normalized.mcpServers.local!.cwd)).toBe(
+      "/repo/config/servers",
+    );
+    expect(Option.getOrUndefined(normalized.mcpServers.remote!.cwd)).toBe(
+      "must-not-be-used",
+    );
+    expect(collectUserPtoolsConfigEnvReferences(normalized)).toEqual([
+      "API_TOKEN",
+      "NODE_BIN",
+      "REMOTE_HOST",
+    ]);
+  });
+});
 
 describe("host storage construction", () => {
   it("selects the backend with HostIdentity and publishes that host ID", async () => {

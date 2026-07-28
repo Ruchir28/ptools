@@ -4,26 +4,26 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { CodeMode, makeCodeModeLive } from "@ptools/code-mode";
 import {
+  type CodeModeClientError,
+  type CodeModeResponse,
   CodeModeExecuteRequest,
   CodeModeSearchProvidersRequest,
   CodeModeSearchRequest,
   CodeModeToolSchemaRequest,
 } from "@ptools/code-mode-api";
-import { ConfigSource } from "@ptools/config";
-import { LocalSandboxExecutorLayer } from "@ptools/host-node";
+import { CodeModeClient } from "@ptools/code-mode-api/effect";
 import {
-  NodeAuthCoordinatorLive,
-  NodeConfigSourceLive,
-  NodeCredentialsStoreLive,
-  NodeMcpConnectorLive,
-} from "@ptools/host-node";
-import { makeMcpRegistryLive } from "@ptools/mcp-registry";
-import { Data, Effect, Either, Layer, Option, Scope } from "effect";
+  collectUserPtoolsConfigEnvReferences,
+  DEFAULT_CONFIG_PATHS,
+  normalizeUserPtoolsConfigStdioCwds,
+  parseUserPtoolsConfigJson,
+} from "@ptools/config";
+import { startEmbeddedNodeHost, NODE_LOCAL_HOST_ID } from "@ptools/host-node";
+import { Context, Data, Effect, Either, Option, Runtime, Scope } from "effect";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 
 export class PlaygroundServerError extends Data.TaggedError(
@@ -57,52 +57,65 @@ export const runPlayground = (
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): Effect.Effect<void, unknown> =>
-  Effect.gen(function* () {
-    const port = yield* resolvePlaygroundPort(argv, env);
-    const configSource = yield* ConfigSource;
-    const config = yield* configSource.load;
-    const live = makeCodeModeLive().pipe(
-      Layer.provide(
-        Layer.merge(
-          makeMcpRegistryLive(config.mcpServers).pipe(
-            Layer.provide(NodeMcpConnectorLive),
-            Layer.provide(makeNodeAuthCoordinatorLive(env)),
-          ),
-          LocalSandboxExecutorLayer(
-            Option.match(config.executor, {
-              onNone: () => undefined,
-              onSome: (executor) =>
-                Option.match(executor.defaultTimeoutMs, {
-                  onNone: () => ({}),
-                  onSome: (defaultTimeoutMs) => ({ defaultTimeoutMs }),
+  Effect.scoped(
+    Effect.gen(function* () {
+      const port = yield* resolvePlaygroundPort(argv, env);
+      const configPath = yield* Effect.tryPromise(() =>
+        resolveAuthoredConfigPath(parseArgValue(argv, "--config"), env, cwd),
+      );
+      const raw = yield* Effect.tryPromise(() => readFile(configPath, "utf8"));
+      const decoded = yield* parseUserPtoolsConfigJson(raw, configPath);
+      const config = normalizeUserPtoolsConfigStdioCwds(decoded, (stdioCwd) =>
+        resolve(dirname(configPath), stdioCwd),
+      );
+      const secrets = yield* Effect.forEach(
+        collectUserPtoolsConfigEnvReferences(config),
+        (name) =>
+          Effect.fromNullable(env[name]).pipe(
+            Effect.mapError(
+              () =>
+                new PlaygroundServerError({
+                  message: `Missing environment variable ${name} referenced by ${configPath}.`,
                 }),
-            }),
+            ),
+            Effect.map((value) => [name, value] as const),
           ),
+      ).pipe(Effect.map(Object.fromEntries));
+      const host = yield* Effect.acquireRelease(
+        Effect.tryPromise(() =>
+          startEmbeddedNodeHost({
+            hostId: NODE_LOCAL_HOST_ID,
+            ...(nonEmpty(env.PTOOLS_HOME) === undefined
+              ? {}
+              : {
+                  internalStateDirectory: resolve(
+                    nonEmpty(env.PTOOLS_HOME)!,
+                    "state",
+                  ),
+                }),
+          }),
         ),
-      ),
-    );
+        (handle) => Effect.promise(() => handle.close()).pipe(Effect.ignore),
+      );
 
-    yield* runPlaygroundHttp({ configPath: "ptools config", port }).pipe(
-      Effect.provide(live),
-    );
-  }).pipe(
-    Effect.provide(NodeConfigSourceLive({ argv, env, cwd })),
-    Effect.scoped,
-  );
+      yield* callHostSetup(() =>
+        host.call({ operation: "configure", input: { config } }),
+      );
+      yield* callHostSetup(() =>
+        host.call({ operation: "configure_secrets", input: { secrets } }),
+      );
 
-const makeNodeAuthCoordinatorLive = (env: NodeJS.ProcessEnv) =>
-  NodeAuthCoordinatorLive({
-    runtimeId: "local",
-    autoOpen:
-      env.PTOOLS_AUTH_AUTO_OPEN !== "0" &&
-      env.PTOOLS_AUTH_AUTO_OPEN !== "false" &&
-      process.stderr.isTTY === true,
-  }).pipe(
-    Layer.provide(
-      NodeCredentialsStoreLive({
-        serviceName: "ptools-mcp-oauth",
-      }),
-    ),
+      const codeMode = CodeModeClient.of({
+        call: (request) =>
+          Effect.tryPromise({
+            try: () => host.codeMode.call(request),
+            catch: (cause) => cause as CodeModeClientError,
+          }),
+      });
+      yield* runPlaygroundHttp({ configPath, port }).pipe(
+        Effect.provideService(CodeModeClient, codeMode),
+      );
+    }),
   );
 
 /**
@@ -116,14 +129,15 @@ export const startPlaygroundServer = (
 ): Effect.Effect<
   StartedPlaygroundServer,
   PlaygroundServerError,
-  CodeMode | Scope.Scope
+  CodeModeClient | Scope.Scope
 > =>
   Effect.gen(function* () {
-    const codeMode = yield* CodeMode;
+    const codeMode = yield* CodeModeClient;
+    const runtime = yield* Effect.runtime<never>();
     const server = createServer();
 
     server.on("request", (request, response) => {
-      void Effect.runPromise(
+      void Runtime.runPromise(runtime)(
         handleRequest(codeMode, request, response, options.vite),
       );
     });
@@ -142,7 +156,7 @@ export const startPlaygroundServer = (
 
 const runPlaygroundHttp = (
   options: PlaygroundServerOptions,
-): Effect.Effect<void, PlaygroundServerError, CodeMode | Scope.Scope> =>
+): Effect.Effect<void, PlaygroundServerError, CodeModeClient | Scope.Scope> =>
   Effect.gen(function* () {
     const vite = yield* makeViteDevServer;
     const started = yield* startPlaygroundServer({ ...options, vite });
@@ -157,7 +171,7 @@ const runPlaygroundHttp = (
   });
 
 const handleRequest = (
-  codeMode: ContextService<typeof CodeMode>,
+  codeMode: Context.Tag.Service<typeof CodeModeClient>,
   request: IncomingMessage,
   response: ServerResponse,
   vite?: ViteDevServer,
@@ -174,26 +188,30 @@ const handleRequest = (
       const context =
         query === undefined || query.length === 0
           ? yield* codeMode
-              .searchProviders(
-                CodeModeSearchProvidersRequest.make({
+              .call({
+                operation: "search_providers",
+                input: CodeModeSearchProvidersRequest.make({
                   query: Option.none(),
                   limit: Option.none(),
                 }),
-              )
+              })
               .pipe(
+                Effect.flatMap(expectCodeModeOutput("search_providers")),
                 Effect.map(toPlaygroundContext),
                 Effect.mapError(toErrorBody),
                 Effect.either,
               )
           : yield* codeMode
-              .search(
-                CodeModeSearchRequest.make({
+              .call({
+                operation: "search",
+                input: CodeModeSearchRequest.make({
                   query,
                   provider: Option.none(),
                   limit: Option.none(),
                 }),
-              )
+              })
               .pipe(
+                Effect.flatMap(expectCodeModeOutput("search")),
                 Effect.map(toPlaygroundContext),
                 Effect.mapError(toErrorBody),
                 Effect.either,
@@ -217,8 +235,11 @@ const handleRequest = (
       }
 
       const result = yield* codeMode
-        .toolSchema(parsed.right)
-        .pipe(Effect.either);
+        .call({ operation: "get_tool_schema", input: parsed.right })
+        .pipe(
+          Effect.flatMap(expectCodeModeOutput("get_tool_schema")),
+          Effect.either,
+        );
 
       if (Either.isLeft(result)) {
         return yield* sendJson(response, 500, toErrorBody(result.left));
@@ -234,7 +255,9 @@ const handleRequest = (
         return yield* sendJson(response, 400, toErrorBody(parsed.left));
       }
 
-      const result = yield* codeMode.execute(parsed.right).pipe(Effect.either);
+      const result = yield* codeMode
+        .call({ operation: "execute", input: parsed.right })
+        .pipe(Effect.flatMap(expectCodeModeOutput("execute")), Effect.either);
 
       if (Either.isLeft(result)) {
         return yield* sendJson(response, 500, toErrorBody(result.left));
@@ -256,7 +279,24 @@ const handleRequest = (
     ),
   );
 
-type ContextService<Tag extends { Service: unknown }> = Tag["Service"];
+type CodeModeOutput<Operation extends CodeModeResponse["operation"]> = Extract<
+  CodeModeResponse,
+  { readonly operation: Operation }
+>["output"];
+
+/** Preserve the request/response discriminator invariant at the client seam. */
+const expectCodeModeOutput =
+  <Operation extends CodeModeResponse["operation"]>(operation: Operation) =>
+  (
+    response: CodeModeResponse,
+  ): Effect.Effect<CodeModeOutput<Operation>, PlaygroundServerError> =>
+    (response.operation === operation
+      ? Effect.succeed(response.output)
+      : Effect.fail(
+          new PlaygroundServerError({
+            message: `Expected Code Mode ${operation} response, received ${response.operation}.`,
+          }),
+        )) as Effect.Effect<CodeModeOutput<Operation>, PlaygroundServerError>;
 
 const summarizeContext = (context: {
   readonly servers: ReadonlyArray<{
@@ -290,8 +330,8 @@ const toPlaygroundContext = (
           readonly toolId: string;
           readonly provider: string;
           readonly action: string;
-          readonly title?: string;
-          readonly description?: string;
+          readonly title?: string | undefined;
+          readonly description?: string | undefined;
         }>;
         readonly diagnostics: ReadonlyArray<unknown>;
       },
@@ -358,6 +398,84 @@ const toPlaygroundContext = (
     diagnostics: result.diagnostics,
   };
 };
+
+const callHostSetup = (
+  operation: () => Promise<unknown>,
+): Effect.Effect<void, unknown> =>
+  Effect.tryPromise(operation).pipe(
+    Effect.flatMap((response) => {
+      if (typeof response !== "object" || response === null) {
+        return Effect.fail(
+          new PlaygroundServerError({
+            message: "Host returned an invalid setup response.",
+          }),
+        );
+      }
+      if (
+        "result" in response &&
+        typeof response.result === "object" &&
+        response.result !== null &&
+        "ok" in response.result &&
+        response.result.ok === true
+      ) {
+        return Effect.void;
+      }
+      const message = findResponseErrorMessage(response);
+      return Effect.fail(
+        new PlaygroundServerError({
+          message: message ?? "Host setup operation failed.",
+        }),
+      );
+    }),
+  );
+
+const findResponseErrorMessage = (response: object): string | undefined => {
+  for (const container of [
+    "error" in response ? response.error : undefined,
+    "result" in response &&
+    typeof response.result === "object" &&
+    response.result !== null &&
+    "error" in response.result
+      ? response.result.error
+      : undefined,
+  ]) {
+    if (
+      typeof container === "object" &&
+      container !== null &&
+      "message" in container &&
+      typeof container.message === "string"
+    )
+      return container.message;
+  }
+  return undefined;
+};
+
+const resolveAuthoredConfigPath = async (
+  explicitPath: string | undefined,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<string> => {
+  const selected = explicitPath ?? nonEmpty(env.PTOOLS_CONFIG);
+  if (selected !== undefined) {
+    return isAbsolute(selected) ? selected : resolve(cwd, selected);
+  }
+  for (const candidate of DEFAULT_CONFIG_PATHS) {
+    const absolute = resolve(cwd, candidate);
+    if (await fileExists(absolute)) return absolute;
+  }
+  throw new Error(
+    `No ptools config found. Pass --config <path> or create ${DEFAULT_CONFIG_PATHS.join(" or ")}.`,
+  );
+};
+
+const nonEmpty = (value: string | undefined): string | undefined =>
+  value === undefined || value.trim() === "" ? undefined : value;
+
+const fileExists = (path: string): Promise<boolean> =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 
 const resolvePlaygroundPort = (
   argv: ReadonlyArray<string>,
@@ -504,8 +622,7 @@ const makeViteDevServer: Effect.Effect<
         cause,
       }),
   }),
-  (vite) =>
-    Effect.promise(() => vite.close()).pipe(Effect.catchAll(() => Effect.void)),
+  (vite) => Effect.tryPromise(() => vite.close()).pipe(Effect.ignore),
 );
 
 const serveClient = (

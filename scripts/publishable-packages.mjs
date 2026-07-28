@@ -15,14 +15,44 @@ export const publishablePackages = [
     internalDeps: ["@ptools/config"],
   },
   {
-    name: "@ptools/host-node",
-    dir: "packages/host-node",
+    name: "@ptools/host-context",
+    dir: "packages/host-context",
+    internalDeps: [],
+  },
+  {
+    name: "@ptools/host-api",
+    dir: "packages/host-api",
+    internalDeps: [
+      "@ptools/auth",
+      "@ptools/code-mode-api",
+      "@ptools/config",
+    ],
+  },
+  {
+    name: "@ptools/host-runtime",
+    dir: "packages/host-runtime",
     internalDeps: [
       "@ptools/auth",
       "@ptools/code-mode",
       "@ptools/code-mode-api",
       "@ptools/config",
       "@ptools/executor",
+      "@ptools/host-api",
+      "@ptools/host-context",
+      "@ptools/mcp-registry",
+    ],
+  },
+  {
+    name: "@ptools/host-node",
+    dir: "packages/host-node",
+    internalDeps: [
+      "@ptools/auth",
+      "@ptools/code-mode-api",
+      "@ptools/config",
+      "@ptools/executor",
+      "@ptools/host-api",
+      "@ptools/host-context",
+      "@ptools/host-runtime",
       "@ptools/mcp-registry",
     ],
   },
@@ -63,7 +93,11 @@ export const publishablePackages = [
   {
     name: "@ptools/cli",
     dir: "packages/cli",
-    internalDeps: ["@ptools/host-node", "@ptools/mcp-server"],
+    internalDeps: [
+      "@ptools/config",
+      "@ptools/host-node",
+      "@ptools/mcp-server",
+    ],
   },
 ];
 

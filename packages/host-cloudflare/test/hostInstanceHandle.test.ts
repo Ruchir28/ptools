@@ -10,7 +10,6 @@ const operation = (hostId: string) => ({
   caller: Option.none(),
   request: {
     operation: "mcp_auth_status" as const,
-    input: { origin: "https://ptools.example" },
   },
 });
 
@@ -77,7 +76,6 @@ describe("CloudflareDurableObjectHostInstanceHandle", () => {
         caller: { kind: "HostApiTokenCaller" },
         request: {
           operation: "mcp_auth_status",
-          input: { origin: "https://ptools.example" },
         },
       }),
     );

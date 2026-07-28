@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpAuthStatus } from "@ptools/auth/contracts";
 import {
   CodeModeExecuteRequest,
@@ -14,7 +15,7 @@ import {
   type CodeModeResponse,
 } from "@ptools/code-mode-api";
 import { CodeModeClient } from "@ptools/code-mode-api/effect";
-import { Effect, Option, Scope } from "effect";
+import { Effect, Option, Runtime, Scope } from "effect";
 import { z } from "zod";
 
 const SearchProvidersInputSchema = {
@@ -121,6 +122,56 @@ const RefreshOutputSchema = {
   refreshed: z.boolean(),
 };
 
+const CodeModeToolDefinitions = {
+  authStatus: {
+    name: "auth_status",
+    title: "Get Upstream MCP Auth Status",
+    description:
+      "Show the ptools auth center URL and current auth state for every configured upstream MCP server. If a provider requires auth, ask the user to open authUrl and authorize it, then call search again.",
+    inputSchema: {},
+    outputSchema: AuthStatusOutputSchema,
+  },
+  refresh: {
+    name: "refresh",
+    title: "Refresh Upstream MCP Registry",
+    description:
+      "Reconnect and rediscover configured upstream MCP servers after the user authorizes a provider in the ptools auth center.",
+    inputSchema: {},
+    outputSchema: RefreshOutputSchema,
+  },
+  searchProviders: {
+    name: "search_providers",
+    title: "Search Code Mode Providers",
+    description:
+      'Find configured upstream MCP provider namespaces behind this single ptools server. Call with {} to see available providers, or with { query: "..." } when the task mentions a source or capability and you are unsure which provider owns it. Use a returned provider value to narrow search when helpful.',
+    inputSchema: SearchProvidersInputSchema,
+    outputSchema: SearchProvidersOutputSchema,
+  },
+  search: {
+    name: "search",
+    title: "Search Code Mode Actions",
+    description:
+      'Find MCP-backed actions for a task. This is action discovery; use search_providers first when you need to discover which upstream providers are available. Call with { query: "..." }, optionally with { provider: "..." } to narrow. A good next step is get_tool_schema for selected action.toolId values before execute.',
+    inputSchema: SearchInputSchema,
+    outputSchema: SearchOutputSchema,
+  },
+  getToolSchema: {
+    name: "get_tool_schema",
+    title: "Get Code Mode Tool Schemas",
+    description:
+      "Fetch full JSON schemas and self-contained TypeScript declarations for one or more tools selected from search. Prefer a small set of toolIds you actually plan to call, then use execute to combine tool calls and reduce intermediate results. Fails the whole request if any requested tool is unknown.",
+    inputSchema: ToolSchemaInputSchema,
+    outputSchema: ToolSchemaOutputSchema,
+  },
+  execute: {
+    name: "execute",
+    title: "Execute Code Mode JavaScript",
+    description: `Run generated JavaScript against MCP-backed provider APIs discovered through search. This is the best place for multi-step provider calls, result inspection, filtering, aggregation, joins, and extracting the few fields needed for the final answer. ${EXECUTE_CODE_CONTRACT}`,
+    inputSchema: ExecuteInputSchema,
+    outputSchema: ExecuteOutputSchema,
+  },
+} as const;
+
 type CodeModeClientCaller = Pick<CodeModeClientHandle, "call">;
 
 type ClientCallResult<Operation extends CodeModeResponse["operation"]> =
@@ -147,9 +198,10 @@ export const serveMcpWithCodeModeClientService: Effect.Effect<
   CodeModeClient | Scope.Scope
 > = Effect.gen(function* () {
   const client = yield* CodeModeClient;
+  const runtime = yield* Effect.runtime<never>();
 
   yield* runMcpServer({
-    call: (request) => Effect.runPromise(client.call(request)),
+    call: (request) => Runtime.runPromise(runtime)(client.call(request)),
   });
 });
 
@@ -187,13 +239,7 @@ export const registerCodeModeTools = (
 ): void => {
   server.registerTool(
     "auth_status",
-    {
-      title: "Get Upstream MCP Auth Status",
-      description:
-        "Show the ptools auth center URL and current auth state for every configured upstream MCP server. If a provider requires auth, ask the user to open authUrl and authorize it, then call search again.",
-      inputSchema: {},
-      outputSchema: AuthStatusOutputSchema,
-    },
+    CodeModeToolDefinitions.authStatus,
     async () => {
       const result = await callClient(client, { operation: "auth_status" });
 
@@ -213,13 +259,7 @@ export const registerCodeModeTools = (
 
   server.registerTool(
     "refresh",
-    {
-      title: "Refresh Upstream MCP Registry",
-      description:
-        "Reconnect and rediscover configured upstream MCP servers after the user authorizes a provider in the ptools auth center.",
-      inputSchema: {},
-      outputSchema: RefreshOutputSchema,
-    },
+    CodeModeToolDefinitions.refresh,
     async () => {
       const result = await callClient(client, { operation: "refresh" });
 
@@ -239,13 +279,7 @@ export const registerCodeModeTools = (
 
   server.registerTool(
     "search_providers",
-    {
-      title: "Search Code Mode Providers",
-      description:
-        'Find configured upstream MCP provider namespaces behind this single ptools server. Call with {} to see available providers, or with { query: "..." } when the task mentions a source or capability and you are unsure which provider owns it. Use a returned provider value to narrow search when helpful.',
-      inputSchema: SearchProvidersInputSchema,
-      outputSchema: SearchProvidersOutputSchema,
-    },
+    CodeModeToolDefinitions.searchProviders,
     async ({ query, limit }) => {
       const request = CodeModeSearchProvidersRequest.make({
         query: Option.fromNullable(query),
@@ -272,13 +306,7 @@ export const registerCodeModeTools = (
 
   server.registerTool(
     "search",
-    {
-      title: "Search Code Mode Actions",
-      description:
-        'Find MCP-backed actions for a task. This is action discovery; use search_providers first when you need to discover which upstream providers are available. Call with { query: "..." }, optionally with { provider: "..." } to narrow. A good next step is get_tool_schema for selected action.toolId values before execute.',
-      inputSchema: SearchInputSchema,
-      outputSchema: SearchOutputSchema,
-    },
+    CodeModeToolDefinitions.search,
     async ({ query, provider, limit }) => {
       const request = CodeModeSearchRequest.make({
         query,
@@ -303,13 +331,7 @@ export const registerCodeModeTools = (
 
   server.registerTool(
     "get_tool_schema",
-    {
-      title: "Get Code Mode Tool Schemas",
-      description:
-        "Fetch full JSON schemas and self-contained TypeScript declarations for one or more tools selected from search. Prefer a small set of toolIds you actually plan to call, then use execute to combine tool calls and reduce intermediate results. Fails the whole request if any requested tool is unknown.",
-      inputSchema: ToolSchemaInputSchema,
-      outputSchema: ToolSchemaOutputSchema,
-    },
+    CodeModeToolDefinitions.getToolSchema,
     async ({ toolIds }) => {
       const request = CodeModeToolSchemaRequest.make({ toolIds });
       const result = await callClient(client, {
@@ -333,12 +355,7 @@ export const registerCodeModeTools = (
 
   server.registerTool(
     "execute",
-    {
-      title: "Execute Code Mode JavaScript",
-      description: `Run generated JavaScript against MCP-backed provider APIs discovered through search. This is the best place for multi-step provider calls, result inspection, filtering, aggregation, joins, and extracting the few fields needed for the final answer. ${EXECUTE_CODE_CONTRACT}`,
-      inputSchema: ExecuteInputSchema,
-      outputSchema: ExecuteOutputSchema,
-    },
+    CodeModeToolDefinitions.execute,
     async ({ code, timeoutMs }) => {
       const request = CodeModeExecuteRequest.make({
         code,
@@ -362,6 +379,35 @@ export const registerCodeModeTools = (
         : toToolError(result.cause);
     },
   );
+
+  installJsonSchema202012ToolList(server);
+};
+
+/**
+ * Replaces the SDK's draft-07 tools/list projection with MCP's default
+ * JSON Schema 2020-12 dialect while retaining Zod runtime validation.
+ *
+ * @remarks The MCP SDK's high-level server currently hardcodes draft-07 and
+ * does not expose its converter target. Keep this boundary local until the SDK
+ * can advertise 2020-12 itself.
+ */
+const installJsonSchema202012ToolList = (server: McpServer): void => {
+  server.server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: Object.values(CodeModeToolDefinitions).map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      execution: { taskSupport: "forbidden" as const },
+      inputSchema: z.toJSONSchema(z.object(tool.inputSchema), {
+        target: "draft-2020-12",
+        io: "input",
+      }),
+      outputSchema: z.toJSONSchema(z.object(tool.outputSchema), {
+        target: "draft-2020-12",
+        io: "output",
+      }),
+    })),
+  }));
 };
 
 const toStructuredContent = (value: object): Record<string, unknown> =>
