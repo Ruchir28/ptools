@@ -14,7 +14,7 @@
  * ConfiguredSecretStore.get("NAME")
  *   reads configured secret values
  *
- * ResolvedPtoolsConfigSource.Default
+ * ResolvedPtoolsConfigSource.layer
  *   combines the two steps above
  *   returns ResolvedPtoolsConfig for Code Mode / MCP registry runtime use
  * ```
@@ -23,7 +23,7 @@
  * Node file-backed config discovery. The package-owned default reflects the
  * preferred configured-host runtime shape.
  */
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import type { ResolvedPtoolsConfig } from "../contracts/index.js";
 import { ServerConfigError } from "../configErrors.js";
 import { resolvePtoolsConfigWithSecrets } from "../config.js";
@@ -46,7 +46,7 @@ export interface ResolvedPtoolsConfigSourceService {
 
 /**
  * Build the configured-host implementation object used by
- * `ResolvedPtoolsConfigSource.Default`.
+ * `ResolvedPtoolsConfigSource.layer`.
  */
 const makeConfiguredHostResolvedPtoolsConfigSourceService: Effect.Effect<
   ResolvedPtoolsConfigSourceService,
@@ -75,12 +75,14 @@ const makeConfiguredHostResolvedPtoolsConfigSourceService: Effect.Effect<
  * `ConfiguredHostConfigStore` plus `ConfiguredSecretStore`. File-backed or
  * discovery-based hosts may still provide this service with their own layer.
  */
-export class ResolvedPtoolsConfigSource extends Effect.Service<ResolvedPtoolsConfigSource>()(
+export class ResolvedPtoolsConfigSource extends Context.Service<ResolvedPtoolsConfigSource>()(
   "@ptools/ResolvedPtoolsConfigSource",
   {
-    effect: makeConfiguredHostResolvedPtoolsConfigSourceService,
+    make: makeConfiguredHostResolvedPtoolsConfigSourceService,
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 const defaultConfigStoreErrorMapper = (
   cause: ConfiguredHostConfigStoreError,

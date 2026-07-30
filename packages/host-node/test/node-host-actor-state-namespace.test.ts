@@ -1,5 +1,5 @@
 import { join, normalize, resolve } from "node:path";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_NODE_HOST_KEYRING_SERVICE_NAME,
@@ -84,14 +84,14 @@ describe("Node host-actor state namespace", () => {
     async (overrides, expectedMessage) => {
       const result = await Effect.runPromise(
         resolveNodeHostActorRuntimeOptions(overrides, {}, fixtureHome).pipe(
-          Effect.either,
+          Effect.result,
         ),
       );
 
-      expect(Either.isLeft(result)).toBe(true);
-      if (Either.isLeft(result)) {
-        expect(result.left).toBeInstanceOf(NodeHostActorStateNamespaceError);
-        expect(result.left.message).toBe(expectedMessage);
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toBeInstanceOf(NodeHostActorStateNamespaceError);
+        expect(result.failure.message).toBe(expectedMessage);
       }
     },
   );
@@ -102,12 +102,14 @@ describe("Node host-actor state namespace", () => {
         {},
         { PTOOLS_HOME: "relative/home" },
         fixtureHome,
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.message).toBe("PTOOLS_HOME must be an absolute path.");
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.message).toBe(
+        "PTOOLS_HOME must be an absolute path.",
+      );
     }
   });
 });

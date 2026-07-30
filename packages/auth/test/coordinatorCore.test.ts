@@ -8,7 +8,7 @@ import {
   ResolvedHttpMcpConfig,
   ResolvedStdioMcpConfig,
 } from "@ptools/config";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AuthCoordinatorCore,
@@ -36,7 +36,7 @@ const policy = AuthCoordinatorPolicy.of({
     `${serverName} needs manual OAuth client configuration.`,
 });
 
-describe("AuthCoordinatorCore.Default", () => {
+describe("AuthCoordinatorCore.layer", () => {
   it("tracks only HTTP configs and formats host policy URLs", async () => {
     const status = await Effect.runPromise(
       Effect.gen(function* () {
@@ -457,13 +457,13 @@ describe("AuthCoordinatorCore.Default", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const core = yield* AuthCoordinatorCore;
-        return yield* core.noteConnected("missing").pipe(Effect.either);
+        return yield* core.noteConnected("missing").pipe(Effect.result);
       }).pipe(Effect.provide(makeCoreLayer())),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left.message).toBe(
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.message).toBe(
         "No HTTP MCP server named missing is configured.",
       );
     }
@@ -529,7 +529,7 @@ const makeCoreLayer = (
   calls: { makeProvider: number } = { makeProvider: 0 },
   overrides: Partial<AuthCoordinatorOAuthProvider> = {},
 ) =>
-  AuthCoordinatorCore.Default.pipe(
+  AuthCoordinatorCore.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(AuthCoordinatorPolicy, policy),
@@ -607,17 +607,17 @@ const httpConfig = (
 ): ResolvedHttpMcpConfig =>
   ResolvedHttpMcpConfig.make({
     url,
-    headers: Option.fromNullable(options.headers),
-    auth: Option.fromNullable(options.auth).pipe(
+    headers: Option.fromNullishOr(options.headers),
+    auth: Option.fromNullishOr(options.auth).pipe(
       Option.map((auth) =>
         ResolvedHttpMcpAuthConfig.make({
           type: "oauth",
-          scope: Option.fromNullable(auth.scope),
-          resourceMetadataUrl: Option.fromNullable(auth.resourceMetadataUrl),
-          clientId: Option.fromNullable(auth.clientId),
-          clientSecret: Option.fromNullable(auth.clientSecret),
-          clientMetadataUrl: Option.fromNullable(auth.clientMetadataUrl),
-          redirectUri: Option.fromNullable(auth.redirectUri),
+          scope: Option.fromNullishOr(auth.scope),
+          resourceMetadataUrl: Option.fromNullishOr(auth.resourceMetadataUrl),
+          clientId: Option.fromNullishOr(auth.clientId),
+          clientSecret: Option.fromNullishOr(auth.clientSecret),
+          clientMetadataUrl: Option.fromNullishOr(auth.clientMetadataUrl),
+          redirectUri: Option.fromNullishOr(auth.redirectUri),
         }),
       ),
     ),

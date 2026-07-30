@@ -28,12 +28,12 @@ it("acquires one internal connection for the discovery scope and shares it acros
 
   // Fake connection whose lifetime we can count. handleHostOperation is unused;
   // this test only cares that discovery wires through one shared connection.
-  const connectionLayer = Layer.scoped(
+  const connectionLayer = Layer.effect(
     NodeHostActorDaemonConnection,
     Effect.acquireRelease(
       Effect.sync(() => {
         acquisitions += 1;
-        return NodeHostActorDaemonConnection.make({
+        return NodeHostActorDaemonConnection.of({
           handleHostOperation: () => Effect.die("not called"),
         });
       }),

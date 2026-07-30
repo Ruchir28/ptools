@@ -70,12 +70,12 @@ export type CodeModeExecuteResponse = Schema.Schema.Type<
 >;
 
 /** Success-only response union returned by CodeModeServer/CodeModeClient. */
-export const CodeModeResponse = Schema.Union(
+export const CodeModeResponse = Schema.Union([
   CodeModeAuthStatusResponse,
   CodeModeRefreshResponse,
   CodeModeSearchProvidersResponse,
   CodeModeSearchResponse,
   CodeModeToolSchemaResponse,
   CodeModeExecuteResponse,
-);
+]);
 export type CodeModeResponse = Schema.Schema.Type<typeof CodeModeResponse>;

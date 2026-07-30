@@ -7,13 +7,16 @@ export const verifyBearerToken = (input: {
 }): Effect.Effect<void, HostCloudflareError> =>
   Effect.gen(function* () {
     if (input.accessToken.length === 0) {
-      return yield* Effect.fail(unauthorized());
+      return yield* unauthorized();
     }
 
-    const matches = yield* timingSafeTokenEquals(input.token, input.accessToken);
+    const matches = yield* timingSafeTokenEquals(
+      input.token,
+      input.accessToken,
+    );
 
     if (!matches) {
-      return yield* Effect.fail(unauthorized());
+      return yield* unauthorized();
     }
   });
 

@@ -33,8 +33,8 @@ export const NodeDaemonHostInstanceDiscoveryLive = (
 ): Layer.Layer<HostInstanceDiscovery, NodeDaemonConnectionError> =>
   NodeDaemonHostInstanceDiscoveryFromConnectionLive.pipe(
     Layer.provide(
-      NodeHostActorDaemonConnection.Default(options).pipe(
-        Layer.provide(NodeHostActorDaemonSpawner.Default),
+      NodeHostActorDaemonConnection.layer(options).pipe(
+        Layer.provide(NodeHostActorDaemonSpawner.layer),
       ),
     ),
   );

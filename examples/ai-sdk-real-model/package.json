@@ -15,7 +15,7 @@
     "@ptools/config": "workspace:*",
     "@ptools/host-node": "workspace:*",
     "ai": "latest",
-    "effect": "latest",
+    "effect": "4.0.0-beta.102",
     "zod": "latest"
   },
   "devDependencies": {

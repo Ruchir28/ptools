@@ -17,7 +17,7 @@ export interface CodeModeObjectNamespace {
 export const toCloudflareHostOperationRpcInput = (
   input: HostOperationDispatchInput,
 ): Effect.Effect<CloudflareHostOperationRpcInput, HostOperationDispatchError> =>
-  Schema.encode(HostOperationDispatchInput)(input).pipe(
+  Schema.encodeEffect(HostOperationDispatchInput)(input).pipe(
     Effect.mapError(
       (cause) =>
         new HostOperationDispatchError({
@@ -46,7 +46,7 @@ export const callCodeModeObjectHostOperation = (input: {
     // proof, so validate the returned logical protocol before shared HTTP code
     // trusts or projects the operation-specific response.
     Effect.flatMap((response) =>
-      Schema.decodeUnknown(HostOperationResponse)(response, {
+      Schema.decodeUnknownEffect(HostOperationResponse)(response, {
         errors: "all",
       }).pipe(
         Effect.mapError(

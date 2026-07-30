@@ -27,7 +27,7 @@ export type ConfigureHostSecretsRequest = Schema.Schema.Type<
 >;
 
 /** Operation-owned result for host secret setup. */
-export const ConfigureHostSecretsResult = Schema.Union(
+export const ConfigureHostSecretsResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
     configured: Schema.Literal(true),
@@ -45,7 +45,7 @@ export const ConfigureHostSecretsResult = Schema.Union(
       message: Schema.String,
     }),
   }),
-);
+]);
 export type ConfigureHostSecretsResult = Schema.Schema.Type<
   typeof ConfigureHostSecretsResult
 >;

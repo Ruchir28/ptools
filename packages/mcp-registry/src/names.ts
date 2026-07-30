@@ -68,13 +68,11 @@ export const buildNameMap = (
 
     for (const [jsName, collidingOriginals] of byJsName) {
       if (collidingOriginals.length > 1) {
-        return yield* Effect.fail(
-          new NameCollisionError({
-            scope,
-            jsName,
-            originals: collidingOriginals,
-          }),
-        );
+        return yield* new NameCollisionError({
+          scope,
+          jsName,
+          originals: collidingOriginals,
+        });
       }
     }
 

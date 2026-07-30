@@ -30,24 +30,20 @@ export const dispatchToolCall = (
     );
 
     if (tool === undefined) {
-      return yield* Effect.fail(
-        new ToolNotFound({
-          serverName: request.jsServerName,
-          toolName: request.jsToolName,
-        }),
-      );
+      return yield* new ToolNotFound({
+        serverName: request.jsServerName,
+        toolName: request.jsToolName,
+      });
     }
 
     const toolArguments = request.arguments;
 
     if (!isRecord(toolArguments)) {
-      return yield* Effect.fail(
-        new InvalidToolArguments({
-          serverName: tool.serverName,
-          toolName: tool.originalToolName,
-          value: toolArguments,
-        }),
-      );
+      return yield* new InvalidToolArguments({
+        serverName: tool.serverName,
+        toolName: tool.originalToolName,
+        value: toolArguments,
+      });
     }
 
     const connected = clients.find(
@@ -55,12 +51,10 @@ export const dispatchToolCall = (
     );
 
     if (connected === undefined) {
-      return yield* Effect.fail(
-        new ToolNotFound({
-          serverName: tool.serverName,
-          toolName: tool.originalToolName,
-        }),
-      );
+      return yield* new ToolNotFound({
+        serverName: tool.serverName,
+        toolName: tool.originalToolName,
+      });
     }
 
     return yield* Effect.tryPromise({

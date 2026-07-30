@@ -9,7 +9,7 @@
  * These are pure data contracts, distinct from the runtime types in
  * `../types.ts` (which are `Data.Class`/interfaces because they may carry
  * non-serializable callback functions). Decode unknown payloads with
- * `Schema.decodeUnknown(...)` on the way in and `Schema.encode(...)` on the
+ * `Schema.decodeUnknownEffect(...)` on the way in and `Schema.encodeEffect(...)` on the
  * way out.
  *
  * Naming convention: the exported schema value and its decoded TypeScript type
@@ -22,7 +22,7 @@
  * noisy `FooSchema` / `Foo` split while preserving both runtime validation and
  * static typing.
  *
- * Optional fields here use `Schema.optionalWith(..., { exact: true })` because
+ * Optional fields here use `Schema.optionalKey(...)` because
  * they are transport fields and should encode as omitted properties when
  * absent. `Option` is reserved for values that stay inside Effect-managed
  * executor internals, such as `ExecuteRequest`.
@@ -34,17 +34,23 @@ import { Schema } from "effect";
  * envelopes across transport.
  */
 export const SerializedSandboxError = Schema.Struct({
-  name: Schema.optionalWith(Schema.String, { exact: true }),
+  name: Schema.optionalKey(Schema.String),
   message: Schema.String,
-  stack: Schema.optionalWith(Schema.String, { exact: true }),
-  code: Schema.optionalWith(Schema.String, { exact: true }),
+  stack: Schema.optionalKey(Schema.String),
+  code: Schema.optionalKey(Schema.String),
 });
 
 export type SerializedSandboxError = Schema.Schema.Type<
   typeof SerializedSandboxError
 >;
 
-export const LogLevel = Schema.Literal("debug", "error", "info", "log", "warn");
+export const LogLevel = Schema.Literals([
+  "debug",
+  "error",
+  "info",
+  "log",
+  "warn",
+]);
 
 export type LogLevel = Schema.Schema.Type<typeof LogLevel>;
 
@@ -75,7 +81,7 @@ export type SandboxProviderManifest = Schema.Schema.Type<
 /** Semantic data required to start generated code; contains no host callbacks. */
 export const SandboxExecutionPayload = Schema.Struct({
   code: Schema.String,
-  globals: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  globals: Schema.Record(Schema.String, Schema.Unknown),
   providers: Schema.Array(SandboxProviderManifest),
 });
 
@@ -104,19 +110,18 @@ export type SandboxProviderCall = Schema.Schema.Type<
  * carries `value`; failure carries a `SerializedSandboxError`. Produced by
  * `invokeProviderCall`.
  */
-export const SandboxProviderCallResult = Schema.Union(
+export const SandboxProviderCallResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
     callId: Schema.String,
-    value: Schema.optionalWith(Schema.Unknown, { exact: true }),
+    value: Schema.optionalKey(Schema.Unknown),
   }),
   Schema.Struct({
     ok: Schema.Literal(false),
     callId: Schema.String,
     error: SerializedSandboxError,
   }),
-);
-
+]);
 export type SandboxProviderCallResult = Schema.Schema.Type<
   typeof SandboxProviderCallResult
 >;
@@ -126,7 +131,7 @@ export type SandboxProviderCallResult = Schema.Schema.Type<
  * The kernel drains the call before completion and reports its real outcome so
  * callers are informed without being encouraged to replay a possible mutation.
  */
-export const ProviderCallPendingAtReturnWarning = Schema.Union(
+export const ProviderCallPendingAtReturnWarning = Schema.Union([
   Schema.Struct({
     code: Schema.Literal("ProviderCallPendingAtReturn"),
     callId: Schema.String,
@@ -142,7 +147,7 @@ export const ProviderCallPendingAtReturnWarning = Schema.Union(
     outcome: Schema.Literal("failed"),
     error: SerializedSandboxError,
   }),
-);
+]);
 
 export type ProviderCallPendingAtReturnWarning = Schema.Schema.Type<
   typeof ProviderCallPendingAtReturnWarning
@@ -157,10 +162,10 @@ export type SandboxExecutionWarning = ProviderCallPendingAtReturnWarning;
  * warnings; failure carries a `SerializedSandboxError` + `logs` and an empty
  * warning list until failure metadata propagation is designed.
  */
-export const SandboxCompletion = Schema.Union(
+export const SandboxCompletion = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
-    value: Schema.optionalWith(Schema.Unknown, { exact: true }),
+    value: Schema.optionalKey(Schema.Unknown),
     logs: Schema.Array(CapturedLog),
     warnings: Schema.Array(SandboxExecutionWarning),
   }),
@@ -170,8 +175,7 @@ export const SandboxCompletion = Schema.Union(
     logs: Schema.Array(CapturedLog),
     warnings: Schema.Array(SandboxExecutionWarning),
   }),
-);
-
+]);
 export type SandboxCompletion = Schema.Schema.Type<typeof SandboxCompletion>;
 
 /** Host message that starts the single execution owned by this process. */
@@ -213,19 +217,19 @@ export type SandboxToHostCompleteMessage = Schema.Schema.Type<
 >;
 
 /** Decoder for every message flowing from the trusted host to the sandbox. */
-export const HostToSandboxMessage = Schema.Union(
+export const HostToSandboxMessage = Schema.Union([
   HostToSandboxExecuteMessage,
   HostToSandboxProviderResultMessage,
-);
+]);
 export type HostToSandboxMessage = Schema.Schema.Type<
   typeof HostToSandboxMessage
 >;
 
 /** Decoder for every untrusted message flowing from sandbox to host. */
-export const SandboxToHostMessage = Schema.Union(
+export const SandboxToHostMessage = Schema.Union([
   SandboxToHostProviderCallMessage,
   SandboxToHostCompleteMessage,
-);
+]);
 export type SandboxToHostMessage = Schema.Schema.Type<
   typeof SandboxToHostMessage
 >;

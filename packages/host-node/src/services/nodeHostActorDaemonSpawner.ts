@@ -5,7 +5,7 @@
  * Node process mechanism and packaged entrypoint resolution, which lets tests
  * replace process creation without mixing executable callbacks into settings.
  */
-import { Data, Effect, Runtime } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 import { spawn as spawnChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { NodeHostActorRuntimeOptions } from "../hostActorDaemon/actorRuntime/contracts/nodeHostActorRuntimeOptions.js";
@@ -20,14 +20,33 @@ export interface NodeHostActorDaemonSpawnerOperations {
   ) => Effect.Effect<void, NodeHostActorDaemonSpawnError>;
 }
 
-/** Package-owned detached-daemon spawner with an overridable default layer. */
-export class NodeHostActorDaemonSpawner extends Effect.Service<NodeHostActorDaemonSpawner>()(
+/**
+ * Parent-process capability for launching the detached daemon executable.
+ *
+ * Building this service does not build the daemon's services or transfer the
+ * current Effect context to the child. `start` only spawns a fresh Node process
+ * and passes machine settings as command-line arguments. The child entrypoint
+ * constructs its own independent Effect runtime and service layers.
+ *
+ * A `ChildProcess` can emit an error after the initial spawn handshake, when
+ * Node invokes a plain JavaScript callback outside the Effect that started it.
+ * Effect v4 has no separate `Runtime` value to capture at this boundary;
+ * `Effect.runForkWith` starts a root fiber from a captured `Context`. Capturing
+ * the parent context therefore preserves its logger references and other
+ * runtime configuration for that late log instead of silently falling back to
+ * an empty context where `CurrentLoggers` resolves to its defaults.
+ *
+ * This context remains in the parent process. It is never transferred to the
+ * daemon child, which constructs its own independent runtime and services.
+ */
+export class NodeHostActorDaemonSpawner extends Context.Service<NodeHostActorDaemonSpawner>()(
   "@ptools/host-node/NodeHostActorDaemonSpawner",
   {
-    effect: Effect.gen(function* () {
-      const runtime = yield* Effect.runtime<never>();
+    make: Effect.gen(function* () {
+      const parentContext = yield* Effect.context<never>();
+      const runInParentContext = Effect.runForkWith(parentContext);
       const reportLateError = (cause: unknown): void => {
-        void Runtime.runFork(runtime)(
+        runInParentContext(
           Effect.logError(
             "Detached Node host-actor daemon process error.",
           ).pipe(Effect.annotateLogs({ cause })),
@@ -39,7 +58,9 @@ export class NodeHostActorDaemonSpawner extends Effect.Service<NodeHostActorDaem
       } satisfies NodeHostActorDaemonSpawnerOperations;
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 /**
  * Wait for Node's launch handshake instead of treating `spawn()` returning as
@@ -51,7 +72,7 @@ const startDetachedDaemon = (
   options: NodeHostActorRuntimeOptions,
   reportLateError: (cause: unknown) => void,
 ): Effect.Effect<void, NodeHostActorDaemonSpawnError> =>
-  Effect.async<void, NodeHostActorDaemonSpawnError>((resume) => {
+  Effect.callback<void, NodeHostActorDaemonSpawnError>((resume) => {
     try {
       const runningFromTypeScript = import.meta.url.endsWith(".ts");
       const entrypoint = fileURLToPath(

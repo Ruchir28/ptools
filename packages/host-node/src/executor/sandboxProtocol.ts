@@ -15,7 +15,7 @@ export const MAX_SANDBOX_FRAME_BYTES = 1024 * 1024;
 export const encodeHostMessage = (
   message: HostToSandboxMessage,
 ): Effect.Effect<string, ExecutorProtocolError> =>
-  Schema.decodeUnknown(HostToSandboxMessageSchema)(message).pipe(
+  Schema.decodeUnknownEffect(HostToSandboxMessageSchema)(message).pipe(
     Effect.flatMap((validated) =>
       Effect.try({
         try: () => {
@@ -59,7 +59,7 @@ export const decodeSandboxMessage = (
         cause,
       }),
   }).pipe(
-    Effect.flatMap(Schema.decodeUnknown(SandboxToHostMessageSchema)),
+    Effect.flatMap(Schema.decodeUnknownEffect(SandboxToHostMessageSchema)),
     Effect.mapError((cause) =>
       cause instanceof ExecutorProtocolError
         ? cause

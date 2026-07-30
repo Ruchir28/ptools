@@ -9,6 +9,17 @@
  * This is the lifecycle owner for configured services. Platform shells should
  * not implement their own origin cache, Context rebuild, or finalizer logic —
  * pass origin/config changes here instead.
+ *
+ * There are three related lifetimes:
+ *
+ * 1. The stable host runtime owns this runner and the `RcMap`.
+ * 2. Each cached key owns a configured Context and its scoped resources.
+ * 3. Each `run` temporarily leases that Context while its operation executes.
+ *
+ * Invalidation immediately removes an entry from the map, so later calls cannot
+ * acquire it. It does not interrupt existing users: the entry's resources close
+ * only after the last `run` holding a lease finishes. This is why the runner
+ * uses `RcMap` rather than storing a bare Context in a mutable reference.
  */
 import {
   HostIdentity,
@@ -22,10 +33,10 @@ import {
   Context,
   Duration,
   Effect,
-  Exit,
   Layer,
+  RcMap,
   Scope,
-  ScopedCache,
+  Semaphore,
 } from "effect";
 import { ConfiguredHostContextError } from "../errors.js";
 import {
@@ -50,7 +61,7 @@ export interface ConfiguredHostContextRunnerOperations {
    */
   readonly run: <A, E>(
     binding: HostRuntimeBinding,
-    effect: Effect.Effect<A, E, ConfiguredHostOperationServices>,
+    make: Effect.Effect<A, E, ConfiguredHostOperationServices>,
   ) => Effect.Effect<A, E | ConfiguredHostContextError>;
   /**
    * Drop every cached configured Context after config or secrets are replaced.
@@ -82,39 +93,100 @@ const makeConfiguredHostContextRunner: Effect.Effect<
   const stableContext =
     yield* Effect.context<ConfiguredHostContextRunnerRequirements>();
   const stableLayer = Layer.succeedContext(stableContext);
-  // Capacity one implements first-release origin latching: the normal case
-  // stays warm indefinitely, while a different public origin replaces the old
-  // scoped Context. Failed builds receive zero TTL so a corrected config or
-  // transient dependency can be retried immediately.
-  const cache = yield* ScopedCache.makeWith<
+  // RcMap is the v4 reference-counted resource cache. `RcMap.get` does more
+  // than read a value: it registers a lease in the caller's Scope. Invalidating
+  // a key removes it from this map immediately, but its private resource Scope
+  // stays open until all leases on that specific entry have been released.
+  //
+  // `idleTimeToLive` is infinite because a successfully built Context should be
+  // reused until config/secrets are explicitly invalidated or a different
+  // origin replaces it. The stable runtime's Scope remains the ultimate owner
+  // and closes all remaining entries during runtime disposal.
+  const cache = yield* RcMap.make<
     string,
     Context.Context<ConfiguredHostOperationServices>,
-    ConfiguredHostContextError
+    ConfiguredHostContextError,
+    Scope.Scope
   >({
-    capacity: 1,
     lookup: (origin) => buildConfiguredContext(origin, stableLayer),
-    timeToLive: (exit) =>
-      Exit.isSuccess(exit) ? Duration.infinity : Duration.zero,
+    idleTimeToLive: Duration.infinity,
   });
+  // Selecting a Context is a multi-step transition: inspect the cached keys,
+  // invalidate keys for older origins, and then acquire the requested key. An
+  // RcMap deduplicates concurrent `get`s for one key, but it does not make that
+  // whole cross-key transition atomic. Without this permit, concurrent calls
+  // for origins A and B could interleave and invalidate the entry that the
+  // other call has just selected.
+  //
+  // The permit therefore linearizes only that short selection/acquisition
+  // phase. `RcMap.get` registers a lease before the permit is released. The
+  // caller's operation then runs outside the permit, protected by that lease,
+  // so long-running configured work does not block another operation from
+  // selecting or leasing a Context.
+  const selection = yield* Semaphore.make(1);
+
+  // Invalidation is intentionally non-blocking with respect to in-flight
+  // operations. `RcMap.invalidate` removes each key from future selection now;
+  // if an entry is still leased, its finalizer runs later when that entry's
+  // final lease is released. `discard` only ignores the `void` results from the
+  // loop—it does not discard or prematurely close leased Contexts.
+  const invalidateAll = Effect.suspend(() =>
+    RcMap.keys(cache).pipe(
+      Effect.flatMap((keys) =>
+        Effect.forEach(keys, (key) => RcMap.invalidate(cache, key), {
+          discard: true,
+        }),
+      ),
+    ),
+  );
 
   return {
-    run: (binding, effect) =>
-      // The cache owns each Context and its resource scope. `cache.get` also
-      // needs a fresh, per-operation scope: it registers a temporary lease
-      // there while `effect` uses the Context. Closing this scope releases only
-      // that lease; eviction or invalidation closes MCP connections only after
-      // every active lease has been released.
-      Effect.scoped(
-        cache
-          .get(hostRuntimeBindingCacheKey(binding))
+    run: (binding, effect) => {
+      // The key is stable across fresh `{ origin }` objects. This avoids RcMap's
+      // reference-identity behavior for ordinary object keys.
+      const key = hostRuntimeBindingCacheKey(binding);
+
+      // This Scope lasts through the caller's entire operation. `RcMap.get`
+      // attaches its lease finalizer to this Scope, so the Context cannot be
+      // finalized while `effect` is still using services from it.
+      return Effect.scoped(
+        selection
+          .withPermit(
+            RcMap.keys(cache).pipe(
+              // The runner intentionally latches one origin. Remove entries for
+              // older origins before selecting the requested one. Removal only
+              // prevents future leases; in-flight operations retain their old
+              // Context until their own `run` Scopes close.
+              Effect.flatMap((keys) =>
+                Effect.forEach(
+                  keys,
+                  (cachedKey) =>
+                    cachedKey === key
+                      ? Effect.void
+                      : RcMap.invalidate(cache, cachedKey),
+                  { discard: true },
+                ),
+              ),
+              // This returns the configured Context—not the key—and registers
+              // its reference-counted lease in the surrounding `Effect.scoped`.
+              Effect.andThen(RcMap.get(cache, key)),
+            ),
+          )
           .pipe(
+            // The semaphore covers only origin selection and lease acquisition.
+            // It is released before the user operation runs, so concurrent
+            // operations are not serialized once each has a safe lease.
+            //
+            // RcMap retains failed acquisitions like successful idle entries.
+            // Remove only a failed lookup so corrected persisted config or a
+            // transient dependency can retry; operation failures occur after
+            // this tap and do not invalidate a healthy configured Context.
+            Effect.tapError(() => RcMap.invalidate(cache, key)),
             Effect.flatMap((context) => effect.pipe(Effect.provide(context))),
           ),
-      ),
-    // `ScopedCache.invalidateAll` is a getter that snapshots current keys when
-    // accessed. Defer that access until this Effect runs; capturing it here
-    // would permanently capture the cache's initially empty key set.
-    invalidateAll: Effect.suspend(() => cache.invalidateAll),
+      );
+    },
+    invalidateAll,
   } satisfies ConfiguredHostContextRunnerOperations;
 });
 
@@ -126,15 +198,17 @@ const makeConfiguredHostContextRunner: Effect.Effect<
  * the cache key, builds `ConfiguredHostContextLayer` on a miss, and provides
  * that Context to the caller's Effect.
  *
- * `.Default` is scoped because the cache owns scoped resources and must be
+ * Its Layer is scoped because the cache owns scoped resources and must be
  * finalized when the platform-owned stable `ManagedRuntime` is disposed.
  */
-export class ConfiguredHostContextRunner extends Effect.Service<ConfiguredHostContextRunner>()(
+export class ConfiguredHostContextRunner extends Context.Service<ConfiguredHostContextRunner>()(
   "@ptools/host-runtime/ConfiguredHostContextRunner",
   {
-    scoped: makeConfiguredHostContextRunner,
+    make: makeConfiguredHostContextRunner,
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 /**
  * Build one scoped configured Context for a public origin.

@@ -9,7 +9,7 @@ import { McpOAuthStateStore, type McpOAuthStatePayload } from "../src/index.js";
  * be the only protection against accepting a callback for the wrong host,
  * provider, or authorization attempt.
  */
-describe("McpOAuthStateStore.Default", () => {
+describe("McpOAuthStateStore.layer", () => {
   it("rejects a state for another host without consuming the issuing host's state", async () => {
     const fixture = makeStateStoreFixture();
     const state = await sign(fixture.layer, payload());
@@ -121,17 +121,17 @@ const verify = (
 const makeStateStoreFixture = () => {
   const values = new Map<string, string>();
   const storage: HostStorageOperations = {
-    get: (key) => Effect.sync(() => Option.fromNullable(values.get(key))),
+    get: (key) => Effect.sync(() => Option.fromNullishOr(values.get(key))),
     put: (key, value) => Effect.sync(() => void values.set(key, value)),
     delete: (key) => Effect.sync(() => void values.delete(key)),
   };
-  const hostSecretStorage = HostSecretStorage.make({
+  const hostSecretStorage = HostSecretStorage.of({
     hostId: "demo",
     ...storage,
   });
 
   return {
-    layer: McpOAuthStateStore.Default.pipe(
+    layer: McpOAuthStateStore.layer.pipe(
       Layer.provide(Layer.succeed(HostSecretStorage, hostSecretStorage)),
     ),
   };

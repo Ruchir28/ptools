@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { NameCollisionError } from "../src/errors.js";
 import {
   buildNameMap,
@@ -28,28 +28,31 @@ describe("names", () => {
 
   it("fails when two original names sanitize to the same JS name", async () => {
     const result = await Effect.runPromise(
-      Effect.either(buildNameMap(["create-issue", "create_issue"], "tools")),
+      Effect.result(buildNameMap(["create-issue", "create_issue"], "tools")),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(NameCollisionError);
-      expect(result.left.jsName).toBe("create_issue");
-      expect(result.left.originals).toEqual(["create-issue", "create_issue"]);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(NameCollisionError);
+      expect(result.failure.jsName).toBe("create_issue");
+      expect(result.failure.originals).toEqual([
+        "create-issue",
+        "create_issue",
+      ]);
     }
   });
 
   it("fails if a mapped name is missing", async () => {
     const result = await Effect.runPromise(
-      Effect.either(getMappedName(new Map(), "missing", "tools")),
+      Effect.result(getMappedName(new Map(), "missing", "tools")),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(NameCollisionError);
-      expect(result.left.originals).toEqual(["missing"]);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(NameCollisionError);
+      expect(result.failure.originals).toEqual(["missing"]);
     }
   });
 });

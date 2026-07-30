@@ -24,7 +24,7 @@ export type ConfigureHostRequest = Schema.Schema.Type<
 >;
 
 /** Operation-owned result for host config setup. */
-export const ConfigureHostResult = Schema.Union(
+export const ConfigureHostResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
     configured: Schema.Literal(true),
@@ -35,15 +35,15 @@ export const ConfigureHostResult = Schema.Union(
   Schema.Struct({
     ok: Schema.Literal(false),
     error: Schema.Struct({
-      code: Schema.Literal(
+      code: Schema.Literals([
         "invalid_config",
         "unsupported_config",
         "config_storage_unavailable",
-      ),
+      ]),
       message: Schema.String,
     }),
   }),
-);
+]);
 export type ConfigureHostResult = Schema.Schema.Type<
   typeof ConfigureHostResult
 >;

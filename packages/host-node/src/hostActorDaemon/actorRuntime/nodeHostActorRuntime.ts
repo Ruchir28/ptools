@@ -84,7 +84,7 @@ export const makeNodeHostActorRuntime = (
  *
  * Production supplies Node adapters above; tests may supply in-memory ports
  * without replacing shared stores, context caching, or operation handling. The
- * eager `runtimeEffect` evaluation ensures Layer acquisition failures occur
+ * eager `contextEffect` evaluation ensures Layer acquisition failures occur
  * before the manager publishes this actor. The returned wrapper retains the
  * `ManagedRuntime` solely for dispatch and deterministic scope disposal.
  */
@@ -97,7 +97,7 @@ export const makeNodeHostActorRuntimeFromPlatformLayers = (
     unknown
   > = ManagedRuntime.make(makeNodeHostActorRuntimeLayer(hostId, platform));
 
-  return managedRuntime.runtimeEffect.pipe(
+  return managedRuntime.contextEffect.pipe(
     mapRuntimeCause(
       hostId,
       NodeHostActorRuntimePhase.Activate,
@@ -107,43 +107,46 @@ export const makeNodeHostActorRuntimeFromPlatformLayers = (
     // publishes this actor. Deliberately discard the returned raw Runtime:
     // dispatch provides the ManagedRuntime itself, so disposal invalidates
     // future dispatch instead of leaving a captured Runtime usable afterward.
-    Effect.as({
-      hostId,
-      dispatch: (input: HostOperationDispatchInput) =>
-        Effect.flatMap(HostInstanceHandler, (handler) =>
-          handler.handle(input),
-        ).pipe(
-          /**
-           * Effect 3.21 `provide(ManagedRuntime)` enters the actor on the current
-           * request fiber; it does not create a thread, fiber, or actor mailbox.
-           * It fiber-locally overlays the actor Context, FiberRefs, and runtime
-           * flags, with actor services winning duplicate Context tags, and then
-           * restores the request fiber in an `ensuring` finalizer. Consequently,
-           * concurrent host IDs receive independent HostIdentity values without
-           * mutating the manager Context.
-           *
-           * Non-colliding manager services remain visible because Contexts are
-           * merged, so this is an ownership/execution boundary, not a security
-           * sandbox. The typed operation requires only HostInstanceHandler. If a
-           * future design needs a strictly separate execution fiber or mailbox,
-           * use Runtime.runFork and explicitly bridge interruption/completion
-           * rather than assuming `provide` supplies that isolation.
-           */
-          Effect.provide(managedRuntime),
-          mapRuntimeCause(
-            hostId,
-            NodeHostActorRuntimePhase.Execute,
-            "Failed to execute a host actor operation.",
-          ),
-        ),
-      dispose: managedRuntime.disposeEffect.pipe(
-        mapRuntimeCause(
+    Effect.map(
+      () =>
+        ({
           hostId,
-          NodeHostActorRuntimePhase.Dispose,
-          "Failed to dispose host actor runtime.",
-        ),
-      ),
-    } satisfies NodeHostActorRuntime),
+          dispatch: (input: HostOperationDispatchInput) =>
+            managedRuntime.contextEffect.pipe(
+              Effect.flatMap((context) =>
+                Effect.flatMap(HostInstanceHandler, (handler) =>
+                  handler.handle(input),
+                ).pipe(
+                  /**
+                   * Supplying the actor Context enters it on the current request
+                   * fiber; it does not create a thread, fiber, or actor mailbox.
+                   * Actor services win duplicate Context tags and the request
+                   * Context is restored afterward. Concurrent host IDs therefore
+                   * receive independent HostIdentity values without mutating the
+                   * manager Context.
+                   *
+                   * Fetching the Context through ManagedRuntime for every dispatch
+                   * also makes disposal authoritative: no raw Context survives for
+                   * calls after the actor scope has closed.
+                   */
+                  Effect.provide(context),
+                ),
+              ),
+              mapRuntimeCause(
+                hostId,
+                NodeHostActorRuntimePhase.Execute,
+                "Failed to execute a host actor operation.",
+              ),
+            ),
+          dispose: managedRuntime.disposeEffect.pipe(
+            mapRuntimeCause(
+              hostId,
+              NodeHostActorRuntimePhase.Dispose,
+              "Failed to dispose host actor runtime.",
+            ),
+          ),
+        }) satisfies NodeHostActorRuntime,
+    ),
     Effect.onError(() => managedRuntime.disposeEffect),
   );
 };
@@ -158,8 +161,8 @@ const mapRuntimeCause =
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, NodeHostActorRuntimeError, R> =>
     effect.pipe(
-      Effect.catchAllCause((cause) =>
-        Cause.isInterruptedOnly(cause)
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
           ? Effect.interrupt
           : Effect.fail(
               new NodeHostActorRuntimeError({
@@ -177,7 +180,7 @@ const appendTypedFailureMessage = <E>(
   message: string,
   cause: Cause.Cause<E>,
 ): string =>
-  Option.match(Cause.failureOption(cause), {
+  Option.match(Cause.findErrorOption(cause), {
     onNone: () => message,
     onSome: (failure) => {
       if (

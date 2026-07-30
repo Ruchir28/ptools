@@ -10,7 +10,8 @@ import {
   HttpApiEndpoint,
   HttpApiGroup,
   HttpApiSchema,
-} from "@effect/platform";
+} from "effect/unstable/httpapi";
+import { Schema } from "effect";
 import { CodeModeRequest } from "@ptools/code-mode-api/contracts";
 import {
   ConfigureHostInput,
@@ -39,6 +40,13 @@ import {
   RequireHostApiAccess,
 } from "../../services/hostHttpMiddleware.js";
 
+const HostHttpRouteErrors = [
+  HostHttpBadRequest,
+  HostHttpUnauthorized,
+  HostHttpHostUnavailable,
+  HostHttpInternalError,
+] as const;
+
 /**
  * Credentialed JSON API routes for normal Host API clients.
  *
@@ -47,58 +55,48 @@ import {
  * platform middleware derives `HostHttpIngress`.
  */
 export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
+  .add(
+    HttpApiEndpoint.post("codeMode", "/hosts/:hostId/code-mode", {
+      params: HostPath,
+      payload: CodeModeRequest,
+      success: HostCodeModeResponse,
+      error: HostHttpRouteErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.put("configure", "/hosts/:hostId/config", {
+      params: HostPath,
+      payload: ConfigureHostInput,
+      success: ConfigureHostResponse,
+      error: HostHttpRouteErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.put("configureSecrets", "/hosts/:hostId/secrets", {
+      params: HostPath,
+      payload: ConfigureHostSecretsInput,
+      success: ConfigureHostSecretsResponse,
+      error: HostHttpRouteErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("mcpAuthStatus", "/hosts/:hostId/auth/status", {
+      params: HostPath,
+      payload: EmptyHttpPayload,
+      success: HostMcpAuthStatusResponse,
+      error: HostHttpRouteErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("startMcpAuth", "/hosts/:hostId/auth/:serverName", {
+      params: HostMcpServerPath,
+      payload: StartMcpAuthHttpPayload,
+      success: StartHostMcpAuthResponse,
+      error: HostHttpRouteErrors,
+    }),
+  )
   .middleware(ProvideHostHttpIngress)
-  .middleware(RequireHostApiAccess)
-  .add(
-    HttpApiEndpoint.post("codeMode", "/hosts/:hostId/code-mode")
-      .setPath(HostPath)
-      .setPayload(CodeModeRequest)
-      .addSuccess(HostCodeModeResponse)
-      .addError(HostHttpBadRequest)
-      .addError(HostHttpUnauthorized)
-      .addError(HostHttpHostUnavailable)
-      .addError(HostHttpInternalError),
-  )
-  .add(
-    HttpApiEndpoint.put("configure", "/hosts/:hostId/config")
-      .setPath(HostPath)
-      .setPayload(ConfigureHostInput)
-      .addSuccess(ConfigureHostResponse)
-      .addError(HostHttpBadRequest)
-      .addError(HostHttpUnauthorized)
-      .addError(HostHttpHostUnavailable)
-      .addError(HostHttpInternalError),
-  )
-  .add(
-    HttpApiEndpoint.put("configureSecrets", "/hosts/:hostId/secrets")
-      .setPath(HostPath)
-      .setPayload(ConfigureHostSecretsInput)
-      .addSuccess(ConfigureHostSecretsResponse)
-      .addError(HostHttpBadRequest)
-      .addError(HostHttpUnauthorized)
-      .addError(HostHttpHostUnavailable)
-      .addError(HostHttpInternalError),
-  )
-  .add(
-    HttpApiEndpoint.post("mcpAuthStatus", "/hosts/:hostId/auth/status")
-      .setPath(HostPath)
-      .setPayload(EmptyHttpPayload)
-      .addSuccess(HostMcpAuthStatusResponse)
-      .addError(HostHttpBadRequest)
-      .addError(HostHttpUnauthorized)
-      .addError(HostHttpHostUnavailable)
-      .addError(HostHttpInternalError),
-  )
-  .add(
-    HttpApiEndpoint.post("startMcpAuth", "/hosts/:hostId/auth/:serverName")
-      .setPath(HostMcpServerPath)
-      .setPayload(StartMcpAuthHttpPayload)
-      .addSuccess(StartHostMcpAuthResponse)
-      .addError(HostHttpBadRequest)
-      .addError(HostHttpUnauthorized)
-      .addError(HostHttpHostUnavailable)
-      .addError(HostHttpInternalError),
-  ) {}
+  .middleware(RequireHostApiAccess) {}
 
 /**
  * Browser/OAuth callback routes; these do not use Host API bearer auth.
@@ -108,31 +106,33 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
  * middleware used by credentialed API routes.
  */
 export class OAuthBrowserGroup extends HttpApiGroup.make("host.oauth")
-  .middleware(ProvideHostHttpIngress)
   .add(
     HttpApiEndpoint.get(
       "completeOAuthCallbackGet",
       "/hosts/:hostId/oauth/callback/:provider",
-    )
-      .setPath(OAuthCallbackPath)
-      .addSuccess(HttpApiSchema.Text({ contentType: "text/html" }))
-      .addError(HostHttpBadRequest)
-      .addError(HostHttpUnauthorized)
-      .addError(HostHttpHostUnavailable)
-      .addError(HostHttpInternalError),
+      {
+        params: OAuthCallbackPath,
+        success: Schema.String.pipe(
+          HttpApiSchema.asText({ contentType: "text/html" }),
+        ),
+        error: HostHttpRouteErrors,
+      },
+    ),
   )
   .add(
     HttpApiEndpoint.post(
       "completeOAuthCallbackPost",
       "/hosts/:hostId/oauth/callback/:provider",
-    )
-      .setPath(OAuthCallbackPath)
-      .addSuccess(HttpApiSchema.Text({ contentType: "text/html" }))
-      .addError(HostHttpBadRequest)
-      .addError(HostHttpUnauthorized)
-      .addError(HostHttpHostUnavailable)
-      .addError(HostHttpInternalError),
-  ) {}
+      {
+        params: OAuthCallbackPath,
+        success: Schema.String.pipe(
+          HttpApiSchema.asText({ contentType: "text/html" }),
+        ),
+        error: HostHttpRouteErrors,
+      },
+    ),
+  )
+  .middleware(ProvideHostHttpIngress) {}
 
 /** Complete shared Host HTTP API declaration. */
 export class HostHttpApi extends HttpApi.make("ptools-host")

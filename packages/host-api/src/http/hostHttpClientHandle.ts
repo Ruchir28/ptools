@@ -44,7 +44,10 @@ export const makeHostHttpClientHandle = async <E>(
   const managedRuntime = ManagedRuntime.make(completeLayer);
 
   try {
-    await managedRuntime.runtime();
+    // Eagerly build layers so invalid config fails here, not on first call.
+    // No business request is sent; only service construction runs.
+    await managedRuntime.context();
+    // Tear down the runtime (finalizers + drop services) for handle/codeMode.
     const close = () => managedRuntime.dispose();
 
     return {
@@ -80,7 +83,7 @@ const makeCodeModeClientHandle = <E>(
 
 /** Interpret the transport-agnostic operation envelope through named routes. */
 const callHostHttpClient = (
-  host: Context.Tag.Service<typeof HostHttpClient>,
+  host: Context.Service.Shape<typeof HostHttpClient>,
   request: HostOperationRequest,
 ): Effect.Effect<HostOperationResponse, unknown> => {
   switch (request.operation) {

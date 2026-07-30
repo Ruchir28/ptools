@@ -21,17 +21,8 @@
  * tries discovery first and only calls `spawner.start` when discovery fails;
  * the dying spawner stub makes accidental spawn paths fail loudly.
  */
-import * as NodeContext from "@effect/platform-node/NodeContext";
-import {
-  Data,
-  Effect,
-  ExecutionStrategy,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  Scope,
-} from "effect";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { Data, Effect, Exit, Fiber, Layer, Option, Scope } from "effect";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,7 +72,7 @@ it("releases the real daemon lease when the connection owner scope closes", asyn
           const parentScope = yield* Effect.scope;
           const connectionOwnerScope = yield* Scope.fork(
             parentScope,
-            ExecutionStrategy.sequential,
+            "sequential",
           );
 
           // Tripwire: start must never run. Discovery should succeed against the
@@ -89,7 +80,7 @@ it("releases the real daemon lease when the connection owner scope closes", asyn
           // this die would fail the test immediately.
           const unexpectedSpawnLayer = Layer.succeed(
             NodeHostActorDaemonSpawner,
-            NodeHostActorDaemonSpawner.make({
+            NodeHostActorDaemonSpawner.of({
               start: () =>
                 Effect.die(
                   "the already-running test daemon must be discovered",
@@ -102,7 +93,7 @@ it("releases the real daemon lease when the connection owner scope closes", asyn
           // Finalizers for lease release / heartbeat interrupt are registered on
           // that owner scope (and its forked children), not on the test parent.
           yield* Layer.buildWithScope(
-            NodeHostActorDaemonConnection.Default({
+            NodeHostActorDaemonConnection.layer({
               internalStateDirectory: directory,
               keyringServiceName: "ptools-daemon-connection-scope-test",
               heartbeatIntervalMs: 25,
@@ -114,23 +105,27 @@ it("releases the real daemon lease when the connection owner scope closes", asyn
 
           // Layer construction acquired a real lease; the daemon fiber must
           // still be running before we close the connection owner.
-          expect(Option.isNone(yield* Fiber.poll(daemon))).toBe(true);
+          expect(Option.isNone(Option.fromNullishOr(daemon.pollUnsafe()))).toBe(
+            true,
+          );
 
           // Close only the connection owner. That cascades into the connection's
           // child scope → interrupts heartbeat → ReleaseServerLease. The daemon
           // then sees zero leases, waits zeroLeaseGraceMs, and exits.
           yield* Scope.close(connectionOwnerScope, Exit.void);
           yield* Fiber.join(daemon).pipe(
-            Effect.timeoutFail({
+            Effect.timeoutOrElse({
               duration: "10 seconds",
-              onTimeout: () =>
-                new ConnectionLifecycleTestError({
-                  message:
-                    "Daemon did not exit after the connection scope released its lease.",
-                }),
+              orElse: () =>
+                Effect.fail(
+                  new ConnectionLifecycleTestError({
+                    message:
+                      "Daemon did not exit after the connection scope released its lease.",
+                  }),
+                ),
             }),
           );
-        }).pipe(Effect.provide(NodeContext.layer)),
+        }).pipe(Effect.provide(NodeServices.layer)),
       ),
     );
 

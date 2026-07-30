@@ -48,7 +48,7 @@ export const parseHostOperationResponseJson = (
 export const stringifyHostOperationRequestJson = (
   request: HostOperationRequest,
 ): Effect.Effect<string, HostOperationEncodeError> =>
-  Schema.encode(HostOperationRequest)(request).pipe(
+  Schema.encodeEffect(HostOperationRequest)(request).pipe(
     Effect.flatMap((encoded) =>
       Effect.try({
         try: () => JSON.stringify(encoded),
@@ -73,7 +73,7 @@ export const stringifyHostOperationRequestJson = (
 export const stringifyHostOperationResponseJson = (
   response: HostOperationResponse,
 ): Effect.Effect<string, HostOperationEncodeError> =>
-  Schema.encode(HostOperationResponse)(response).pipe(
+  Schema.encodeEffect(HostOperationResponse)(response).pipe(
     Effect.flatMap((encoded) =>
       Effect.try({
         try: () => JSON.stringify(encoded),

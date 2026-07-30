@@ -2,7 +2,7 @@
  * @file Wire contract for the daemon's private typed procedure surface.
  *
  * The daemon process and its trusted caller-side client share this `RpcGroup`.
- * Effect Schema owns application payload encoding while `@effect/rpc` owns
+ * Effect Schema owns application payload encoding while `effect/unstable/rpc` owns
  * request IDs, tracing, and envelopes. No handler, listener, lease state, or
  * actor runtime lives in this file.
  */
@@ -10,7 +10,7 @@ import {
   HostOperationDispatchInput,
   HostOperationResponse,
 } from "@ptools/host-api";
-import { Rpc, RpcGroup, RpcMiddleware } from "@effect/rpc";
+import { Rpc, RpcGroup, RpcMiddleware } from "effect/unstable/rpc";
 import { Schema } from "effect";
 
 export const NODE_HOST_ACTOR_DAEMON_PROTOCOL_VERSION = "1";
@@ -39,54 +39,54 @@ export type NodeDaemonServerLease = Schema.Schema.Type<
   typeof NodeDaemonServerLease
 >;
 
-export const NodeDaemonLeaseReleaseResult = Schema.Union(
+export const NodeDaemonLeaseReleaseResult = Schema.Union([
   Schema.TaggedStruct("Released", {}),
   Schema.TaggedStruct("NotFound", {}),
-);
+]);
 export type NodeDaemonLeaseReleaseResult = Schema.Schema.Type<
   typeof NodeDaemonLeaseReleaseResult
 >;
 
 /** Missing or incorrect private daemon credential. */
-export class NodeDaemonUnauthorized extends Schema.TaggedError<NodeDaemonUnauthorized>()(
+export class NodeDaemonUnauthorized extends Schema.TaggedErrorClass<NodeDaemonUnauthorized>()(
   "NodeDaemonUnauthorized",
   { message: Schema.String },
 ) {}
 
 /** Caller and live daemon use incompatible ptools protocol versions. */
-export class NodeDaemonProtocolVersionMismatch extends Schema.TaggedError<NodeDaemonProtocolVersionMismatch>()(
+export class NodeDaemonProtocolVersionMismatch extends Schema.TaggedErrorClass<NodeDaemonProtocolVersionMismatch>()(
   "NodeDaemonProtocolVersionMismatch",
   { expected: Schema.String, received: Schema.String },
 ) {}
 
 /** Unknown, expired, or no-longer-admissible server lease. */
-export class NodeDaemonLeaseRejected extends Schema.TaggedError<NodeDaemonLeaseRejected>()(
+export class NodeDaemonLeaseRejected extends Schema.TaggedErrorClass<NodeDaemonLeaseRejected>()(
   "NodeDaemonLeaseRejected",
   {
     leaseId: Schema.String,
-    reason: Schema.Literal("unknown", "expired", "shutting-down"),
+    reason: Schema.Literals(["unknown", "expired", "shutting-down"]),
     message: Schema.String,
   },
 ) {}
 
 /** Safe serializable projection of an actor runtime lifecycle failure. */
-export class NodeHostActorRuntimeRpcError extends Schema.TaggedError<NodeHostActorRuntimeRpcError>()(
+export class NodeHostActorRuntimeRpcError extends Schema.TaggedErrorClass<NodeHostActorRuntimeRpcError>()(
   "NodeHostActorRuntimeRpcError",
   {
     hostId: Schema.String,
-    phase: Schema.Literal("activate", "execute", "dispose"),
+    phase: Schema.Literals(["activate", "execute", "dispose"]),
     message: Schema.String,
   },
 ) {}
 
 /** Applied to every daemon procedure; implementation checks HTTP headers. */
-export class NodeDaemonCredentialProtocolMiddleware extends RpcMiddleware.Tag<NodeDaemonCredentialProtocolMiddleware>()(
+export class NodeDaemonCredentialProtocolMiddleware extends RpcMiddleware.Service<NodeDaemonCredentialProtocolMiddleware>()(
   "@ptools/host-node/hostActorDaemon/NodeDaemonCredentialProtocolMiddleware",
   {
-    failure: Schema.Union(
+    error: Schema.Union([
       NodeDaemonUnauthorized,
       NodeDaemonProtocolVersionMismatch,
-    ),
+    ]),
   },
 ) {}
 
@@ -94,9 +94,9 @@ export class NodeDaemonCredentialProtocolMiddleware extends RpcMiddleware.Tag<No
  * RPC adapter that admits one host operation under its server lease and keeps
  * that admission active until the downstream handler Effect finishes.
  */
-export class NodeDaemonOperationAdmissionMiddleware extends RpcMiddleware.Tag<NodeDaemonOperationAdmissionMiddleware>()(
+export class NodeDaemonOperationAdmissionMiddleware extends RpcMiddleware.Service<NodeDaemonOperationAdmissionMiddleware>()(
   "@ptools/host-node/hostActorDaemon/NodeDaemonOperationAdmissionMiddleware",
-  { failure: NodeDaemonLeaseRejected, wrap: true },
+  { error: NodeDaemonLeaseRejected },
 ) {}
 
 /** Complete V1 private daemon procedure group. */

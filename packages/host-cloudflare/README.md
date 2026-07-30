@@ -4,7 +4,7 @@ Cloudflare host adapters for ptools.
 
 This package owns the Cloudflare Worker ingress surface and Durable Object
 handoff for hosted Code Mode. The first implementation slice exposes only the
-Effect v3 Worker ingress, public bearer auth, route parsing, and typed Durable
+Effect v4 Worker ingress, public bearer auth, route parsing, and typed Durable
 Object RPC boundary.
 
 The runtime uses standard Cloudflare bindings and keeps Alchemy out of Worker

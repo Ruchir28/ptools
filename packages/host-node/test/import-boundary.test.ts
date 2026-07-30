@@ -130,19 +130,17 @@ describe("host-node actor-daemon import boundaries", () => {
     );
     const contents = services.join("\n");
 
-    expect(contents).toContain("extends Effect.Service");
+    expect(contents).toContain("extends Context.Service");
     expect(contents).not.toContain("extends Context.Tag");
   });
 
   // Public HTTP should only discover/proxy to the daemon, not embed actor
   // runtime, MCP connector, Code Mode server, or the old in-process dispatcher.
   it("keeps public HTTP assembly free of actor/runtime platform layers", async () => {
-    const httpSources = await Promise.all(
-      ["http/hostHttp.ts", "http/nodeLocalHostHttpServer.ts"].map((file) =>
-        readFile(join(packageRoot, "src", file), "utf8"),
-      ),
+    const contents = await readFile(
+      join(packageRoot, "src/http/hostHttp.ts"),
+      "utf8",
     );
-    const contents = httpSources.join("\n");
 
     for (const forbidden of [
       "NodeHostRuntimeManager",

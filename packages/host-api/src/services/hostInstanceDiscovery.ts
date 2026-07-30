@@ -33,13 +33,11 @@ export interface HostInstanceHandle {
  * managers. The shared Host API only depends on this service, not on either
  * platform's lookup mechanism.
  */
-export class HostInstanceDiscovery extends Context.Tag(
-  "@ptools/HostInstanceDiscovery",
-)<
+export class HostInstanceDiscovery extends Context.Service<
   HostInstanceDiscovery,
   {
     readonly resolve: (
       hostId: string,
     ) => Effect.Effect<HostInstanceHandle, HostOperationDispatchError>;
   }
->() {}
+>()("@ptools/HostInstanceDiscovery") {}

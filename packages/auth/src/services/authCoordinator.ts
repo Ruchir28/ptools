@@ -1,6 +1,6 @@
 /** Shared AuthCoordinator service consumed by host MCP connectors. */
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import type { McpAuthStatus } from "../contracts/index.js";
 import type { AuthError } from "../authErrors.js";
 import type { HttpMcpConfig, UpstreamMcpConfig } from "../authTypes.js";
@@ -50,12 +50,14 @@ export interface AuthCoordinatorService {
  * The default implementation owns no separate state; it delegates to the shared
  * AuthCoordinatorCore built once per host runtime.
  */
-export class AuthCoordinator extends Effect.Service<AuthCoordinator>()(
+export class AuthCoordinator extends Context.Service<AuthCoordinator>()(
   "@ptools/AuthCoordinator",
   {
-    effect: makeAuthCoordinator(),
+    make: makeAuthCoordinator(),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 function makeAuthCoordinator(): Effect.Effect<
   AuthCoordinatorService,

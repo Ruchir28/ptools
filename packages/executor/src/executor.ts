@@ -12,14 +12,14 @@ import { decodeSandboxCompletion, prepareExecuteRequest } from "./execution.js";
  * `ExecutorBackend`. The shared implementation that wires this service to a
  * host backend is `CodeExecutorLayer` below.
  */
-export class CodeExecutor extends Context.Tag("@ptools/CodeExecutor")<
+export class CodeExecutor extends Context.Service<
   CodeExecutor,
   {
     readonly execute: (
       request: ExecuteRequest,
     ) => Effect.Effect<ExecuteResult, ExecutorError>;
   }
->() {}
+>()("@ptools/CodeExecutor") {}
 
 /**
  * Effect-side options for {@link CodeExecutorLayer}.

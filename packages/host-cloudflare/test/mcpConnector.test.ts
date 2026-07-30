@@ -35,7 +35,7 @@ describe("Cloudflare MCP connector layers", () => {
             })
             .pipe(
               Effect.provide(makeTestAuthCoordinatorLayer({ providerFor: 0 })),
-              Effect.either,
+              Effect.result,
             );
         }).pipe(
           Effect.provide(
@@ -47,12 +47,12 @@ describe("Cloudflare MCP connector layers", () => {
       ),
     );
 
-    expect(result._tag).toBe("Left");
-    if (result._tag !== "Left") {
+    expect(result._tag).toBe("Failure");
+    if (result._tag !== "Failure") {
       throw new Error("Expected stdio connection to fail.");
     }
 
-    expect(String(result.left.cause)).toContain(
+    expect(String(result.failure.cause)).toContain(
       "stdio MCP over Containers is deferred",
     );
   });
@@ -77,7 +77,7 @@ describe("Cloudflare MCP connector layers", () => {
             })
             .pipe(
               Effect.provide(makeTestAuthCoordinatorLayer(calls)),
-              Effect.either,
+              Effect.result,
             );
         }).pipe(Effect.provide(CloudflareHttpMcpConnectorLayer)),
       ),
@@ -108,7 +108,7 @@ describe("Cloudflare MCP connector layers", () => {
               })
               .pipe(
                 Effect.provide(makeTestAuthCoordinatorLayer(calls)),
-                Effect.either,
+                Effect.result,
               );
           }).pipe(Effect.provide(CloudflareHttpMcpConnectorLayer)),
         ),
@@ -139,7 +139,7 @@ const makeUnavailableHttpConnectorLayer = () =>
 const makeTestAuthCoordinatorLayer = (calls: { providerFor: number }) =>
   Layer.succeed(
     AuthCoordinator,
-    AuthCoordinator.make({
+    AuthCoordinator.of({
       origin: Effect.succeed("https://ptools.example/hosts/demo/auth"),
       callbackUrl: (serverName) =>
         Effect.succeed(

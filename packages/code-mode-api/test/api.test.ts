@@ -1,4 +1,4 @@
-import { Effect, Either, Layer, Option } from "effect";
+import { Effect, Result, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   CodeModeExecuteRequest,
@@ -94,35 +94,37 @@ describe("Code Mode API request validation", () => {
     ["execute", { code: "async () => 1", timeoutMs: "fast" }],
   ])("rejects invalid %s input", async (operation, input) => {
     const result = await Effect.runPromise(
-      Effect.either(parseCodeModeToolCall(operation, input)),
+      Effect.result(parseCodeModeToolCall(operation, input)),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
   });
 
   it("fails with a typed error for unknown operations", async () => {
     const result = await Effect.runPromise(
-      Effect.either(parseCodeModeToolCall("missing", {})),
+      Effect.result(parseCodeModeToolCall("missing", {})),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left._tag).toBe("CodeModeInvalidRequestError");
-      expect(result.left.message).toBe("Unknown Code Mode operation: missing");
+    if (Result.isFailure(result)) {
+      expect(result.failure._tag).toBe("CodeModeInvalidRequestError");
+      expect(result.failure.message).toBe(
+        "Unknown Code Mode operation: missing",
+      );
     }
   });
 
   it("fails with a typed error for invalid request envelopes", async () => {
     const result = await Effect.runPromise(
-      Effect.either(parseCodeModeRequest(null)),
+      Effect.result(parseCodeModeRequest(null)),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left._tag).toBe("CodeModeInvalidRequestError");
-      expect(result.left.message).toBe("Invalid Code Mode request");
+    if (Result.isFailure(result)) {
+      expect(result.failure._tag).toBe("CodeModeInvalidRequestError");
+      expect(result.failure.message).toBe("Invalid Code Mode request");
     }
   });
 });
@@ -165,7 +167,7 @@ describe("Code Mode API response validation", () => {
 
   it("rejects responses for the wrong request operation", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         parseCodeModeResponseForRequest(
           {
             operation: "search",
@@ -183,9 +185,9 @@ describe("Code Mode API response validation", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left._tag).toBe("CodeModeInvalidResponseError");
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure._tag).toBe("CodeModeInvalidResponseError");
     }
   });
 });

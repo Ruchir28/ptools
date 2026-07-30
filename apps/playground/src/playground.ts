@@ -23,7 +23,7 @@ import {
   parseUserPtoolsConfigJson,
 } from "@ptools/config";
 import { startEmbeddedNodeHost, NODE_LOCAL_HOST_ID } from "@ptools/host-node";
-import { Context, Data, Effect, Either, Option, Runtime, Scope } from "effect";
+import { Context, Data, Effect, Result, Option, Scope } from "effect";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 
 export class PlaygroundServerError extends Data.TaggedError(
@@ -71,7 +71,7 @@ export const runPlayground = (
       const secrets = yield* Effect.forEach(
         collectUserPtoolsConfigEnvReferences(config),
         (name) =>
-          Effect.fromNullable(env[name]).pipe(
+          Effect.fromNullishOr(env[name]).pipe(
             Effect.mapError(
               () =>
                 new PlaygroundServerError({
@@ -133,11 +133,11 @@ export const startPlaygroundServer = (
 > =>
   Effect.gen(function* () {
     const codeMode = yield* CodeModeClient;
-    const runtime = yield* Effect.runtime<never>();
+    const services = yield* Effect.context<never>();
     const server = createServer();
 
     server.on("request", (request, response) => {
-      void Runtime.runPromise(runtime)(
+      void Effect.runPromiseWith(services)(
         handleRequest(codeMode, request, response, options.vite),
       );
     });
@@ -171,7 +171,7 @@ const runPlaygroundHttp = (
   });
 
 const handleRequest = (
-  codeMode: Context.Tag.Service<typeof CodeModeClient>,
+  codeMode: Context.Service.Shape<typeof CodeModeClient>,
   request: IncomingMessage,
   response: ServerResponse,
   vite?: ViteDevServer,
@@ -199,7 +199,7 @@ const handleRequest = (
                 Effect.flatMap(expectCodeModeOutput("search_providers")),
                 Effect.map(toPlaygroundContext),
                 Effect.mapError(toErrorBody),
-                Effect.either,
+                Effect.result,
               )
           : yield* codeMode
               .call({
@@ -214,56 +214,56 @@ const handleRequest = (
                 Effect.flatMap(expectCodeModeOutput("search")),
                 Effect.map(toPlaygroundContext),
                 Effect.mapError(toErrorBody),
-                Effect.either,
+                Effect.result,
               );
 
-      if (Either.isLeft(context)) {
-        return yield* sendJson(response, 500, context.left);
+      if (Result.isFailure(context)) {
+        return yield* sendJson(response, 500, context.failure);
       }
 
       return yield* sendJson(response, 200, {
-        context: context.right,
-        summary: summarizeContext(context.right),
+        context: context.success,
+        summary: summarizeContext(context.success),
       });
     }
 
     if (request.method === "POST" && url.pathname === "/api/tool-schema") {
-      const parsed = yield* readToolSchemaRequest(request).pipe(Effect.either);
+      const parsed = yield* readToolSchemaRequest(request).pipe(Effect.result);
 
-      if (Either.isLeft(parsed)) {
-        return yield* sendJson(response, 400, toErrorBody(parsed.left));
+      if (Result.isFailure(parsed)) {
+        return yield* sendJson(response, 400, toErrorBody(parsed.failure));
       }
 
       const result = yield* codeMode
-        .call({ operation: "get_tool_schema", input: parsed.right })
+        .call({ operation: "get_tool_schema", input: parsed.success })
         .pipe(
           Effect.flatMap(expectCodeModeOutput("get_tool_schema")),
-          Effect.either,
+          Effect.result,
         );
 
-      if (Either.isLeft(result)) {
-        return yield* sendJson(response, 500, toErrorBody(result.left));
+      if (Result.isFailure(result)) {
+        return yield* sendJson(response, 500, toErrorBody(result.failure));
       }
 
-      return yield* sendJson(response, 200, result.right);
+      return yield* sendJson(response, 200, result.success);
     }
 
     if (request.method === "POST" && url.pathname === "/api/execute") {
-      const parsed = yield* readExecuteRequest(request).pipe(Effect.either);
+      const parsed = yield* readExecuteRequest(request).pipe(Effect.result);
 
-      if (Either.isLeft(parsed)) {
-        return yield* sendJson(response, 400, toErrorBody(parsed.left));
+      if (Result.isFailure(parsed)) {
+        return yield* sendJson(response, 400, toErrorBody(parsed.failure));
       }
 
       const result = yield* codeMode
-        .call({ operation: "execute", input: parsed.right })
-        .pipe(Effect.flatMap(expectCodeModeOutput("execute")), Effect.either);
+        .call({ operation: "execute", input: parsed.success })
+        .pipe(Effect.flatMap(expectCodeModeOutput("execute")), Effect.result);
 
-      if (Either.isLeft(result)) {
-        return yield* sendJson(response, 500, toErrorBody(result.left));
+      if (Result.isFailure(result)) {
+        return yield* sendJson(response, 500, toErrorBody(result.failure));
       }
 
-      return yield* sendJson(response, 200, result.right);
+      return yield* sendJson(response, 200, result.success);
     }
 
     if (request.method === "GET" || request.method === "HEAD") {
@@ -272,9 +272,9 @@ const handleRequest = (
 
     return yield* sendJson(response, 404, { error: "Not found" });
   }).pipe(
-    Effect.catchAll((cause) =>
+    Effect.catch((cause) =>
       sendJson(response, 500, toErrorBody(cause)).pipe(
-        Effect.catchAll(() => Effect.void),
+        Effect.catch(() => Effect.void),
       ),
     ),
   );
@@ -557,7 +557,7 @@ const readExecuteRequest = (
       return Effect.succeed(
         CodeModeExecuteRequest.make({
           code: candidate.code,
-          timeoutMs: Option.fromNullable(timeoutMs),
+          timeoutMs: Option.fromNullishOr(timeoutMs),
         }),
       );
     }),
@@ -644,7 +644,7 @@ const serveWithVite = (
   response: ServerResponse,
   vite: ViteDevServer,
 ): Effect.Effect<void, PlaygroundServerError> =>
-  Effect.async<void, PlaygroundServerError>((resume) => {
+  Effect.callback<void, PlaygroundServerError>((resume) => {
     vite.middlewares(request, response, (cause?: unknown) => {
       if (cause !== undefined) {
         resume(
@@ -685,7 +685,7 @@ const listen = (
   requestedPort: number,
 ): Effect.Effect<AddressInfo, PlaygroundServerError> =>
   listenOnPort(server, requestedPort).pipe(
-    Effect.catchAll((cause) => {
+    Effect.catch((cause) => {
       if (requestedPort !== 0 && isAddressInUse(cause.cause)) {
         return listenOnPort(server, 0);
       }
@@ -741,7 +741,7 @@ const closeServer = (
       }),
   );
 
-const waitForProcessClose: Effect.Effect<void> = Effect.async<void>(
+const waitForProcessClose: Effect.Effect<void> = Effect.callback<void>(
   (resume) => {
     const done = (): void => {
       process.stdin.off("close", done);

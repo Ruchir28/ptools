@@ -2,8 +2,8 @@ import {
   FetchHttpClient,
   HttpClient,
   HttpClientRequest,
-} from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
+} from "effect/unstable/http";
+import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import {
   HostOperationDispatchInput,
   HostOperationResponse,
@@ -11,11 +11,12 @@ import {
 } from "@ptools/host-api";
 import {
   Data,
+  Context,
   Effect,
-  ExecutionStrategy,
   Exit,
   Fiber,
   Layer,
+  Semaphore,
   Schema,
   Scope,
 } from "effect";
@@ -35,15 +36,14 @@ import {
   NodeHostActorDaemonRpcs,
   NodeHostActorRuntimeRpcError,
 } from "../hostActorDaemon/rpc/nodeHostActorDaemonRpcContracts.js";
-import * as NodeContext from "@effect/platform-node/NodeContext";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   NodeHostActorDaemonSpawner,
   type NodeHostActorDaemonSpawnerOperations,
 } from "./nodeHostActorDaemonSpawner.js";
 
-export type EncodedHostOperationResponse = Schema.Schema.Encoded<
-  typeof HostOperationResponse
->;
+export type EncodedHostOperationResponse =
+  (typeof HostOperationResponse)["Encoded"];
 
 export class NodeDaemonConnectionError extends Data.TaggedError(
   "NodeDaemonConnectionError",
@@ -78,21 +78,24 @@ interface ConnectedDaemon {
   readonly credential: string;
   readonly client: DaemonRpcClient;
   readonly leaseId: string;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
 }
 
-type DaemonRpcClient = Effect.Effect.Success<ReturnType<typeof makeRpcClient>>;
+type DaemonRpcClient = Effect.Success<ReturnType<typeof makeRpcClient>>;
 
 /**
  * Maintains one authenticated, leased connection from a public Node Host HTTP
  * server to the authoritative actor daemon for its state namespace.
  */
-export class NodeHostActorDaemonConnection extends Effect.Service<NodeHostActorDaemonConnection>()(
+export class NodeHostActorDaemonConnection extends Context.Service<NodeHostActorDaemonConnection>()(
   "@ptools/host-node/NodeHostActorDaemonConnection",
   {
-    scoped: (options: NodeDaemonDiscoveryOptions) => makeConnection(options),
+    make: (options: NodeDaemonDiscoveryOptions) => makeConnection(options),
   },
-) {}
+) {
+  static readonly layer = (options: NodeDaemonDiscoveryOptions) =>
+    Layer.effect(this, this.make(options));
+}
 
 const makeConnection = (
   options: NodeDaemonDiscoveryOptions,
@@ -104,7 +107,7 @@ const makeConnection = (
   Effect.gen(function* () {
     const parentScope = yield* Effect.scope;
     const spawner = yield* NodeHostActorDaemonSpawner;
-    const semaphore = yield* Effect.makeSemaphore(1);
+    const semaphore = yield* Semaphore.make(1);
     let active = yield* connectOrStart(options, parentScope, spawner);
 
     const replaceConnection = (expected: ConnectedDaemon) =>
@@ -123,16 +126,16 @@ const makeConnection = (
 
     const heartbeat = yield* Effect.forever(
       Effect.sleep(options.heartbeatIntervalMs ?? 5_000).pipe(
-        Effect.zipRight(
+        Effect.andThen(
           Effect.gen(function* () {
             const connection = active;
             yield* connection.client
               .RenewServerLease({ leaseId: connection.leaseId })
               .pipe(
-                Effect.catchAll(() =>
+                Effect.catch(() =>
                   replaceConnection(connection).pipe(
                     Effect.asVoid,
-                    Effect.catchAll((error) =>
+                    Effect.catch((error) =>
                       Effect.logWarning(
                         `Node daemon heartbeat reconnect failed: ${error.message}`,
                       ),
@@ -147,12 +150,12 @@ const makeConnection = (
 
     yield* Effect.addFinalizer(() =>
       Fiber.interrupt(heartbeat).pipe(
-        Effect.zipRight(Effect.suspend(() => closeConnected(active))),
+        Effect.andThen(Effect.suspend(() => closeConnected(active))),
       ),
     );
 
     const call = (input: EncodedHostOperationDispatchInput) =>
-      Schema.decodeUnknown(HostOperationDispatchInput)(input).pipe(
+      Schema.decodeUnknownEffect(HostOperationDispatchInput)(input).pipe(
         Effect.mapError(
           (cause) =>
             new NodeDaemonConnectionError({
@@ -171,7 +174,7 @@ const makeConnection = (
                 input: decoded,
               })
               .pipe(
-                Effect.catchAll((cause) =>
+                Effect.catch((cause) =>
                   cause instanceof NodeHostActorRuntimeRpcError
                     ? Effect.fail(
                         new NodeDaemonConnectionError({
@@ -185,7 +188,7 @@ const makeConnection = (
                       // never replay when its outcome is unknown.
                       replaceConnection(connection).pipe(
                         Effect.ignore,
-                        Effect.zipRight(
+                        Effect.andThen(
                           Effect.fail(
                             new NodeDaemonConnectionError({
                               phase: "operation",
@@ -201,7 +204,7 @@ const makeConnection = (
           }),
         ),
         Effect.flatMap((response) =>
-          Schema.encode(HostOperationResponse)(response).pipe(
+          Schema.encodeEffect(HostOperationResponse)(response).pipe(
             Effect.mapError(
               (cause) =>
                 new NodeDaemonConnectionError({
@@ -214,7 +217,9 @@ const makeConnection = (
         ),
       );
 
-    return NodeHostActorDaemonConnection.make({ handleHostOperation: call });
+    return {
+      handleHostOperation: call,
+    } satisfies NodeHostActorDaemonConnectionOperations;
   });
 
 const connectOrStart = (
@@ -223,7 +228,7 @@ const connectOrStart = (
   spawner: NodeHostActorDaemonSpawnerOperations,
 ): Effect.Effect<ConnectedDaemon, NodeDaemonConnectionError> =>
   connectReadyDaemon(options, parentScope).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       error.phase === "protocol"
         ? Effect.fail(error)
         : spawner.start(options).pipe(
@@ -235,7 +240,7 @@ const connectOrStart = (
                   cause,
                 }),
             ),
-            Effect.zipRight(discoverAndConnect(options, parentScope)),
+            Effect.andThen(discoverAndConnect(options, parentScope)),
           ),
     ),
   );
@@ -270,7 +275,7 @@ const connectReadyDaemon = (
     const metadata = yield* readNodeHostActorDaemonReadyMetadata(
       options.internalStateDirectory,
     ).pipe(
-      Effect.provide(NodeContext.layer),
+      Effect.provide(NodeServices.layer),
       Effect.mapError(
         (cause) =>
           new NodeDaemonConnectionError({
@@ -304,7 +309,7 @@ const connectReadyDaemon = (
     });
     // Each replaceable connection owns a child scope: reconnect can close it
     // early, while the service scope remains the shutdown safety net.
-    const scope = yield* Scope.fork(parentScope, ExecutionStrategy.sequential);
+    const scope = yield* Scope.fork(parentScope, "sequential");
 
     return yield* Effect.gen(function* () {
       const client = yield* makeRpcClient(metadata.origin, credential);
@@ -350,7 +355,7 @@ const connectReadyDaemon = (
                   cause,
                 }),
             ),
-            Effect.ignoreLogged,
+            Effect.ignore,
           ),
       );
       return {
@@ -361,7 +366,7 @@ const connectReadyDaemon = (
         scope,
       } as ConnectedDaemon;
     }).pipe(
-      Scope.extend(scope),
+      Scope.provide(scope),
       Effect.onError(() => Scope.close(scope, Exit.void)),
     );
   });

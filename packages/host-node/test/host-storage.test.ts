@@ -29,7 +29,7 @@ describe("Node host storage adapters", () => {
         return { missing, present, deleted };
       }).pipe(
         Effect.provide(
-          HostStateStorage.Default.pipe(
+          HostStateStorage.layer.pipe(
             Layer.provide(NodeFileHostStateStorageBackendLayer(directory)),
             Layer.provide(HostIdentityLayer("demo")),
           ),
@@ -45,7 +45,7 @@ describe("Node host storage adapters", () => {
   it("isolates identical logical keys by HostIdentity", async () => {
     const rootDirectory = await mkdtemp(join(tmpdir(), "ptools-host-root-"));
     const layerFor = (hostId: string) =>
-      HostStateStorage.Default.pipe(
+      HostStateStorage.layer.pipe(
         Layer.provide(NodeFileHostStateStorageBackendLayer(rootDirectory)),
         Layer.provide(HostIdentityLayer(hostId)),
       );
@@ -86,9 +86,7 @@ describe("Node host storage adapters", () => {
     );
 
     expect(firstDigest).toMatch(/^[a-f0-9]{64}$/);
-    expect(firstPrefix).toBe(
-      `namespaces/v1/${firstDigest}/hosts/host%2Fone/`,
-    );
+    expect(firstPrefix).toBe(`namespaces/v1/${firstDigest}/hosts/host%2Fone/`);
     expect(firstPrefix).not.toContain(firstDirectory);
     expect(
       nodeKeyringHostSecretAccountPrefix(secondDirectory, "host/one"),

@@ -6,14 +6,13 @@
  */
 import {
   FetchHttpClient,
-  FileSystem,
   HttpClient,
   HttpClientRequest,
-} from "@effect/platform";
-import * as NodeContext from "@effect/platform-node/NodeContext";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
+} from "effect/unstable/http";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import type { HostOperationDispatchInput } from "@ptools/host-api";
-import { Effect, Either, Layer, Option, Ref } from "effect";
+import { Effect, FileSystem, Result, Layer, Option, Ref } from "effect";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,7 +45,7 @@ afterEach(async () => {
   );
 });
 
-describe("Node host-actor daemon @effect/rpc server", () => {
+describe("Node host-actor daemon Effect RPC server", () => {
   it("authenticates, serves health and leases, and forwards decoded input unchanged", async () => {
     // Flow:
     // 1. construct daemon ownership, lease authority, and a recording actor
@@ -74,7 +73,7 @@ describe("Node host-actor daemon @effect/rpc server", () => {
           const received = yield* Ref.make<
             Option.Option<HostOperationDispatchInput>
           >(Option.none());
-          const runtimes = NodeHostRuntimeManager.make({
+          const runtimes = NodeHostRuntimeManager.of({
             dispatch: (input) =>
               input.hostId === "runtime-failure"
                 ? Effect.fail(
@@ -102,7 +101,7 @@ describe("Node host-actor daemon @effect/rpc server", () => {
           ).pipe(
             Effect.provideService(
               NodeHostActorDaemonLeaseManager,
-              NodeHostActorDaemonLeaseManager.make(leases),
+              NodeHostActorDaemonLeaseManager.of(leases),
             ),
             Effect.provideService(NodeHostRuntimeManager, runtimes),
           );
@@ -140,13 +139,13 @@ describe("Node host-actor daemon @effect/rpc server", () => {
               leaseId: lease.leaseId,
               input: { ...input, hostId: "runtime-failure" },
             })
-            .pipe(Effect.either);
-          expect(Either.isLeft(runtimeFailure)).toBe(true);
-          if (Either.isLeft(runtimeFailure)) {
-            expect(runtimeFailure.left._tag).toBe(
+            .pipe(Effect.result);
+          expect(Result.isFailure(runtimeFailure)).toBe(true);
+          if (Result.isFailure(runtimeFailure)) {
+            expect(runtimeFailure.failure._tag).toBe(
               "NodeHostActorRuntimeRpcError",
             );
-            expect("cause" in runtimeFailure.left).toBe(false);
+            expect("cause" in runtimeFailure.failure).toBe(false);
           }
 
           yield* client.ReleaseServerLease({ leaseId: lease.leaseId });
@@ -172,7 +171,7 @@ describe("Node host-actor daemon @effect/rpc server", () => {
             expirationSweepMs: 20,
             shutdownDrainTimeoutMs: 1_000,
           });
-          const runtimes = NodeHostRuntimeManager.make({
+          const runtimes = NodeHostRuntimeManager.of({
             dispatch: () => Effect.die("unexpected dispatch"),
           });
           const server = yield* startNodeHostActorDaemonRpcServer(
@@ -181,15 +180,15 @@ describe("Node host-actor daemon @effect/rpc server", () => {
           ).pipe(
             Effect.provideService(
               NodeHostActorDaemonLeaseManager,
-              NodeHostActorDaemonLeaseManager.make(leases),
+              NodeHostActorDaemonLeaseManager.of(leases),
             ),
             Effect.provideService(NodeHostRuntimeManager, runtimes),
           );
           const client = yield* makeClient(server.origin, "wrong-credential");
-          const result = yield* client.Health().pipe(Effect.either);
-          expect(Either.isLeft(result)).toBe(true);
-          if (Either.isLeft(result)) {
-            expect(result.left._tag).toBe("NodeDaemonUnauthorized");
+          const result = yield* client.Health().pipe(Effect.result);
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure._tag).toBe("NodeDaemonUnauthorized");
           }
 
           // Correct authentication isolates protocol-version validation from
@@ -201,10 +200,10 @@ describe("Node host-actor daemon @effect/rpc server", () => {
           );
           const versionResult = yield* wrongVersionClient
             .Health()
-            .pipe(Effect.either);
-          expect(Either.isLeft(versionResult)).toBe(true);
-          if (Either.isLeft(versionResult)) {
-            expect(versionResult.left._tag).toBe(
+            .pipe(Effect.result);
+          expect(Result.isFailure(versionResult)).toBe(true);
+          if (Result.isFailure(versionResult)) {
+            expect(versionResult.failure._tag).toBe(
               "NodeDaemonProtocolVersionMismatch",
             );
           }
@@ -250,4 +249,4 @@ const makeDirectory = async (): Promise<string> => {
 const run = <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem>,
 ): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(NodeContext.layer)));
+  Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)));

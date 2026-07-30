@@ -6,7 +6,7 @@
  * entry; the returned runtime then owns that actor's identity, stores, handler,
  * and configured-context cache.
  */
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import type { NodeHostActorRuntimeOptions } from "../contracts/nodeHostActorRuntimeOptions.js";
 import {
   makeNodeHostActorRuntime,
@@ -29,18 +29,21 @@ export interface NodeDaemonHostActorRuntimeActivatorOperations {
 /**
  * Node-daemon-owned actor activation service.
  *
- * Its production `.Default(options)` closes over daemon-wide physical settings
+ * Its production `.layer(options)` closes over daemon-wide physical settings
  * once when the daemon Layer graph is built. It is provided to
  * `NodeHostRuntimeManager`; it is never installed into `HostStableRuntimeLayer`
  * or exposed to `HostInstanceHandler`. This separation prevents an actor from
  * gaining authority to create sibling actors.
  */
-export class NodeDaemonHostActorRuntimeActivator extends Effect.Service<NodeDaemonHostActorRuntimeActivator>()(
+export class NodeDaemonHostActorRuntimeActivator extends Context.Service<NodeDaemonHostActorRuntimeActivator>()(
   "@ptools/host-node/hostActorDaemon/NodeDaemonHostActorRuntimeActivator",
   {
-    effect: (options: NodeHostActorRuntimeOptions) =>
+    make: (options: NodeHostActorRuntimeOptions) =>
       Effect.succeed({
         activate: (hostId) => makeNodeHostActorRuntime(hostId, options),
       } satisfies NodeDaemonHostActorRuntimeActivatorOperations),
   },
-) {}
+) {
+  static readonly layer = (options: NodeHostActorRuntimeOptions) =>
+    Layer.effect(this, this.make(options));
+}

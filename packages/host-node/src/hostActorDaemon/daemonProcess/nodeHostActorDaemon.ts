@@ -8,7 +8,7 @@
  *
  * It serves no public Host HttpApi and performs no caller-side discovery.
  */
-import { FileSystem } from "@effect/platform";
+import { FileSystem } from "effect";
 import { Context, Effect, Exit, Layer, Scope } from "effect";
 import type { NodeHostActorRuntimeOptions } from "../actorRuntime/contracts/nodeHostActorRuntimeOptions.js";
 import { NodeDaemonHostActorRuntimeActivator } from "../actorRuntime/services/nodeDaemonHostActorRuntimeActivator.js";
@@ -59,11 +59,9 @@ export const runNodeHostActorDaemon = (options: NodeHostActorDaemonOptions) =>
           };
 
           const daemonServices = Layer.merge(
-            NodeHostActorDaemonLeaseManager.Default(leaseOptions),
-            NodeHostRuntimeManager.Default.pipe(
-              Layer.provide(
-                NodeDaemonHostActorRuntimeActivator.Default(options),
-              ),
+            NodeHostActorDaemonLeaseManager.layer(leaseOptions),
+            NodeHostRuntimeManager.layer.pipe(
+              Layer.provide(NodeDaemonHostActorRuntimeActivator.layer(options)),
             ),
           );
 
@@ -109,7 +107,7 @@ export const runNodeHostActorDaemon = (options: NodeHostActorDaemonOptions) =>
           // Last finalizer → first to run on interruption/shutdown, before the
           // serviceScope and serverScope closes registered above.
           yield* Effect.addFinalizer(() =>
-            leases.stopAdmission.pipe(Effect.zipRight(leases.drain)),
+            leases.stopAdmission.pipe(Effect.andThen(leases.drain)),
           );
 
           yield* ownership.publishReadyMetadata({

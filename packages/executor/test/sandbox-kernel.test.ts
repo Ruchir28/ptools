@@ -18,7 +18,7 @@ describe("sandbox protocol", () => {
   it("decodes both directional message variants", async () => {
     await expect(
       Effect.runPromise(
-        Schema.decodeUnknown(HostToSandboxMessage)({
+        Schema.decodeUnknownEffect(HostToSandboxMessage)({
           _tag: "Execute",
           payload: { code: "async () => null", globals: {}, providers: [] },
         }),
@@ -27,7 +27,7 @@ describe("sandbox protocol", () => {
 
     await expect(
       Effect.runPromise(
-        Schema.decodeUnknown(SandboxToHostMessage)({
+        Schema.decodeUnknownEffect(SandboxToHostMessage)({
           _tag: "ProviderCall",
           call: { callId: "1", provider: "fixture", tool: "echo", input: null },
         }),
@@ -38,12 +38,12 @@ describe("sandbox protocol", () => {
   it("rejects unknown tags and malformed calls", async () => {
     await expect(
       Effect.runPromise(
-        Schema.decodeUnknown(SandboxToHostMessage)({ _tag: "Unknown" }),
+        Schema.decodeUnknownEffect(SandboxToHostMessage)({ _tag: "Unknown" }),
       ),
     ).rejects.toThrow();
     await expect(
       Effect.runPromise(
-        Schema.decodeUnknown(SandboxToHostMessage)({
+        Schema.decodeUnknownEffect(SandboxToHostMessage)({
           _tag: "ProviderCall",
           call: { provider: "fixture", tool: "echo", input: null },
         }),
@@ -54,7 +54,7 @@ describe("sandbox protocol", () => {
   it("requires valid warning outcome shapes on completion", async () => {
     await expect(
       Effect.runPromise(
-        Schema.decodeUnknown(SandboxToHostMessage)({
+        Schema.decodeUnknownEffect(SandboxToHostMessage)({
           _tag: "Complete",
           completion: {
             ok: true,

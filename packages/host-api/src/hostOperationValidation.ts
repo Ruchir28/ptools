@@ -33,7 +33,7 @@ export class HostOperationEncodeError extends Data.TaggedError(
 export const parseHostOperationRequest = (
   value: unknown,
 ): Effect.Effect<HostOperationRequest, HostOperationInvalidRequestError> =>
-  Schema.decodeUnknown(HostOperationRequest)(value, {
+  Schema.decodeUnknownEffect(HostOperationRequest)(value, {
     errors: "all",
     onExcessProperty: "error",
   }).pipe(
@@ -50,7 +50,7 @@ export const parseHostOperationRequest = (
 export const parseHostOperationResponse = (
   value: unknown,
 ): Effect.Effect<HostOperationResponse, HostOperationInvalidResponseError> =>
-  Schema.decodeUnknown(HostOperationResponse)(value, {
+  Schema.decodeUnknownEffect(HostOperationResponse)(value, {
     errors: "all",
     onExcessProperty: "error",
   }).pipe(

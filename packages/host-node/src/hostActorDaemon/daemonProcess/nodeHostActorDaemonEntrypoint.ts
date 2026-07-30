@@ -12,7 +12,7 @@
  * This entrypoint does not read user-authored ptools configuration or depend on
  * the caller's current working directory.
  */
-import * as NodeContext from "@effect/platform-node/NodeContext";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import { Data, Effect } from "effect";
 import { pathToFileURL } from "node:url";
@@ -44,7 +44,7 @@ export const nodeHostActorDaemonMain = (
         process.exitCode = NODE_HOST_ACTOR_DAEMON_ALREADY_OWNED_EXIT_CODE;
       }),
     ),
-    Effect.provide(NodeContext.layer),
+    Effect.provide(NodeServices.layer),
   );
 
 const parseArguments = (

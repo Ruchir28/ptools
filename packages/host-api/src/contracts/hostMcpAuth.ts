@@ -17,20 +17,20 @@ export type HostMcpAuthStatusRequest = Schema.Schema.Type<
 >;
 
 const HostMcpAuthError = Schema.Struct({
-  code: Schema.Literal(
+  code: Schema.Literals([
     "invalid_config",
     "auth_unavailable",
     "invalid_oauth_callback",
     "oauth_failed",
-  ),
+  ]),
   message: Schema.String,
 });
 
 /** Operation-owned result for auth status. */
-export const HostMcpAuthStatusResult = Schema.Union(
+export const HostMcpAuthStatusResult = Schema.Union([
   Schema.Struct({ ok: Schema.Literal(true), status: McpAuthStatus }),
   Schema.Struct({ ok: Schema.Literal(false), error: HostMcpAuthError }),
-);
+]);
 export type HostMcpAuthStatusResult = Schema.Schema.Type<
   typeof HostMcpAuthStatusResult
 >;
@@ -63,13 +63,13 @@ export type StartHostMcpAuthRequest = Schema.Schema.Type<
 >;
 
 /** Operation-owned result for starting MCP auth. */
-export const StartHostMcpAuthResult = Schema.Union(
+export const StartHostMcpAuthResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
     authorizeUrl: Schema.String,
   }),
   Schema.Struct({ ok: Schema.Literal(false), error: HostMcpAuthError }),
-);
+]);
 export type StartHostMcpAuthResult = Schema.Schema.Type<
   typeof StartHostMcpAuthResult
 >;
@@ -107,9 +107,7 @@ export type CompleteHostMcpOAuthCallbackRequest = Schema.Schema.Type<
 /** Browser response payload returned after the host completes OAuth. */
 export const HostMcpOAuthCallbackBrowserResponse = Schema.Struct({
   status: Schema.Number,
-  headers: Schema.optional(
-    Schema.Record({ key: Schema.String, value: Schema.String }),
-  ),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   body: Schema.String,
 });
 export type HostMcpOAuthCallbackBrowserResponse = Schema.Schema.Type<
@@ -117,13 +115,13 @@ export type HostMcpOAuthCallbackBrowserResponse = Schema.Schema.Type<
 >;
 
 /** Operation-owned result for completing an MCP OAuth callback. */
-export const CompleteHostMcpOAuthCallbackResult = Schema.Union(
+export const CompleteHostMcpOAuthCallbackResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
     response: HostMcpOAuthCallbackBrowserResponse,
   }),
   Schema.Struct({ ok: Schema.Literal(false), error: HostMcpAuthError }),
-);
+]);
 export type CompleteHostMcpOAuthCallbackResult = Schema.Schema.Type<
   typeof CompleteHostMcpOAuthCallbackResult
 >;

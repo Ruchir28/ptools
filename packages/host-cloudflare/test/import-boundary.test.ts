@@ -78,16 +78,15 @@ describe("host-cloudflare import boundaries", () => {
     expect(contents).not.toContain("../deploy");
   });
 
-  it("uses the workspace Effect v3 runtime without an Alchemy runtime dependency", async () => {
+  it("uses the pinned Effect v4 runtime without an Alchemy runtime dependency", async () => {
     const packageJson = await readFile(
       join(packageRoot, "package.json"),
       "utf8",
     );
 
-    expect(packageJson).toContain('"effect": "3.21.2"');
-    expect(packageJson).toContain('"@effect/platform": "0.96.1"');
+    expect(packageJson).toContain('"effect": "4.0.0-beta.102"');
+    expect(packageJson).not.toContain('"@effect/platform"');
     expect(packageJson).not.toContain('"alchemy"');
-    expect(packageJson).not.toContain("4.0.0-beta");
   });
 
   it("uses shared Effect HttpApi for Host API routes without Hono", async () => {
@@ -97,10 +96,10 @@ describe("host-cloudflare import boundaries", () => {
       "utf8",
     );
 
-    expect(workerContents).toContain('from "@effect/platform"');
+    expect(workerContents).toContain('from "effect/unstable/http"');
     expect(workerContents).toContain('from "@ptools/host-api/http"');
     expect(workerContents).not.toContain('from "hono"');
-    expect(packageJson).toContain('"@effect/platform": "0.96.1"');
+    expect(packageJson).not.toContain('"@effect/platform"');
     expect(packageJson).not.toContain('"hono"');
     expect(packageJson).not.toContain('"itty-router"');
   });
@@ -194,11 +193,11 @@ describe("host-cloudflare import boundaries", () => {
     expect(authPackage).toContain("McpOAuthProviderFactoryLayer");
     expect(hostRuntimePackage).toContain("HostAuthCoordinatorPolicyLayer");
     expect(hostRuntimePackage).toContain("ConfiguredHostContextRunner");
-    expect(hostRuntimePackage).toContain("ScopedCache.makeWith");
+    expect(hostRuntimePackage).toContain("RcMap.make");
     expect(platform).toContain("HostIdentity");
     expect(platform).not.toContain("CodeModeObjectIdentity");
     expect(platform).not.toContain("CodeModeObjectRequestOrigin");
-    expect(hostRuntimePackage).toContain("ResolvedPtoolsConfigSource.Default");
+    expect(hostRuntimePackage).toContain("ResolvedPtoolsConfigSource.layer");
     expect(codeModeObject).not.toContain("ResolvedPtoolsConfigSource");
     expect(codeModeObject).not.toContain("loadResolvedConfig");
     expect(codeModeObject).not.toContain(
@@ -222,10 +221,10 @@ describe("host-cloudflare import boundaries", () => {
       join(packageRoot, "src/layers/codeModeServer.ts"),
     );
     expect(codeModeObject).not.toContain(
-      "Effect.provide(ConfiguredHostConfigStore.Default)",
+      "Effect.provide(ConfiguredHostConfigStore.layer)",
     );
     expect(codeModeObject).not.toContain(
-      "Effect.provide(ConfiguredSecretStore.Default)",
+      "Effect.provide(ConfiguredSecretStore.layer)",
     );
   });
 });

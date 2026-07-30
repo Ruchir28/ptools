@@ -165,8 +165,8 @@ const runWithProductionManager = <A, E>(
   options: NodeHostActorRuntimeOptions,
   effect: Effect.Effect<A, E, NodeHostRuntimeManager>,
 ): Promise<A> => {
-  const managerLayer = NodeHostRuntimeManager.Default.pipe(
-    Layer.provide(NodeDaemonHostActorRuntimeActivator.Default(options)),
+  const managerLayer = NodeHostRuntimeManager.layer.pipe(
+    Layer.provide(NodeDaemonHostActorRuntimeActivator.layer(options)),
   );
   return Effect.runPromise(
     Effect.scoped(effect.pipe(Effect.provide(managerLayer))),

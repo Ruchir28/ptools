@@ -10,7 +10,7 @@ import type { CodeModeServerError } from "../codeModeErrors.js";
 import type { CodeModeRequest, CodeModeResponse } from "../contracts/index.js";
 
 /** Effect-native Code Mode server capability provided by host runtimes. */
-export class CodeModeServer extends Context.Tag("@ptools/CodeModeServer")<
+export class CodeModeServer extends Context.Service<
   CodeModeServer,
   {
     /** Handle one schema-backed Code Mode request. */
@@ -18,4 +18,4 @@ export class CodeModeServer extends Context.Tag("@ptools/CodeModeServer")<
       request: CodeModeRequest,
     ) => Effect.Effect<CodeModeResponse, CodeModeServerError>;
   }
->() {}
+>()("@ptools/CodeModeServer") {}

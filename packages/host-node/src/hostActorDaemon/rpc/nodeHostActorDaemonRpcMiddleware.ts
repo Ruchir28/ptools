@@ -29,7 +29,7 @@ export const NodeDaemonCredentialProtocolMiddlewareLive = (
 ): Layer.Layer<NodeDaemonCredentialProtocolMiddleware> =>
   Layer.succeed(
     NodeDaemonCredentialProtocolMiddleware,
-    NodeDaemonCredentialProtocolMiddleware.of(({ headers }) => {
+    NodeDaemonCredentialProtocolMiddleware.of((effect, { headers }) => {
       const authorization = headers[NODE_HOST_ACTOR_DAEMON_CREDENTIAL_HEADER];
       const receivedVersion =
         headers[NODE_HOST_ACTOR_DAEMON_PROTOCOL_HEADER] ?? "";
@@ -49,14 +49,14 @@ export const NodeDaemonCredentialProtocolMiddlewareLive = (
           }),
         );
       }
-      return Effect.void;
+      return effect;
     }),
   );
 
 /**
  * Connect the host-operation RPC procedure to daemon-wide lease admission.
  *
- * With `wrap: true`, `@effect/rpc` supplies `next`: a lazy Effect representing
+ * With `wrap: true`, `effect/unstable/rpc` supplies `next`: a lazy Effect representing
  * the remainder of this same request, including the registered handler,
  * runtime-manager selection, and actor dispatch. The middleware extracts the
  * request's lease ID and pipes `next` through the lease manager's
@@ -75,7 +75,7 @@ export const NodeDaemonOperationAdmissionMiddlewareLive: Layer.Layer<
   NodeDaemonOperationAdmissionMiddleware,
   Effect.gen(function* () {
     const leases = yield* NodeHostActorDaemonLeaseManager;
-    return NodeDaemonOperationAdmissionMiddleware.of(({ payload, next }) => {
+    return NodeDaemonOperationAdmissionMiddleware.of((effect, { payload }) => {
       if (
         typeof payload !== "object" ||
         payload === null ||
@@ -91,10 +91,10 @@ export const NodeDaemonOperationAdmissionMiddlewareLive: Layer.Layer<
         );
       }
       // `pipe` constructs a larger lazy Effect; it does not start `next` here.
-      // When @effect/rpc runs the returned Effect, admission is acquired first,
+      // When effect/unstable/rpc runs the returned Effect, admission is acquired first,
       // remains held throughout downstream actor execution, and is released on
       // every exit from that downstream Effect.
-      return next.pipe(leases.withOperationAdmission(payload.leaseId));
+      return effect.pipe(leases.withOperationAdmission(payload.leaseId));
     });
   }),
 );

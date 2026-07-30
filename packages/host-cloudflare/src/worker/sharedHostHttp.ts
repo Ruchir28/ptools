@@ -6,10 +6,11 @@
  * bearer-token verification, request-origin derivation, and Durable Object RPC dispatch.
  */
 import {
-  HttpApiBuilder,
+  HttpRouter,
   HttpServer,
   HttpServerRequest,
-} from "@effect/platform";
+} from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import {
   CredentialedHostApiHandlers,
   HostHttpApi,
@@ -18,8 +19,10 @@ import {
 import {
   HostApiUnauthorized,
   HostHttpOperationAdapterLive,
+  HostHttpIngress,
   ProvideHostHttpIngress,
   RequireHostApiAccess,
+  VerifiedHostApiCaller,
 } from "@ptools/host-api/effect";
 import { Effect, Layer, Redacted } from "effect";
 import type { PtoolsWorkerEnv } from "./ingress.js";
@@ -47,14 +50,22 @@ export const CloudflareRequireHostApiAccessLive: Layer.Layer<
     const env = yield* WorkerIngressEnv;
 
     return RequireHostApiAccess.of({
-      bearer: (token) =>
+      bearer: (effect, { credential }) =>
         verifyBearerToken({
-          token: Redacted.value(token),
+          token: Redacted.value(credential),
           accessToken: env.PTOOLS_PUBLIC_ACCESS_TOKEN,
         }).pipe(
-          Effect.as({ caller: { kind: "HostApiTokenCaller" as const } }),
+          // Only authentication failures become 401 responses. In Effect v4
+          // the middleware receives the complete downstream handler Effect, so
+          // mapping after flatMap would also rewrite payload/schema and handler
+          // failures as unauthorized.
           Effect.mapError(
             () => new HostApiUnauthorized({ message: "Unauthorized" }),
+          ),
+          Effect.flatMap(() =>
+            Effect.provideService(effect, VerifiedHostApiCaller, {
+              caller: { kind: "HostApiTokenCaller" as const },
+            }),
           ),
         ),
     });
@@ -74,23 +85,23 @@ export const CloudflareRequireHostApiAccessLive: Layer.Layer<
  * adapter because `HttpServerRequest.url` is path-only in the workerd test/runtime
  * adapter.
  */
-export const CloudflareProvideHostHttpIngressLive: Layer.Layer<
-  ProvideHostHttpIngress
-> = Layer.succeed(
-  ProvideHostHttpIngress,
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const publicOrigin = request.headers[PUBLIC_ORIGIN_HEADER];
+export const CloudflareProvideHostHttpIngressLive: Layer.Layer<ProvideHostHttpIngress> =
+  Layer.succeed(ProvideHostHttpIngress, (effect) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const publicOrigin = request.headers[PUBLIC_ORIGIN_HEADER];
 
-    if (publicOrigin === undefined || publicOrigin.trim() === "") {
-      throw new Error("Cloudflare Host HTTP ingress request is missing public origin.");
-    }
+      if (publicOrigin === undefined || publicOrigin.trim() === "") {
+        throw new Error(
+          "Cloudflare Host HTTP ingress request is missing public origin.",
+        );
+      }
 
-    return {
-      publicOrigin,
-    };
-  }),
-);
+      return yield* Effect.provideService(effect, HostHttpIngress, {
+        publicOrigin,
+      });
+    }),
+  );
 
 const withPublicOriginHeader = (request: Request): Request => {
   const headers = new Headers(request.headers);
@@ -176,20 +187,9 @@ export const makeCloudflareHostHttpHandler = (env: PtoolsWorkerEnv) => {
   );
 
   /** Shared route table/router layer after Cloudflare has supplied dependencies. */
-  const hostHttpApiRouterLayer = HttpApiBuilder.api(HostHttpApi).pipe(
+  const hostHttpApiRouterLayer = HttpApiBuilder.layer(HostHttpApi).pipe(
     Layer.provideMerge(hostHttpApiDependenciesLayer),
-  );
-
-  /**
-   * Final Effect Web-app layer.
-   *
-   * `HttpServer.layerContext` teaches the app how to read a Web `Request` as an
-   * Effect `HttpServerRequest` and encode an Effect response back to Web
-   * `Response`. This is still a layer graph, not a running request.
-   */
-  const cloudflareHostHttpWebAppLayer = Layer.mergeAll(
-    hostHttpApiRouterLayer,
-    HttpServer.layerContext,
+    Layer.provide(HttpServer.layerServices),
   );
 
   // Converts the Effect layer graph into a Web Fetch-style handler object:
@@ -197,9 +197,7 @@ export const makeCloudflareHostHttpHandler = (env: PtoolsWorkerEnv) => {
   // The object lazily builds/caches its runtime on first use, but only for this
   // object instance. Keeping this `effectWebHandler` instance alive is what makes
   // that internal cache useful across requests.
-  const effectWebHandler = HttpApiBuilder.toWebHandler(
-    cloudflareHostHttpWebAppLayer,
-  );
+  const effectWebHandler = HttpRouter.toWebHandler(hostHttpApiRouterLayer);
 
   return {
     ...effectWebHandler,

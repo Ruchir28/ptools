@@ -13,27 +13,21 @@ import {
 } from "./configSchemaFields.js";
 
 /** Normalized MCP server config before env/secret placeholders resolve. */
-export const ServerMcpConfig = Schema.Union(
+export const ServerMcpConfig = Schema.Union([
   Schema.Struct({
     transport: Schema.Literal("stdio"),
     command: Schema.String,
-    args: Schema.optionalWith(Schema.Array(Schema.String), {
-      exact: true,
-      as: "Option",
-    }),
-    cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-    env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
+    args: Schema.OptionFromOptionalKey(Schema.Array(Schema.String)),
+    cwd: Schema.OptionFromOptionalKey(Schema.String),
+    env: Schema.OptionFromOptionalKey(StringRecord),
   }),
   Schema.Struct({
     transport: Schema.Literal("http"),
     url: Schema.String,
-    headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-    auth: Schema.optionalWith(UnresolvedHttpMcpAuthConfig, {
-      exact: true,
-      as: "Option",
-    }),
+    headers: Schema.OptionFromOptionalKey(StringRecord),
+    auth: Schema.OptionFromOptionalKey(UnresolvedHttpMcpAuthConfig),
   }),
-);
+]);
 export type ServerMcpConfig = typeof ServerMcpConfig.Type;
 
 /**
@@ -44,11 +38,8 @@ export type ServerMcpConfig = typeof ServerMcpConfig.Type;
  * remain `Option`s until resolution crosses into external contracts.
  */
 export class PtoolsConfig extends Schema.Class<PtoolsConfig>("PtoolsConfig")({
-  mcpServers: Schema.Record({
-    key: Schema.String,
-    value: ServerMcpConfig,
-  }),
-  executor: Schema.optionalWith(ExecutorConfig, { exact: true, as: "Option" }),
+  mcpServers: Schema.Record(Schema.String, ServerMcpConfig),
+  executor: Schema.OptionFromOptionalKey(ExecutorConfig),
 }) {
   declare private readonly _ptoolsConfigBrand: void;
 }

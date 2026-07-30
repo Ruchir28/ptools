@@ -13,7 +13,7 @@
  *   MCP SDK returns tokens, dynamic client info, and discovery metadata
  *   provider calls McpOAuthCredentialStore.setTokens(...)
  *
- * McpOAuthCredentialStore.Default
+ * McpOAuthCredentialStore.layer
  *   writes exact logical keys derived from:
  *     serverName = "github"
  *     serverUrl  = "https://mcp.example.com"
@@ -35,7 +35,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { HostSecretStorage } from "@ptools/config";
-import { Effect, Option } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import { CredentialError } from "../authErrors.js";
 
 export interface McpOAuthCredentialIdentity {
@@ -61,7 +61,10 @@ export interface McpOAuthCredentialStoreService {
   /** Load dynamic OAuth client registration info, if one was persisted. */
   readonly getClientInformation: (
     identity: McpOAuthCredentialIdentity,
-  ) => Effect.Effect<Option.Option<OAuthClientInformationMixed>, CredentialError>;
+  ) => Effect.Effect<
+    Option.Option<OAuthClientInformationMixed>,
+    CredentialError
+  >;
   /** Persist dynamic OAuth client registration info returned by the MCP SDK. */
   readonly setClientInformation: (
     identity: McpOAuthCredentialIdentity,
@@ -113,10 +116,10 @@ export interface McpOAuthCredentialStoreService {
  * state/nonces. Platform providers call these semantic methods instead of
  * constructing credential keys, parsing JSON, or implementing invalidation.
  */
-export class McpOAuthCredentialStore extends Effect.Service<McpOAuthCredentialStore>()(
+export class McpOAuthCredentialStore extends Context.Service<McpOAuthCredentialStore>()(
   "@ptools/McpOAuthCredentialStore",
   {
-    effect: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const storage = yield* HostSecretStorage;
 
       // JSON-backed slots all share the same read behavior: missing is valid
@@ -136,16 +139,18 @@ export class McpOAuthCredentialStore extends Effect.Service<McpOAuthCredentialSt
               }),
           ),
           Effect.flatMap(
-            Effect.transposeMapOption((value) =>
-              Effect.try({
-                try: () => JSON.parse(value) as Value,
-                catch: (cause) =>
-                  new CredentialError({
-                    message: `Failed to parse MCP OAuth ${slot} credential for ${identity.serverName}.`,
-                    cause,
-                  }),
-              }),
-            ),
+            Option.match({
+              onNone: () => Effect.succeedNone,
+              onSome: (value) =>
+                Effect.try({
+                  try: () => JSON.parse(value) as Value,
+                  catch: (cause) =>
+                    new CredentialError({
+                      message: `Failed to parse MCP OAuth ${slot} credential for ${identity.serverName}.`,
+                      cause,
+                    }),
+                }).pipe(Effect.map(Option.some)),
+            }),
           ),
         );
       };
@@ -157,15 +162,17 @@ export class McpOAuthCredentialStore extends Effect.Service<McpOAuthCredentialSt
         slot: McpOAuthCredentialSlot,
         value: unknown,
       ): Effect.Effect<void, CredentialError> =>
-        storage.put(credentialSlotKey(identity, slot), JSON.stringify(value)).pipe(
-          Effect.mapError(
-            (cause) =>
-              new CredentialError({
-                message: `Failed to write MCP OAuth ${slot} credential for ${identity.serverName}.`,
-                cause,
-              }),
-          ),
-        );
+        storage
+          .put(credentialSlotKey(identity, slot), JSON.stringify(value))
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new CredentialError({
+                  message: `Failed to write MCP OAuth ${slot} credential for ${identity.serverName}.`,
+                  cause,
+                }),
+            ),
+          );
 
       const deleteSlot = (
         identity: McpOAuthCredentialIdentity,
@@ -209,15 +216,17 @@ export class McpOAuthCredentialStore extends Effect.Service<McpOAuthCredentialSt
             ),
           ),
         setCodeVerifier: (identity, codeVerifier) =>
-          storage.put(credentialSlotKey(identity, "pkce-verifier"), codeVerifier).pipe(
-            Effect.mapError(
-              (cause) =>
-                new CredentialError({
-                  message: `Failed to write MCP OAuth PKCE verifier for ${identity.serverName}.`,
-                  cause,
-                }),
+          storage
+            .put(credentialSlotKey(identity, "pkce-verifier"), codeVerifier)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new CredentialError({
+                    message: `Failed to write MCP OAuth PKCE verifier for ${identity.serverName}.`,
+                    cause,
+                  }),
+              ),
             ),
-          ),
         getDiscoveryState: (identity) => getOptionalJson(identity, "discovery"),
         setDiscoveryState: (identity, state) =>
           setJson(identity, "discovery", state),
@@ -243,9 +252,15 @@ export class McpOAuthCredentialStore extends Effect.Service<McpOAuthCredentialSt
       } satisfies McpOAuthCredentialStoreService;
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
-export type McpOAuthCredentialSlot = "client" | "tokens" | "pkce-verifier" | "discovery";
+export type McpOAuthCredentialSlot =
+  | "client"
+  | "tokens"
+  | "pkce-verifier"
+  | "discovery";
 
 /** Prefix for logical MCP OAuth credential keys inside HostSecretStorage. */
 

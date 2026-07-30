@@ -1,6 +1,6 @@
 import { HostStateStorage, HostStorageError } from "@ptools/config";
 import { HostIdentityLayer } from "@ptools/host-context";
-import { Effect, Either, Layer, Option } from "effect";
+import { Effect, Result, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   CodeModeObjectHostStorageBackendLayer,
@@ -36,13 +36,13 @@ describe("makeDurableObjectHostStorage", () => {
     );
 
     const result = await Effect.runPromise(
-      storage.get("key").pipe(Effect.either),
+      storage.get("key").pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(HostStorageError);
-      expect(result.left).toMatchObject({
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(HostStorageError);
+      expect(result.failure).toMatchObject({
         storage: "secret",
         operation: "get",
         key: "key",
@@ -58,18 +58,18 @@ describe("CodeModeObjectHostStorageBackendLayer", () => {
       id: { name: "object-a" },
       storage: makeDurableObjectStorage({}),
     } as unknown as DurableObjectState;
-    const layer = HostStateStorage.Default.pipe(
+    const layer = HostStateStorage.layer.pipe(
       Layer.provide(CodeModeObjectHostStorageBackendLayer(state)),
       Layer.provide(HostIdentityLayer("object-b")),
     );
 
     const result = await Effect.runPromise(
-      HostStateStorage.pipe(Effect.provide(layer), Effect.either),
+      HostStateStorage.pipe(Effect.provide(layer), Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
         storage: "state",
         operation: "open",
         key: "object-b",

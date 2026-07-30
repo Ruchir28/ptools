@@ -39,7 +39,7 @@ export interface MakeCodeModeLiveOptions {
  * JavaScript through the configured executor with provider functions backed by
  * the MCP registry.
  */
-export class CodeMode extends Context.Tag("@ptools/CodeMode")<
+export class CodeMode extends Context.Service<
   CodeMode,
   {
     readonly diagnostics: Effect.Effect<
@@ -61,7 +61,7 @@ export class CodeMode extends Context.Tag("@ptools/CodeMode")<
       request: CodeModeExecuteRequest,
     ) => Effect.Effect<CodeModeRunResult, CodeModeError>;
   }
->() {}
+>()("@ptools/CodeMode") {}
 
 /**
  * Builds the Code Mode Effect layer from an MCP registry and code executor.

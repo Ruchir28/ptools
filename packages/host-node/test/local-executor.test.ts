@@ -11,7 +11,7 @@ import {
   InvalidExecutorCode,
   makeExecuteRequest,
 } from "@ptools/executor";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import { LocalSandboxExecutorLayer } from "../src/executor/localExecutor.js";
 import { resolveDenoSandboxRuntimeConfig } from "../src/executor/denoSandboxProcess.js";
@@ -54,7 +54,7 @@ describe("host-node sandbox protocol", () => {
 
   it("fails layer acquisition with an actionable start error", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         CodeExecutor.pipe(
           Effect.provide(
             LocalSandboxExecutorLayer({
@@ -64,10 +64,10 @@ describe("host-node sandbox protocol", () => {
         ),
       ),
     );
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(ExecutorStartError);
-      expect(result.left.message).toContain(
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(ExecutorStartError);
+      expect(result.failure.message).toContain(
         "Install Deno, set DENO_BIN, or pass denoExecutable",
       );
     }
@@ -91,11 +91,11 @@ describe("host-node sandbox protocol", () => {
       { DENO_BIN: "/definitely/missing/deno-from-env" },
       async () => {
         const result = await Effect.runPromise(
-          Effect.either(resolveDenoSandboxRuntimeConfig()),
+          Effect.result(resolveDenoSandboxRuntimeConfig()),
         );
-        expect(Either.isLeft(result)).toBe(true);
-        if (Either.isLeft(result)) {
-          expect(result.left.message).toContain("using DENO_BIN");
+        expect(Result.isFailure(result)).toBe(true);
+        if (Result.isFailure(result)) {
+          expect(result.failure.message).toContain("using DENO_BIN");
         }
       },
     );
@@ -219,14 +219,14 @@ describe.skipIf(!hasDeno)("restricted Deno sandbox", () => {
 
   it("maps invalid code and uncaught runtime failures", async () => {
     const invalid = await runEither({ code: "42" });
-    expect(Either.isLeft(invalid) && invalid.left).toBeInstanceOf(
+    expect(Result.isFailure(invalid) && invalid.failure).toBeInstanceOf(
       InvalidExecutorCode,
     );
 
     const runtime = await runEither({
       code: 'async () => { throw new Error("uncaught"); }',
     });
-    expect(Either.isLeft(runtime) && runtime.left).toBeInstanceOf(
+    expect(Result.isFailure(runtime) && runtime.failure).toBeInstanceOf(
       ExecutorRuntimeError,
     );
   });
@@ -236,7 +236,7 @@ describe.skipIf(!hasDeno)("restricted Deno sandbox", () => {
       code: "async () => await new Promise(() => {})",
       timeoutMs: 50,
     });
-    expect(Either.isLeft(result) && result.left).toBeInstanceOf(
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(
       ExecutorTimeoutError,
     );
   });
@@ -275,7 +275,7 @@ const run = (request: Parameters<typeof makeExecuteRequest>[0]) =>
 
 const runEither = (request: Parameters<typeof makeExecuteRequest>[0]) =>
   Effect.runPromise(
-    Effect.either(
+    Effect.result(
       Effect.gen(function* () {
         const executor = yield* CodeExecutor;
         return yield* executor.execute(makeExecuteRequest(request));

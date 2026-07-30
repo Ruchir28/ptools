@@ -1,29 +1,28 @@
 /** Schema-backed HTTP errors returned by shared Host HTTP handlers. */
-import { HttpApiSchema } from "@effect/platform";
 import { Schema } from "effect";
 
-export class HostHttpBadRequest extends Schema.TaggedError<HostHttpBadRequest>()(
+export class HostHttpBadRequest extends Schema.TaggedErrorClass<HostHttpBadRequest>()(
   "HostHttpBadRequest",
   { message: Schema.String },
-  HttpApiSchema.annotations({ status: 400 }),
+  { httpApiStatus: 400 },
 ) {}
 
-export class HostHttpUnauthorized extends Schema.TaggedError<HostHttpUnauthorized>()(
+export class HostHttpUnauthorized extends Schema.TaggedErrorClass<HostHttpUnauthorized>()(
   "HostHttpUnauthorized",
   { message: Schema.String },
-  HttpApiSchema.annotations({ status: 401 }),
+  { httpApiStatus: 401 },
 ) {}
 
-export class HostHttpHostUnavailable extends Schema.TaggedError<HostHttpHostUnavailable>()(
+export class HostHttpHostUnavailable extends Schema.TaggedErrorClass<HostHttpHostUnavailable>()(
   "HostHttpHostUnavailable",
   { message: Schema.String },
-  HttpApiSchema.annotations({ status: 503 }),
+  { httpApiStatus: 503 },
 ) {}
 
-export class HostHttpInternalError extends Schema.TaggedError<HostHttpInternalError>()(
+export class HostHttpInternalError extends Schema.TaggedErrorClass<HostHttpInternalError>()(
   "HostHttpInternalError",
   { message: Schema.String },
-  HttpApiSchema.annotations({ status: 500 }),
+  { httpApiStatus: 500 },
 ) {}
 
 export type HostHttpError =

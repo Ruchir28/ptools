@@ -38,6 +38,7 @@ import {
   Context,
   Data,
   Effect,
+  Layer,
   Option,
   Schema,
 } from "effect";
@@ -77,16 +78,16 @@ type OAuthBrowserResponse = {
 /**
  * Shared receiver-side behavior for one selected host instance.
  *
- * Platforms install `.Default(options)` in the stable, host-scoped runtime and
+ * Platforms install `.layer(options)` in the stable, host-scoped runtime and
  * connect their local/RPC handle to `handle`. The service owns operation
  * interpretation and response projection, but knows nothing about the carrier
  * used to reach it. Construction captures the stable services once; configured
  * Code Mode and auth services are entered later through the context runner.
  */
-export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
+export class HostInstanceHandler extends Context.Service<HostInstanceHandler>()(
   "@ptools/host-runtime/HostInstanceHandler",
   {
-    effect: (options: HostInstanceHandlerOptions) =>
+    make: (options: HostInstanceHandlerOptions) =>
       Effect.gen(function* () {
         // These values belong to the stable host runtime. Capturing them during
         // service construction ensures every operation uses the stores,
@@ -108,12 +109,12 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
          */
         const runConfigured = <A, E>(
           origin: string,
-          effect: Effect.Effect<
+          make: Effect.Effect<
             A,
             E,
             CodeModeServer | AuthCoordinator | McpOAuthFlow
           >,
-        ) => configuredContextRunner.run({ origin }, effect);
+        ) => configuredContextRunner.run({ origin }, make);
 
         /**
          * Handle one normalized operation after a platform has reached this
@@ -160,7 +161,7 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
                     result: { ok: true, response },
                   }),
                 ),
-                Effect.catchAll((cause) =>
+                Effect.catch((cause) =>
                   Effect.succeed(
                     HostCodeModeResponse.make({
                       operation: "code_mode",
@@ -183,7 +184,9 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
               // restores its JSON representation (including omitted Option
               // fields) so the canonical parser can normalize command/url
               // entries into the stored PtoolsConfig domain value.
-              return Schema.encode(UserPtoolsConfig)(request.input.config).pipe(
+              return Schema.encodeEffect(UserPtoolsConfig)(
+                request.input.config,
+              ).pipe(
                 Effect.map((encoded) => JSON.stringify(encoded)),
                 Effect.flatMap((json) =>
                   parsePtoolsConfigJson(json, `Host ${identity.hostId} config`),
@@ -209,7 +212,7 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
                     },
                   }),
                 ),
-                Effect.catchAll((cause) =>
+                Effect.catch((cause) =>
                   Effect.succeed(
                     ConfigureHostResponse.make({
                       operation: "configure",
@@ -242,7 +245,7 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
                       },
                     }),
                   ),
-                  Effect.catchAll((cause) =>
+                  Effect.catch((cause) =>
                     Effect.succeed(
                       ConfigureHostSecretsResponse.make({
                         operation: "configure_secrets",
@@ -271,7 +274,7 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
                     result: { ok: true, status },
                   }),
                 ),
-                Effect.catchAll((cause) =>
+                Effect.catch((cause) =>
                   Effect.succeed(
                     HostMcpAuthStatusResponse.make({
                       operation: "mcp_auth_status",
@@ -299,7 +302,7 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
                     result: { ok: true, authorizeUrl },
                   }),
                 ),
-                Effect.catchAll((cause) =>
+                Effect.catch((cause) =>
                   Effect.succeed(
                     StartHostMcpAuthResponse.make({
                       operation: "start_mcp_auth",
@@ -352,7 +355,7 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
                     result: { ok: true, response },
                   }),
                 ),
-                Effect.catchAll((cause) =>
+                Effect.catch((cause) =>
                   Effect.succeed(
                     CompleteHostMcpOAuthCallbackResponse.make({
                       operation: "complete_mcp_oauth_callback",
@@ -367,7 +370,10 @@ export class HostInstanceHandler extends Effect.Service<HostInstanceHandler>()(
         return { handle } satisfies HostInstanceHandlerOperations;
       }),
   },
-) {}
+) {
+  static readonly layer = (options: HostInstanceHandlerOptions) =>
+    Layer.effect(this, this.make(options));
+}
 
 class UnsupportedConfig extends Data.TaggedError("UnsupportedConfig")<{
   readonly message: string;
@@ -453,7 +459,7 @@ const parseOAuthCallback = (input: {
   readonly url: string;
   readonly bodyText?: string;
   readonly expectedHostId: string;
-  readonly oauthStateStore: Context.Tag.Service<typeof McpOAuthStateStore>;
+  readonly oauthStateStore: Context.Service.Shape<typeof McpOAuthStateStore>;
 }): Effect.Effect<ParsedOAuthCallback, HostMcpAuthError> =>
   Effect.gen(function* () {
     const url = yield* Effect.try({

@@ -558,7 +558,7 @@ const configure = async (
   mcpServers: Record<string, unknown>,
 ) => {
   const config = await Effect.runPromise(
-    Schema.decodeUnknown(UserPtoolsConfig)(
+    Schema.decodeUnknownEffect(UserPtoolsConfig)(
       { mcpServers },
       {
         errors: "all",
@@ -707,7 +707,7 @@ const memoryStorage = (
 ): HostStorageOperations => {
   const values = new Map<string, string>();
   return {
-    get: (key) => Effect.sync(() => Option.fromNullable(values.get(key))),
+    get: (key) => Effect.sync(() => Option.fromNullishOr(values.get(key))),
     put: (key, value) =>
       failPuts
         ? Effect.fail(

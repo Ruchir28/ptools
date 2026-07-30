@@ -71,8 +71,8 @@ export class TestCodeModeObject extends CodeModeObject {
         return yield* store.sign({ payload });
       }).pipe(
         Effect.provide(
-          McpOAuthStateStore.Default.pipe(
-            Layer.provide(HostSecretStorage.Default),
+          McpOAuthStateStore.layer.pipe(
+            Layer.provide(HostSecretStorage.layer),
             Layer.provide(
               Layer.merge(
                 HostIdentityLayer(this.ctx.id.name ?? "test-host"),

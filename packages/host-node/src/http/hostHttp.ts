@@ -5,7 +5,10 @@
  * HTTP adapter, daemon discovery, private RPC, and authoritative daemon actor.
  * No authored config or ambient configured secrets are read in this process.
  */
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpRouter } from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import { createServer } from "node:http";
 import {
   CredentialedHostApiHandlers,
   HostHttpApi,
@@ -20,6 +23,7 @@ import {
   HostInstanceDiscovery,
   ProvideHostHttpIngress,
   RequireHostApiAccess,
+  VerifiedHostApiCaller,
 } from "@ptools/host-api/effect";
 import { Effect, Layer, Redacted } from "effect";
 import type { NodeHostActorRuntimeOptions } from "../hostActorDaemon/actorRuntime/contracts/nodeHostActorRuntimeOptions.js";
@@ -34,7 +38,6 @@ import {
   NODE_INTERNAL_ACCESS_TOKEN,
   type NodeHostOptions,
 } from "../options.js";
-import { NodeLocalHostHttpServerLive } from "./nodeLocalHostHttpServer.js";
 
 interface ResolvedNodeHostOptions {
   readonly hostId: string;
@@ -46,11 +49,11 @@ interface ResolvedNodeHostOptions {
 export const NodeHostHttpServerLive = (
   options: NodeHostOptions,
 ): Layer.Layer<never, HostNodeError, never> =>
-  Layer.unwrapEffect(
+  Layer.unwrap(
     resolveNodeHostOptions(options).pipe(
       Effect.map((resolved) => makeNodeHostHttpServerLive(resolved)),
     ),
-  ).pipe(Layer.mapError(toHostNodeError));
+  ).pipe(mapLayerHostNodeError);
 
 /**
  * One scoped embedded listener plus a shared HTTP client pointed at it.
@@ -60,7 +63,7 @@ export const NodeHostHttpServerLive = (
 export const NodeEmbeddedHostHttpStackLive = (
   options: NodeHostOptions,
 ): Layer.Layer<HostHttpClient, HostNodeError, never> =>
-  Layer.unwrapEffect(
+  Layer.unwrap(
     resolveNodeHostOptions(options).pipe(
       Effect.map((resolved) =>
         Layer.merge(
@@ -73,7 +76,7 @@ export const NodeEmbeddedHostHttpStackLive = (
         ),
       ),
     ),
-  ).pipe(Layer.mapError(toHostNodeError));
+  ).pipe(mapLayerHostNodeError);
 
 const resolveNodeHostOptions = (
   options: NodeHostOptions,
@@ -148,18 +151,25 @@ const resolveNodePublicOrigin = (
     return url.origin;
   });
 
-const makeNodeHostHttpServerLive = (
-  options: ResolvedNodeHostOptions,
-): Layer.Layer<never, unknown, never> =>
-  NodeLocalHostHttpServerLive({
-    publicOrigin: options.publicOrigin,
-    apiLayer: makeNodeHostHttpApiLayer(options),
-  });
+const makeNodeHostHttpServerLive = (options: ResolvedNodeHostOptions) => {
+  const api = makeNodeHostHttpApiLayer(options);
+  const publicOrigin = new URL(options.publicOrigin);
+
+  return HttpRouter.serve(api.apiLayer).pipe(
+    Layer.provide(api.requestServicesLayer),
+    Layer.provideMerge(
+      NodeHttpServer.layer(() => createServer(), {
+        host: publicOrigin.hostname || "127.0.0.1",
+        port: Number(publicOrigin.port),
+      }),
+    ),
+  );
+};
 
 const makeNodeHostHttpApiLayer = (options: ResolvedNodeHostOptions) =>
   makeNodeHostHttpApiLayerFromPlatformLayers({
     discoveryLayer: NodeDaemonHostInstanceDiscoveryLive(options.daemon).pipe(
-      Layer.mapError(toHostNodeError),
+      mapLayerHostNodeError,
     ),
     publicOrigin: options.publicOrigin,
   });
@@ -169,9 +179,11 @@ const NodeEmbeddedRequireHostApiAccessLive: Layer.Layer<RequireHostApiAccess> =
   Layer.succeed(
     RequireHostApiAccess,
     RequireHostApiAccess.of({
-      bearer: (token) =>
-        Redacted.value(token) === NODE_INTERNAL_ACCESS_TOKEN
-          ? Effect.succeed({ caller: { kind: "HostApiTokenCaller" as const } })
+      bearer: (effect, { credential }) =>
+        Redacted.value(credential) === NODE_INTERNAL_ACCESS_TOKEN
+          ? Effect.provideService(effect, VerifiedHostApiCaller, {
+              caller: { kind: "HostApiTokenCaller" as const },
+            })
           : Effect.fail(new HostApiUnauthorized({ message: "Unauthorized" })),
     }),
   );
@@ -179,9 +191,12 @@ const NodeEmbeddedRequireHostApiAccessLive: Layer.Layer<RequireHostApiAccess> =
 const NodeProvideHostHttpIngressLive = (
   publicOrigin: string,
 ): Layer.Layer<ProvideHostHttpIngress> =>
-  Layer.succeed(
-    ProvideHostHttpIngress,
-    Effect.succeed(HostHttpIngress.of({ publicOrigin })),
+  Layer.succeed(ProvideHostHttpIngress, (effect) =>
+    Effect.provideService(
+      effect,
+      HostHttpIngress,
+      HostHttpIngress.of({ publicOrigin }),
+    ),
   );
 
 /** Assemble shared route handlers over a platform-selected discovery layer. */
@@ -204,7 +219,7 @@ const makeNodeHostHttpApiLayerFromPlatformLayers = (input: {
     CredentialedHostApiHandlers,
     OAuthBrowserHandlers,
   ).pipe(
-    Layer.provideMerge(
+    Layer.provide(
       Layer.mergeAll(
         adapterLayer,
         NodeProvideHostHttpIngressLive(input.publicOrigin),
@@ -212,9 +227,13 @@ const makeNodeHostHttpApiLayerFromPlatformLayers = (input: {
     ),
   );
 
-  return HttpApiBuilder.api(HostHttpApi).pipe(
-    Layer.provideMerge(Layer.mergeAll(handlersLayer, platformServicesLayer)),
-  );
+  return {
+    apiLayer: HttpApiBuilder.layer(HostHttpApi).pipe(
+      Layer.provideMerge(Layer.mergeAll(handlersLayer, platformServicesLayer)),
+      Layer.provide(NodeHttpServer.layerHttpServices),
+    ),
+    requestServicesLayer: adapterLayer,
+  };
 };
 
 const isLoopbackHostname = (hostname: string): boolean =>
@@ -233,3 +252,16 @@ const toHostNodeError = (cause: unknown): HostNodeError =>
             : "Failed to construct embedded Node Host HTTP services.",
         cause,
       });
+
+const mapLayerHostNodeError = <A, E, R>(
+  layer: Layer.Layer<A, E, R>,
+): Layer.Layer<A, HostNodeError, R> =>
+  layer.pipe(
+    Layer.catch(
+      (error): Layer.Layer<A, HostNodeError> =>
+        Layer.unwrap(Effect.fail(toHostNodeError(error))) as Layer.Layer<
+          A,
+          HostNodeError
+        >,
+    ),
+  );

@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import {
   Clock,
+  Context,
   Data,
   Deferred,
   Duration,
@@ -20,6 +21,7 @@ import {
   Option,
   Scope,
   SynchronizedRef,
+  Layer,
 } from "effect";
 import {
   NodeDaemonLeaseRejected,
@@ -473,14 +475,18 @@ export const makeNodeHostActorDaemonLeaseManager = (
  * `withOperationAdmission` to count work while its downstream actor Effect is
  * running, and the daemon root uses `awaitShutdown` / `drain` to order cleanup.
  */
-export class NodeHostActorDaemonLeaseManager extends Effect.Service<NodeHostActorDaemonLeaseManager>()(
+export class NodeHostActorDaemonLeaseManager extends Context.Service<NodeHostActorDaemonLeaseManager>()(
   "@ptools/host-node/hostActorDaemon/NodeHostActorDaemonLeaseManager",
   {
-    scoped: (
+    make: (
       options: NodeHostActorDaemonLeaseOptions = DEFAULT_NODE_HOST_ACTOR_DAEMON_LEASE_OPTIONS,
     ) => makeNodeHostActorDaemonLeaseManager(options),
   },
-) {}
+) {
+  static readonly layer = (
+    options: NodeHostActorDaemonLeaseOptions = DEFAULT_NODE_HOST_ACTOR_DAEMON_LEASE_OPTIONS,
+  ) => Layer.effect(this, this.make(options));
+}
 
 const removeExpired = (
   leases: HashMap.HashMap<string, LeaseRecord>,

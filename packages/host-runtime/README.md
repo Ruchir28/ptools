@@ -14,10 +14,10 @@ Platform-owned host instance
   one ManagedRuntime
     HostStableRuntimeLayer
       HostIdentity + platform storage backends
-        shared HostStateStorage.Default / HostSecretStorage.Default
+        shared HostStateStorage.layer / HostSecretStorage.layer
           stable semantic stores
       ConfiguredHostContextRunner
-        ScopedCache keyed by public origin
+        RcMap keyed by public origin
           configured Context
             ResolvedPtoolsConfigSource
             AuthCoordinator + McpOAuthFlow
@@ -41,7 +41,7 @@ Cloudflare, Node, and future hosts provide only primitive capabilities:
 - `HostRuntimeBinding` values such as public origin when invoking configured work
 
 This package must not import platform packages. Shared
-`HostStateStorage.Default` / `HostSecretStorage.Default` layers combine
+`HostStateStorage.layer` / `HostSecretStorage.layer` combine
 `HostIdentity` with those backend ports and publish final services containing the
 selected `hostId` plus exact-key operations. Physical behavior remains
 platform-owned: Cloudflare validates that the requested ID is the current Durable
@@ -78,7 +78,7 @@ stableRuntime
 - `src/layers/hostStableSharedStoresLayer.ts`
   Host-scoped storage plus stable semantic stores (config, secrets, OAuth).
 - `src/services/configuredHostContextRunner.ts`
-  Owns the `ScopedCache`, origin latching, Context leases, and invalidation.
+  Owns the `RcMap`, origin latching, Context leases, and invalidation.
 - `src/layers/configuredHostContextLayer.ts`
   Config/origin-derived auth, MCP, executor, Code Mode, and server graph.
 - `src/layers/hostAuthCoordinatorPolicyLayer.ts`

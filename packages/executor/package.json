@@ -43,6 +43,6 @@
     "test": "pnpm build && vitest run --exclude \"**/dist/**\""
   },
   "dependencies": {
-    "effect": "3.21.2"
+    "effect": "4.0.0-beta.102"
   }
 }

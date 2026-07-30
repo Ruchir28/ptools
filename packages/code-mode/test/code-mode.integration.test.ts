@@ -15,7 +15,7 @@ import {
   McpConnector,
   type ConnectedMcpClient,
 } from "@ptools/mcp-registry";
-import { Effect, Either, Layer, Option } from "effect";
+import { Effect, Result, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/index.js";
 import { CodeModeExecuteError } from "../src/errors.js";
@@ -66,7 +66,7 @@ describe("CodeMode stdio MCP integration", () => {
           }
         `),
         );
-        const uncaughtProviderError = yield* Effect.either(
+        const uncaughtProviderError = yield* Effect.result(
           codeMode.execute(
             executeRequest(`
             async () => {
@@ -105,10 +105,10 @@ describe("CodeMode stdio MCP integration", () => {
         name: "Error",
       }),
     );
-    expect(Either.isLeft(result.uncaughtProviderError)).toBe(true);
+    expect(Result.isFailure(result.uncaughtProviderError)).toBe(true);
 
-    if (Either.isLeft(result.uncaughtProviderError)) {
-      expect(result.uncaughtProviderError.left).toBeInstanceOf(
+    if (Result.isFailure(result.uncaughtProviderError)) {
+      expect(result.uncaughtProviderError.failure).toBeInstanceOf(
         CodeModeExecuteError,
       );
     }
@@ -258,7 +258,7 @@ const makeFakeMcpConnectorLive = () =>
 const makeTestAuthCoordinatorLive = () =>
   Layer.succeed(
     AuthCoordinator,
-    AuthCoordinator.make({
+    AuthCoordinator.of({
       origin: Effect.succeed("http://127.0.0.1/auth"),
       callbackUrl: (serverName) =>
         Effect.succeed(

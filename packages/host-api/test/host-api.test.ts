@@ -1,7 +1,7 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { HttpClient, HttpClientResponse } from "@effect/platform";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
   CodeModeInvalidRequestError,
   CodeModeRemoteError,
@@ -173,10 +173,10 @@ describe("host-api schemas", () => {
     });
 
     const encodedWithCaller = await Effect.runPromise(
-      Schema.encode(HostOperationDispatchInput)(withCaller),
+      Schema.encodeEffect(HostOperationDispatchInput)(withCaller),
     );
     const encodedWithoutCaller = await Effect.runPromise(
-      Schema.encode(HostOperationDispatchInput)(withoutCaller),
+      Schema.encodeEffect(HostOperationDispatchInput)(withoutCaller),
     );
 
     expect(encodedWithCaller).toMatchObject({
@@ -186,7 +186,7 @@ describe("host-api schemas", () => {
     expect(encodedWithoutCaller).not.toHaveProperty("caller");
 
     const decoded = await Effect.runPromise(
-      Schema.decodeUnknown(HostOperationDispatchInput)(encodedWithCaller),
+      Schema.decodeUnknownEffect(HostOperationDispatchInput)(encodedWithCaller),
     );
     expect(Option.getOrThrow(decoded.caller)).toEqual({
       kind: "HostApiTokenCaller",
@@ -276,7 +276,7 @@ describe("HostHttpOperationAdapterLive", () => {
 
     const result = await Effect.runPromise(
       Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
-        adapter.codeMode({ path: { hostId: "demo" }, payload: request }),
+        adapter.codeMode({ params: { hostId: "demo" }, payload: request }),
       ).pipe(
         Effect.provideService(HostHttpIngress, {
           publicOrigin: "https://ptools.example",
@@ -311,7 +311,7 @@ describe("HostHttpOperationAdapterLive", () => {
     const exit = await Effect.runPromiseExit(
       Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
         adapter.codeMode({
-          path: { hostId: "demo" },
+          params: { hostId: "demo" },
           payload: searchRequest(),
         }),
       ).pipe(
@@ -334,11 +334,8 @@ describe("HostHttpOperationAdapterLive", () => {
 
 describe("HostHttpClientLive", () => {
   it("requires a platform HttpClient layer instead of owning fetch directly", () => {
-    const layer: Layer.Layer<
-      HostHttpClient,
-      unknown,
-      HttpClient.HttpClient
-    > = HostHttpClientLive({
+    const layer: Layer.Layer<HostHttpClient, unknown, HttpClient.HttpClient> =
+      HostHttpClientLive({
         baseUrl: "https://ptools.example",
         hostId: "demo",
         accessToken: "token",
@@ -445,9 +442,9 @@ describe("CodeModeClientFromHostHttpClientLive", () => {
       },
     });
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left).toBeInstanceOf(CodeModeInvalidRequestError);
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure).toBeInstanceOf(CodeModeInvalidRequestError);
     }
   });
 
@@ -463,9 +460,9 @@ describe("CodeModeClientFromHostHttpClientLive", () => {
       },
     });
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left).toBeInstanceOf(CodeModeRemoteError);
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure).toBeInstanceOf(CodeModeRemoteError);
     }
   });
 });
@@ -476,7 +473,7 @@ const runCodeModeClientWithHostResponse = (response: HostCodeModeResponse) => {
   return Effect.runPromise(
     Effect.gen(function* () {
       const client = yield* CodeModeClient;
-      return yield* client.call(searchRequest()).pipe(Effect.either);
+      return yield* client.call(searchRequest()).pipe(Effect.result);
     }).pipe(
       Effect.provide(
         CodeModeClientFromHostHttpClientLive.pipe(Layer.provide(host)),

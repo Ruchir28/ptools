@@ -4,77 +4,39 @@
  * A `ProviderBridge` instance represents one provider namespace for one
  * sandbox execution. It is passed into the Dynamic Worker as a Workers RPC
  * target; when sandbox code calls a provider proxy, Cloudflare invokes this
- * class back in the Durable Object host, where it re-enters the captured Effect
- * runtime and delegates to the shared executor provider-call handler.
+ * class back in the Durable Object host. The runtime layer binds the
+ * run-specific Effect handler into the plain Promise callback stored here.
  */
 import { RpcTarget } from "cloudflare:workers";
-import {
-  type SandboxProviderCallHandler,
-  type SandboxProviderCallResult,
-  type SerializedSandboxError,
-} from "@ptools/executor";
-import { Cause, Exit, Runtime } from "effect";
+import type { SandboxProviderCallResult } from "@ptools/executor";
+
+export type ProviderBridgeCall = (
+  tool: string,
+  input: unknown,
+  callId: string,
+) => Promise<SandboxProviderCallResult>;
 
 /**
  * Run-scoped Workers RPC target for one provider namespace.
- * Private fields keep trusted Effect runtime and callbacks outside the
- * RPC-visible surface exposed to the untrusted Dynamic Worker.
+ *
+ * The private callback is already bound to the provider name, execution
+ * handler, and Effect context by the trusted runtime layer. This class owns
+ * only the plain Workers RPC adaptation exposed to the Dynamic Worker.
  */
 export class ProviderBridge extends RpcTarget {
-  readonly #providerName: string;
-  readonly #handleProviderCall: SandboxProviderCallHandler;
-  readonly #runtime: Runtime.Runtime<never>;
+  readonly #callProvider: ProviderBridgeCall;
 
-  constructor(options: {
-    readonly providerName: string;
-    readonly handleProviderCall: SandboxProviderCallHandler;
-    readonly runtime: Runtime.Runtime<never>;
-  }) {
+  constructor(options: { readonly callProvider: ProviderBridgeCall }) {
     super();
-    this.#providerName = options.providerName;
-    this.#handleProviderCall = options.handleProviderCall;
-    this.#runtime = options.runtime;
+    this.#callProvider = options.callProvider;
   }
 
-  /**
-   * Called by Cloudflare Workers RPC from the Dynamic Worker sandbox proxy.
-   *
-   * This method must be a normal async method because Cloudflare owns the RPC
-   * boundary and does not understand Effect values. The captured runtime lets
-   * us re-enter the already-composed Durable Object Effect runtime from this
-   * plain JS callback. Use runPromiseExit so typed failures/defects are turned
-   * into protocol envelopes instead of rejected RPC promises.
-   */
-  async call(
+  /** Delegate one Workers RPC invocation to the trusted, run-bound callback. */
+  call(
     tool: string,
     input: unknown,
     callId: string,
   ): Promise<SandboxProviderCallResult> {
-    const exit = await Runtime.runPromiseExit(this.#runtime)(
-      this.#handleProviderCall({
-        callId,
-        provider: this.#providerName,
-        tool,
-        input,
-      }),
-    );
-
-    return Exit.match(exit, {
-      onSuccess: (result) => result,
-      onFailure: (cause) => ({
-        callId,
-        ok: false as const,
-        error: serializeCause(cause, "ProviderBridgeFailure"),
-      }),
-    });
+    return this.#callProvider(tool, input, callId);
   }
 }
-
-const serializeCause = (
-  cause: Cause.Cause<unknown>,
-  code: string,
-): SerializedSandboxError => ({
-  name: "ProviderBridgeFailure",
-  code,
-  message: Cause.pretty(cause),
-});

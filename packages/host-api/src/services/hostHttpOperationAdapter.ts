@@ -36,31 +36,31 @@ import {
 } from "./hostHttpMiddleware.js";
 
 export interface CodeModeHttpContext {
-  readonly path: { readonly hostId: string };
+  readonly params: { readonly hostId: string };
   readonly payload: CodeModeRequest;
 }
 
 export interface ConfigureHttpContext {
-  readonly path: { readonly hostId: string };
+  readonly params: { readonly hostId: string };
   readonly payload: ConfigureHostInput;
 }
 
 export interface ConfigureSecretsHttpContext {
-  readonly path: { readonly hostId: string };
+  readonly params: { readonly hostId: string };
   readonly payload: ConfigureHostSecretsInput;
 }
 
 export interface McpAuthStatusHttpContext {
-  readonly path: { readonly hostId: string };
+  readonly params: { readonly hostId: string };
 }
 
 export interface StartMcpAuthHttpContext {
-  readonly path: { readonly hostId: string; readonly serverName: string };
+  readonly params: { readonly hostId: string; readonly serverName: string };
   readonly payload: { readonly force?: boolean | undefined };
 }
 
 export interface CompleteMcpOAuthCallbackHttpContext {
-  readonly path: { readonly hostId: string; readonly provider: string };
+  readonly params: { readonly hostId: string; readonly provider: string };
   readonly request: { readonly method: string; readonly url: string };
   readonly bodyText: Option.Option<string>;
 }
@@ -89,9 +89,7 @@ export interface CompleteMcpOAuthCallbackHttpContext {
  * @effect-expect-leaking HostHttpIngress
  * @effect-expect-leaking VerifiedHostApiCaller
  */
-export class HostHttpOperationAdapter extends Context.Tag(
-  "@ptools/HostHttpOperationAdapter",
-)<
+export class HostHttpOperationAdapter extends Context.Service<
   HostHttpOperationAdapter,
   {
     readonly codeMode: (
@@ -137,7 +135,7 @@ export class HostHttpOperationAdapter extends Context.Tag(
       HostHttpIngress
     >;
   }
->() {}
+>()("@ptools/HostHttpOperationAdapter") {}
 
 /** Live adapter that resolves and dispatches through a selected host handle. */
 export const HostHttpOperationAdapterLive: Layer.Layer<
@@ -170,8 +168,8 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
 
     const credentialed = <A>(
       use: (input: {
-        readonly ingress: Context.Tag.Service<typeof HostHttpIngress>;
-        readonly auth: Context.Tag.Service<typeof VerifiedHostApiCaller>;
+        readonly ingress: Context.Service.Shape<typeof HostHttpIngress>;
+        readonly auth: Context.Service.Shape<typeof VerifiedHostApiCaller>;
       }) => Effect.Effect<A, HostHttpError>,
     ) =>
       Effect.gen(function* () {
@@ -184,7 +182,7 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
       codeMode: (ctx) =>
         credentialed(({ ingress, auth }) =>
           dispatchExpected("code_mode", {
-            hostId: ctx.path.hostId,
+            hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
             caller: Option.some(auth.caller),
             request: { operation: "code_mode", input: ctx.payload },
@@ -194,7 +192,7 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
       configure: (ctx) =>
         credentialed(({ ingress, auth }) =>
           dispatchExpected("configure", {
-            hostId: ctx.path.hostId,
+            hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
             caller: Option.some(auth.caller),
             request: { operation: "configure", input: ctx.payload },
@@ -204,7 +202,7 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
       configureSecrets: (ctx) =>
         credentialed(({ ingress, auth }) =>
           dispatchExpected("configure_secrets", {
-            hostId: ctx.path.hostId,
+            hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
             caller: Option.some(auth.caller),
             request: { operation: "configure_secrets", input: ctx.payload },
@@ -214,7 +212,7 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
       mcpAuthStatus: (ctx) =>
         credentialed(({ ingress, auth }) =>
           dispatchExpected("mcp_auth_status", {
-            hostId: ctx.path.hostId,
+            hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
             caller: Option.some(auth.caller),
             request: {
@@ -226,13 +224,13 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
       startMcpAuth: (ctx) =>
         credentialed(({ ingress, auth }) =>
           dispatchExpected("start_mcp_auth", {
-            hostId: ctx.path.hostId,
+            hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
             caller: Option.some(auth.caller),
             request: {
               operation: "start_mcp_auth",
               input: {
-                serverName: ctx.path.serverName,
+                serverName: ctx.params.serverName,
                 force: ctx.payload.force === true,
               },
             },
@@ -243,14 +241,14 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
         Effect.gen(function* () {
           const ingress = yield* HostHttpIngress;
           return yield* dispatchExpected("complete_mcp_oauth_callback", {
-            hostId: ctx.path.hostId,
+            hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
             caller: Option.none(),
             request: {
               operation: "complete_mcp_oauth_callback",
               input: {
                 origin: ingress.publicOrigin,
-                provider: ctx.path.provider,
+                provider: ctx.params.provider,
                 method: ctx.request.method,
                 url: new URL(ctx.request.url, ingress.publicOrigin).toString(),
                 bodyText: Option.getOrUndefined(ctx.bodyText),

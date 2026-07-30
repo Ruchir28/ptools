@@ -9,6 +9,7 @@ import type {
 } from "@ptools/host-api";
 import {
   Data,
+  Context,
   Deferred,
   Effect,
   Exit,
@@ -16,6 +17,7 @@ import {
   Option,
   Scope,
   SynchronizedRef,
+  Layer,
 } from "effect";
 import type { NodeHostActorRuntime } from "../nodeHostActorRuntime.js";
 import {
@@ -167,14 +169,16 @@ export const makeNodeHostRuntimeManager: Effect.Effect<
  * Authoritative in-process owner of active host actors inside the Node daemon.
  *
  * The service is intentionally absent from public HTTP ingress and from every
- * actor `ManagedRuntime`. Its generated `.Default` Layer requires the
+ * actor `ManagedRuntime`. Its package-owned Layer requires the
  * daemon-owned `NodeDaemonHostActorRuntimeActivator`; closing the manager Layer
  * stops publication and disposes all runtimes accumulated in its map.
  */
-export class NodeHostRuntimeManager extends Effect.Service<NodeHostRuntimeManager>()(
+export class NodeHostRuntimeManager extends Context.Service<NodeHostRuntimeManager>()(
   "@ptools/host-node/hostActorDaemon/NodeHostRuntimeManager",
-  { scoped: makeNodeHostRuntimeManager },
-) {}
+  { make: makeNodeHostRuntimeManager },
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 /**
  * Finish one claimed activation after `getOrActivate` already published
@@ -270,7 +274,7 @@ const activateAndPublish = (input: {
       // Succeeded activate after close must not leak the unused runtime.
       if (managerWasClosed && Exit.isSuccess(activationExit)) {
         yield* activationExit.value.dispose.pipe(
-          Effect.catchAll((error) => reportDisposalFailure(error)),
+          Effect.catch((error) => reportDisposalFailure(error)),
         );
       }
       // Unblock this caller and every same-host waiter with one shared Exit.
@@ -302,7 +306,7 @@ const closeManager = (
             Deferred.fail(gate, managerClosedError(hostId)),
           Active: ({ runtime }) =>
             runtime.dispose.pipe(
-              Effect.catchAll((error) => reportDisposalFailure(error)),
+              Effect.catch((error) => reportDisposalFailure(error)),
             ),
         }),
       { concurrency: "unbounded", discard: true },

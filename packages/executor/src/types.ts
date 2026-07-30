@@ -111,9 +111,9 @@ export const makeExecuteRequest = (options: {
 }): ExecuteRequest =>
   new ExecuteRequest({
     code: options.code,
-    globals: Option.fromNullable(options.globals),
-    providers: Option.fromNullable(options.providers),
-    timeoutMs: Option.fromNullable(options.timeoutMs),
+    globals: Option.fromNullishOr(options.globals),
+    providers: Option.fromNullishOr(options.providers),
+    timeoutMs: Option.fromNullishOr(options.timeoutMs),
   });
 
 export interface ExecuteResult {

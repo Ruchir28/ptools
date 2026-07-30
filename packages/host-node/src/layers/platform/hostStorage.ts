@@ -3,11 +3,11 @@
  *
  * These adapters receive a host ID through `forHost(...)`, derive Node-specific
  * filesystem/keyring namespaces, and return exact-key operations. Shared
- * `HostStateStorage.Default` and `HostSecretStorage.Default` own the step that
+ * `HostStateStorage.layer` and `HostSecretStorage.layer` own the step that
  * obtains `HostIdentity` and invokes these backends.
  */
-import * as KeyValueStore from "@effect/platform/KeyValueStore";
-import * as NodeKeyValueStore from "@effect/platform-node/NodeKeyValueStore";
+import { KeyValueStore } from "effect/unstable/persistence";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AsyncEntry } from "@napi-rs/keyring";
 import {
   HostSecretStorageBackend,
@@ -32,8 +32,10 @@ export const NodeFileHostStateStorageBackendLayer = (
     forHost: (hostId) => {
       const hostDirectory = join(rootDirectory, encodeHostId(hostId));
 
-      return NodeKeyValueStore.layerFileSystem(hostDirectory).pipe(
-        Layer.mapError(
+      return KeyValueStore.layerFileSystem(hostDirectory).pipe(
+        Layer.provide(NodeServices.layer),
+        Layer.build,
+        Effect.mapError(
           (cause) =>
             new HostStorageError({
               storage: "state",
@@ -42,7 +44,6 @@ export const NodeFileHostStateStorageBackendLayer = (
               cause,
             }),
         ),
-        Layer.build,
         Effect.map((context) =>
           makeKeyValueStoreHostStorage(
             Context.get(context, KeyValueStore.KeyValueStore),
@@ -82,7 +83,7 @@ export const nodeKeyringHostSecretAccountPrefix = (
 /**
  * OS-keyring implementation of `HostSecretStorageBackend`.
  *
- * Shared `HostSecretStorage.Default` resolves `HostIdentity` and calls
+ * Shared `HostSecretStorage.layer` resolves `HostIdentity` and calls
  * `forHost(...)`; this layer only owns Node-specific physical naming. Callers
  * use short logical keys; `physicalKey` prefixes them before `@napi-rs/keyring`
  * so get/put/delete stay isolated by state home and host ID without storing
@@ -100,9 +101,9 @@ export const NodeKeyringHostSecretStorageBackendLayer = (options: {
     forHost: (hostId) => {
       // Same prefix shape as `nodeKeyringHostSecretAccountPrefix`; inlined so
       // the digest is computed once per backend rather than per operation.
-      const hostKeyPrefix =
-        `namespaces/v1/${stateNamespaceDigest}/hosts/${encodeHostId(hostId)}/`;
-      const physicalKey = (logicalKey: string) => `${hostKeyPrefix}${logicalKey}`;
+      const hostKeyPrefix = `namespaces/v1/${stateNamespaceDigest}/hosts/${encodeHostId(hostId)}/`;
+      const physicalKey = (logicalKey: string) =>
+        `${hostKeyPrefix}${logicalKey}`;
 
       return Effect.succeed({
         get: (key) =>
@@ -119,7 +120,7 @@ export const NodeKeyringHostSecretStorageBackendLayer = (options: {
                 key,
                 cause,
               }),
-          }).pipe(Effect.map(Option.fromNullable)),
+          }).pipe(Effect.map(Option.fromNullishOr)),
         put: (key, value) =>
           Effect.tryPromise({
             try: () =>
@@ -159,14 +160,13 @@ const makeKeyValueStoreHostStorage = (
   storage: "state",
 ): HostStorageOperations => ({
   get: (key) =>
-    store
-      .get(key)
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new HostStorageError({ storage, operation: "get", key, cause }),
-        ),
+    store.get(key).pipe(
+      Effect.map(Option.fromNullishOr),
+      Effect.mapError(
+        (cause) =>
+          new HostStorageError({ storage, operation: "get", key, cause }),
       ),
+    ),
   put: (key, value) =>
     store
       .set(key, value)

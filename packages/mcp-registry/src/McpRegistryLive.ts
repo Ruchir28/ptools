@@ -43,7 +43,7 @@ export const makeMcpRegistryLive = (
   AuthError | NameCollisionError,
   AuthCoordinator | McpConnector
 > =>
-  Layer.scoped(
+  Layer.effect(
     McpRegistry,
     Effect.gen(function* () {
       const authCoordinator = yield* AuthCoordinator;
@@ -58,7 +58,7 @@ export const makeMcpRegistryLive = (
        */
       const connectWithinRegistryScope = (selected: UpstreamMcpServers) =>
         connectConfiguredMcpClients(selected, authCoordinator, connector).pipe(
-          Scope.extend(registryScope),
+          Scope.provide(registryScope),
         );
 
       /** Reconnect and rediscover the complete configured upstream set. */

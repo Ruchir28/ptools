@@ -14,7 +14,7 @@ import type {
   UpstreamAuthRequired,
 } from "@ptools/mcp-registry";
 import { McpRegistry } from "@ptools/mcp-registry";
-import { Effect, Either, Layer, Option } from "effect";
+import { Effect, Result, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { CodeMode, makeCodeModeLive } from "../src/CodeMode.js";
 import {
@@ -145,7 +145,7 @@ describe("Code Mode context and search", () => {
 
   it("searchProviders rejects non-positive limits", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
@@ -158,11 +158,11 @@ describe("Code Mode context and search", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
-      expect(result.left.message).toBe(
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.failure.message).toBe(
         "search.limit must be a positive integer when provided",
       );
     }
@@ -195,7 +195,7 @@ describe("Code Mode context and search", () => {
 
   it("search rejects non-positive limits", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
@@ -208,11 +208,11 @@ describe("Code Mode context and search", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
-      expect(result.left.message).toBe(
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.failure.message).toBe(
         "search.limit must be a positive integer when provided",
       );
     }
@@ -420,7 +420,7 @@ describe("Code Mode context and search", () => {
 
   it("toolSchema fails the whole batch when any requested tool is unknown", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
@@ -433,11 +433,11 @@ describe("Code Mode context and search", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
-      expect(result.left.message).toBe(
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.failure.message).toBe(
         "Unknown Code Mode tool: fixture.missing",
       );
     }
@@ -447,7 +447,7 @@ describe("Code Mode context and search", () => {
     "toolSchema rejects malformed toolId %j",
     async (toolId) => {
       const result = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           runWithCodeModeEffect(
             Effect.gen(function* () {
               const codeMode = yield* CodeMode;
@@ -458,11 +458,13 @@ describe("Code Mode context and search", () => {
         ),
       );
 
-      expect(Either.isLeft(result)).toBe(true);
+      expect(Result.isFailure(result)).toBe(true);
 
-      if (Either.isLeft(result)) {
-        expect(result.left).toBeInstanceOf(CodeModeInvariantError);
-        expect(result.left.message).toBe(`Invalid Code Mode toolId: ${toolId}`);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toBeInstanceOf(CodeModeInvariantError);
+        expect(result.failure.message).toBe(
+          `Invalid Code Mode toolId: ${toolId}`,
+        );
       }
     },
   );
@@ -564,7 +566,7 @@ describe("Code Mode context and search", () => {
 
   it("search rejects unknown provider scopes", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         runWithCodeModeEffect(
           Effect.gen(function* () {
             const codeMode = yield* CodeMode;
@@ -580,11 +582,13 @@ describe("Code Mode context and search", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
-      expect(result.left.message).toBe("Unknown Code Mode provider: missing");
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.failure.message).toBe(
+        "Unknown Code Mode provider: missing",
+      );
     }
   });
 
@@ -894,7 +898,7 @@ describe("TypeScript declaration generation", () => {
 
   it("fails loudly on duplicate generated type names", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         generateDeclarations(
           groupDiscoveredMcpTools([
             mcpTool({
@@ -910,11 +914,11 @@ describe("TypeScript declaration generation", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(CodeModeInvariantError);
-      expect(result.left.message).toBe(
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(CodeModeInvariantError);
+      expect(result.failure.message).toBe(
         "Duplicate generated type name: FixtureFooBarInput",
       );
     }
@@ -1016,14 +1020,14 @@ describe("Provider generation and MCP result unwrapping", () => {
     );
     const add = providers[0]?.fns.add;
     const result = await Effect.runPromise(
-      Effect.either(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
+      Effect.result(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(Error);
-      expect((result.left as Error).message).toBe(
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).toBe(
         "MCP tool not found: fixture.add",
       );
     }
@@ -1043,14 +1047,14 @@ describe("Provider generation and MCP result unwrapping", () => {
     );
     const add = providers[0]?.fns.add;
     const result = await Effect.runPromise(
-      Effect.either(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
+      Effect.result(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(Error);
-      expect((result.left as Error).message).toBe(
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).toBe(
         "UPSTREAM_AUTH_REQUIRED: fixture.add requires authorization before this tool can run. Ask the user to open the ptools auth center, authorize the server, then retry.",
       );
     }
@@ -1071,15 +1075,15 @@ describe("Provider generation and MCP result unwrapping", () => {
     );
     const add = providers[0]?.fns.add;
     const result = await Effect.runPromise(
-      Effect.either(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
+      Effect.result(add?.({ a: 2, b: 3 }) ?? Effect.die("missing add")),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(Error);
-      expect((result.left as Error).message).not.toContain("open ,");
-      expect((result.left as Error).message).toContain(
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(Error);
+      expect((result.failure as Error).message).not.toContain("open ,");
+      expect((result.failure as Error).message).toContain(
         "Ask the user to open the ptools auth center",
       );
     }
@@ -1112,7 +1116,7 @@ const makeRegistryLayer = (
   ) => Effect.Effect<
     unknown,
     ToolNotFound | InvalidToolArguments | McpCallError | UpstreamAuthRequired
-  > = () => Effect.dieMessage("callTool not implemented"),
+  > = () => Effect.die(new Error("callTool not implemented")),
   diagnostics: ReadonlyArray<McpRegistryDiagnostic> = [],
 ) =>
   Layer.succeed(McpRegistry, {
@@ -1147,8 +1151,8 @@ const searchProvidersRequest = (input: {
   readonly limit?: number;
 }): CodeModeSearchProvidersRequest =>
   CodeModeSearchProvidersRequest.make({
-    query: Option.fromNullable(input.query),
-    limit: Option.fromNullable(input.limit),
+    query: Option.fromNullishOr(input.query),
+    limit: Option.fromNullishOr(input.limit),
   });
 
 const searchRequest = (input: {
@@ -1158,8 +1162,8 @@ const searchRequest = (input: {
 }): CodeModeSearchRequest =>
   CodeModeSearchRequest.make({
     query: input.query,
-    provider: Option.fromNullable(input.provider),
-    limit: Option.fromNullable(input.limit),
+    provider: Option.fromNullishOr(input.provider),
+    limit: Option.fromNullishOr(input.limit),
   });
 
 const unsafeSearchProvidersRequest = (input: {
@@ -1167,8 +1171,8 @@ const unsafeSearchProvidersRequest = (input: {
   readonly limit?: number;
 }): CodeModeSearchProvidersRequest =>
   ({
-    query: Option.fromNullable(input.query),
-    limit: Option.fromNullable(input.limit),
+    query: Option.fromNullishOr(input.query),
+    limit: Option.fromNullishOr(input.limit),
   }) as CodeModeSearchProvidersRequest;
 
 const unsafeSearchRequest = (input: {
@@ -1178,8 +1182,8 @@ const unsafeSearchRequest = (input: {
 }): CodeModeSearchRequest =>
   ({
     query: input.query,
-    provider: Option.fromNullable(input.provider),
-    limit: Option.fromNullable(input.limit),
+    provider: Option.fromNullishOr(input.provider),
+    limit: Option.fromNullishOr(input.limit),
   }) as CodeModeSearchRequest;
 
 const fixtureAddTool = (): DiscoveredMcpTool =>

@@ -8,8 +8,8 @@ import {
   FetchHttpClient,
   HttpClient,
   HttpClientRequest,
-} from "@effect/platform";
-import { RpcClient, RpcSerialization } from "@effect/rpc";
+} from "effect/unstable/http";
+import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { Effect, Layer } from "effect";
 import { spawn, type ChildProcess } from "node:child_process";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -114,7 +114,9 @@ describe("Node host-actor daemon spawned process", () => {
       replacement.kill("SIGTERM");
       await waitForExit(replacement, 10_000);
     } else {
-      expect(exit.signal === "SIGTERM" || exit.code === 0).toBe(true);
+      // Effect v4's NodeRuntime handles the signal, interrupts the main fiber
+      // so scoped finalizers run, and maps an interruption-only exit to 130.
+      expect(exit.code).toBe(130);
       await expect(
         access(join(directory, NODE_HOST_ACTOR_DAEMON_READY_FILE)),
       ).rejects.toThrow();

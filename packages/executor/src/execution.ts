@@ -178,7 +178,7 @@ export const serializeCause = (
   cause: Cause.Cause<unknown>,
   code?: string,
 ): SerializedSandboxError =>
-  Cause.failureOption(cause).pipe(
+  Cause.findErrorOption(cause).pipe(
     Option.match({
       onNone: () => serializeUnknownError(new Error(Cause.pretty(cause)), code),
       onSome: (failure) => serializeUnknownError(failure, code),
@@ -260,7 +260,7 @@ const findProviderHandler = (
   providers: ExecutorProviders,
   call: SandboxProviderCall,
 ): Option.Option<ExecutorProviderHandler> =>
-  Option.fromNullable(
+  Option.fromNullishOr(
     providers.find((provider) => provider.name === call.provider)?.fns[
       call.tool
     ],

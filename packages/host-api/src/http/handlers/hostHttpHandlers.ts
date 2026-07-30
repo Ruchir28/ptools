@@ -1,5 +1,6 @@
 /** Shared Effect HttpApi handlers for the Host HTTP API. */
-import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
+import { HttpServerResponse } from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Effect, Option } from "effect";
 import { HostHttpApi } from "../api/hostHttpApi.js";
 import { HostHttpBadRequest } from "../../contracts/hostHttpErrors.js";
@@ -54,7 +55,7 @@ export const OAuthBrowserHandlers = HttpApiBuilder.group(
         Effect.gen(function* () {
           const adapter = yield* HostHttpOperationAdapter;
           const response = yield* adapter.completeMcpOAuthCallback({
-            path: ctx.path,
+            params: ctx.params,
             request: {
               method: ctx.request.method,
               url: ctx.request.url,
@@ -77,7 +78,7 @@ export const OAuthBrowserHandlers = HttpApiBuilder.group(
             ),
           );
           const response = yield* adapter.completeMcpOAuthCallback({
-            path: ctx.path,
+            params: ctx.params,
             request: {
               method: ctx.request.method,
               url: ctx.request.url,

@@ -21,24 +21,21 @@ import type { CodeModeError } from "./errors.js";
  * Provides CodeModeServer by delegating each schema-backed request to the
  * matching method on the configured CodeMode service.
  */
-export const CodeModeServerLayer: Layer.Layer<
-  CodeModeServer,
-  never,
-  CodeMode
-> = Layer.effect(
-  CodeModeServer,
-  Effect.gen(function* () {
-    const codeMode = yield* CodeMode;
+export const CodeModeServerLayer: Layer.Layer<CodeModeServer, never, CodeMode> =
+  Layer.effect(
+    CodeModeServer,
+    Effect.gen(function* () {
+      const codeMode = yield* CodeMode;
 
-    return {
-      handle: (request: CodeModeRequest) =>
-        handleCodeModeRequest(codeMode, request),
-    };
-  }),
-);
+      return {
+        handle: (request: CodeModeRequest) =>
+          handleCodeModeRequest(codeMode, request),
+      };
+    }),
+  );
 
 const handleCodeModeRequest = (
-  codeMode: Context.Tag.Service<typeof CodeMode>,
+  codeMode: Context.Service.Shape<typeof CodeMode>,
   request: CodeModeRequest,
 ): Effect.Effect<CodeModeResponse, CodeModeServerError> => {
   switch (request.operation) {

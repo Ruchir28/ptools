@@ -14,7 +14,7 @@ import type {
   McpRegistryDiagnostic,
 } from "./types.js";
 
-export class McpRegistry extends Context.Tag("@ptools/McpRegistry")<
+export class McpRegistry extends Context.Service<
   McpRegistry,
   {
     readonly listTools: Effect.Effect<ReadonlyArray<DiscoveredMcpTool>>;
@@ -28,4 +28,4 @@ export class McpRegistry extends Context.Tag("@ptools/McpRegistry")<
       ToolNotFound | InvalidToolArguments | McpCallError | UpstreamAuthRequired
     >;
   }
->() {}
+>()("@ptools/McpRegistry") {}

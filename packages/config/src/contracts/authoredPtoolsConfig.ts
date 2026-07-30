@@ -14,21 +14,15 @@ import {
 
 /** One user-authored MCP server entry before transport normalization. */
 export const UserServerMcpConfig = Schema.Struct({
-  command: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  args: Schema.optionalWith(Schema.Array(Schema.String), {
-    exact: true,
-    as: "Option",
-  }),
-  cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  url: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  auth: Schema.optionalWith(UnresolvedHttpMcpAuthConfig, {
-    exact: true,
-    as: "Option",
-  }),
-  enabled: Schema.optionalWith(Schema.Boolean, { exact: true, as: "Option" }),
-  disabled: Schema.optionalWith(Schema.Boolean, { exact: true, as: "Option" }),
+  command: Schema.OptionFromOptionalKey(Schema.String),
+  args: Schema.OptionFromOptionalKey(Schema.Array(Schema.String)),
+  cwd: Schema.OptionFromOptionalKey(Schema.String),
+  env: Schema.OptionFromOptionalKey(StringRecord),
+  url: Schema.OptionFromOptionalKey(Schema.String),
+  headers: Schema.OptionFromOptionalKey(StringRecord),
+  auth: Schema.OptionFromOptionalKey(UnresolvedHttpMcpAuthConfig),
+  enabled: Schema.OptionFromOptionalKey(Schema.Boolean),
+  disabled: Schema.OptionFromOptionalKey(Schema.Boolean),
 });
 export type UserServerMcpConfig = typeof UserServerMcpConfig.Type;
 
@@ -40,10 +34,7 @@ export type UserServerMcpConfig = typeof UserServerMcpConfig.Type;
  * stay explicit and fail-fast.
  */
 export const UserPtoolsConfig = Schema.Struct({
-  mcpServers: Schema.Record({
-    key: Schema.String,
-    value: UserServerMcpConfig,
-  }),
-  executor: Schema.optionalWith(ExecutorConfig, { exact: true, as: "Option" }),
+  mcpServers: Schema.Record(Schema.String, UserServerMcpConfig),
+  executor: Schema.OptionFromOptionalKey(ExecutorConfig),
 });
 export type UserPtoolsConfig = typeof UserPtoolsConfig.Type;

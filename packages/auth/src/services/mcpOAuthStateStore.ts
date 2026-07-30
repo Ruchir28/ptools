@@ -12,7 +12,7 @@
  * Start OAuth for host "demo", provider "github"
  *   provider calls McpOAuthStateStore.sign({ payload })
  *
- * McpOAuthStateStore.Default
+ * McpOAuthStateStore.layer
  *   loads or creates signing secret at: oauth/state-secret
  *   stores issued nonce at: oauth/state/<nonce>
  *   returns browser state: base64url(payload).signature
@@ -27,8 +27,11 @@
  * short-lived browser callback/replay-protection protocol; credentials are the
  * reusable tokens/client/discovery data saved after authorization succeeds.
  */
-import { HostSecretStorage, type HostSecretStorageService } from "@ptools/config";
-import { Effect, Option, Schema } from "effect";
+import {
+  HostSecretStorage,
+  type HostSecretStorageService,
+} from "@ptools/config";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 import { AuthError } from "../authErrors.js";
 import { McpOAuthStatePayload } from "../contracts/index.js";
 
@@ -75,16 +78,18 @@ export interface McpOAuthStateStoreService {
  * long-lived OAuth tokens or client registrations; those belong to
  * `McpOAuthCredentialStore`.
  */
-export class McpOAuthStateStore extends Effect.Service<McpOAuthStateStore>()(
+export class McpOAuthStateStore extends Context.Service<McpOAuthStateStore>()(
   "@ptools/McpOAuthStateStore",
   {
-    effect: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const secretStorage = yield* HostSecretStorage;
 
       return makeMcpOAuthStateStoreService(secretStorage);
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 const makeMcpOAuthStateStoreService = (
   secretStorage: HostSecretStorageService,
@@ -92,15 +97,17 @@ const makeMcpOAuthStateStoreService = (
   /** Load the host-local signing secret, creating it on first OAuth flow. */
   const loadOrCreateOAuthStateSecret = (): Effect.Effect<string, AuthError> =>
     Effect.gen(function* () {
-      const existing = yield* secretStorage.get(MCP_OAUTH_STATE_SECRET_KEY).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AuthError({
-              message: "Failed to load MCP OAuth state secret.",
-              cause,
-            }),
-        ),
-      );
+      const existing = yield* secretStorage
+        .get(MCP_OAUTH_STATE_SECRET_KEY)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new AuthError({
+                message: "Failed to load MCP OAuth state secret.",
+                cause,
+              }),
+          ),
+        );
 
       return yield* existing.pipe(
         Option.match({
@@ -143,9 +150,9 @@ const makeMcpOAuthStateStoreService = (
           Option.match({
             onNone: () => Effect.fail(invalidOAuthStateError()),
             onSome: (record) =>
-              Schema.decodeUnknown(EncodedMcpOAuthStatePayload)(record).pipe(
-                Effect.mapError(invalidOAuthStateError),
-              ),
+              Schema.decodeUnknownEffect(EncodedMcpOAuthStatePayload)(
+                record,
+              ).pipe(Effect.mapError(invalidOAuthStateError)),
           }),
         ),
       ),
@@ -209,7 +216,8 @@ const makeMcpOAuthStateStoreService = (
         // state single-use and host-local.
         yield* loadIssuedOAuthState(stateKey).pipe(
           Effect.filterOrFail(
-            (issuedState) => issuedStateMatchesCallbackState(issuedState, payload),
+            (issuedState) =>
+              issuedStateMatchesCallbackState(issuedState, payload),
             () => invalidOAuthStateError(),
           ),
         );
@@ -232,13 +240,19 @@ const makeMcpOAuthStateStoreService = (
   } satisfies McpOAuthStateStoreService;
 };
 
-const SignedOAuthStatePartsSchema = Schema.Tuple(
+/**
+ * Parts of browser OAuth `state` after `rawState.split(".")`:
+ *   [0] encodedPayload — base64url(JSON of McpOAuthStatePayload)
+ *   [1] signature      — HMAC-SHA256(encodedPayload) as base64url
+ */
+const SignedOAuthStatePartsSchema = Schema.Tuple([
   Schema.NonEmptyString,
   Schema.NonEmptyString,
-);
+]);
 
-const EncodedMcpOAuthStatePayload = Schema.parseJson(McpOAuthStatePayload);
-const issuedStateMatchesCallbackState = Schema.equivalence(McpOAuthStatePayload);
+const EncodedMcpOAuthStatePayload = Schema.fromJsonString(McpOAuthStatePayload);
+const issuedStateMatchesCallbackState =
+  Schema.toEquivalence(McpOAuthStatePayload);
 
 const parseSignedOAuthState = (
   rawState: string,
@@ -246,7 +260,9 @@ const parseSignedOAuthState = (
   { readonly encodedPayload: string; readonly signature: string },
   AuthError
 > =>
-  Schema.decodeUnknown(SignedOAuthStatePartsSchema)(rawState.split(".")).pipe(
+  Schema.decodeUnknownEffect(SignedOAuthStatePartsSchema)(
+    rawState.split("."),
+  ).pipe(
     Effect.map(([encodedPayload, signature]) => ({
       encodedPayload,
       signature,
@@ -262,7 +278,7 @@ const parseOAuthStatePayload = (
     catch: invalidOAuthStateError,
   }).pipe(
     Effect.flatMap((json) =>
-      Schema.decodeUnknown(EncodedMcpOAuthStatePayload)(json).pipe(
+      Schema.decodeUnknownEffect(EncodedMcpOAuthStatePayload)(json).pipe(
         Effect.mapError(invalidOAuthStateError),
       ),
     ),
@@ -280,7 +296,7 @@ const oauthStateMatchesCallback = (
   Date.parse(payload.expiresAt) > Date.now();
 
 const invalidOAuthStateError = (cause?: unknown): AuthError =>
-  Option.fromNullable(cause).pipe(
+  Option.fromNullishOr(cause).pipe(
     Option.match({
       onNone: () => new AuthError({ message: "Invalid OAuth state." }),
       onSome: (definedCause) =>
@@ -341,7 +357,10 @@ const timingSafeEquals = (
     const expectedBytes = encoder.encode(expected);
     const lengthsMatch = actualBytes.byteLength === expectedBytes.byteLength;
 
-    const maxLength = Math.max(actualBytes.byteLength, expectedBytes.byteLength);
+    const maxLength = Math.max(
+      actualBytes.byteLength,
+      expectedBytes.byteLength,
+    );
     let difference = actualBytes.byteLength ^ expectedBytes.byteLength;
 
     for (let index = 0; index < maxLength; index += 1) {

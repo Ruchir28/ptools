@@ -12,14 +12,14 @@ const UnknownArray = Schema.Array(Schema.Unknown);
 
 /** Console log captured while executing generated Code Mode code. */
 export const CapturedLog = Schema.Struct({
-  level: Schema.Literal("debug", "error", "info", "log", "warn"),
+  level: Schema.Literals(["debug", "error", "info", "log", "warn"]),
   message: Schema.String,
   args: UnknownArray,
 });
 export type CapturedLog = Schema.Schema.Type<typeof CapturedLog>;
 
 /** Diagnostic emitted while discovering or using MCP tools. */
-export const CodeModeDiagnostic = Schema.Union(
+export const CodeModeDiagnostic = Schema.Union([
   Schema.Struct({
     code: Schema.Literal("McpRegistryRefreshFailed"),
     severity: Schema.Literal("error"),
@@ -68,7 +68,7 @@ export const CodeModeDiagnostic = Schema.Union(
     toolName: Schema.String,
     message: Schema.String,
   }),
-);
+]);
 export type CodeModeDiagnostic = Schema.Schema.Type<typeof CodeModeDiagnostic>;
 
 const ProviderError = Schema.Struct({
@@ -79,7 +79,7 @@ const ProviderError = Schema.Struct({
 });
 
 /** Warning emitted when provider calls are still being observed at return. */
-export const CodeModeExecutionWarning = Schema.Union(
+export const CodeModeExecutionWarning = Schema.Union([
   Schema.Struct({
     code: Schema.Literal("ProviderCallPendingAtReturn"),
     callId: Schema.String,
@@ -95,7 +95,7 @@ export const CodeModeExecutionWarning = Schema.Union(
     outcome: Schema.Literal("failed"),
     error: ProviderError,
   }),
-);
+]);
 export type CodeModeExecutionWarning = Schema.Schema.Type<
   typeof CodeModeExecutionWarning
 >;

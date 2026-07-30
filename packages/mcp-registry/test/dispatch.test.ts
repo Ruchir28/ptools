@@ -1,6 +1,6 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   InvalidToolArguments,
@@ -8,10 +8,7 @@ import {
   UpstreamAuthRequired,
 } from "../src/errors.js";
 import { dispatchToolCall } from "../src/dispatch.js";
-import type {
-  ConnectedMcpClient,
-  DiscoveredMcpTool,
-} from "../src/types.js";
+import type { ConnectedMcpClient, DiscoveredMcpTool } from "../src/types.js";
 
 describe("dispatchToolCall", () => {
   it("dispatches JS-facing calls to original MCP tool names", async () => {
@@ -55,7 +52,7 @@ describe("dispatchToolCall", () => {
 
   it("fails when the JS server/tool pair is unknown", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         dispatchToolCall([], [githubCreateIssueTool], {
           jsServerName: "github",
           jsToolName: "missing",
@@ -64,17 +61,17 @@ describe("dispatchToolCall", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(ToolNotFound);
-      expect(result.left.toolName).toBe("missing");
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(ToolNotFound);
+      expect(result.failure.toolName).toBe("missing");
     }
   });
 
   it("fails before dispatch when arguments are not an object", async () => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         dispatchToolCall([], [githubCreateIssueTool], {
           jsServerName: "github",
           jsToolName: "create_issue",
@@ -83,15 +80,18 @@ describe("dispatchToolCall", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(InvalidToolArguments);
-      expect(result.left._tag).toBe("InvalidToolArguments");
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(InvalidToolArguments);
+      expect(result.failure._tag).toBe("InvalidToolArguments");
     }
 
-    if (Either.isLeft(result) && result.left._tag === "InvalidToolArguments") {
-      expect(result.left.value).toBe("not an object");
+    if (
+      Result.isFailure(result) &&
+      result.failure._tag === "InvalidToolArguments"
+    ) {
+      expect(result.failure.value).toBe("not an object");
     }
   });
 
@@ -109,7 +109,7 @@ describe("dispatchToolCall", () => {
     ];
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         dispatchToolCall(clients, [githubCreateIssueTool], {
           jsServerName: "github",
           jsToolName: "create_issue",
@@ -118,11 +118,11 @@ describe("dispatchToolCall", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(UpstreamAuthRequired);
-      expect(result.left).not.toHaveProperty("authUrl");
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(UpstreamAuthRequired);
+      expect(result.failure).not.toHaveProperty("authUrl");
     }
   });
 
@@ -140,7 +140,7 @@ describe("dispatchToolCall", () => {
     ];
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         dispatchToolCall(
           clients,
           [githubCreateIssueTool],
@@ -166,11 +166,11 @@ describe("dispatchToolCall", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(UpstreamAuthRequired);
-      expect(result.left).toMatchObject({
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(UpstreamAuthRequired);
+      expect(result.failure).toMatchObject({
         authUrl: "http://127.0.0.1:9999/auth",
         authorizeUrl: "http://127.0.0.1:9999/auth/github",
       });

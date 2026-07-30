@@ -28,7 +28,7 @@ export const parseUserPtoolsConfigJson = (
       }),
   }).pipe(
     Effect.flatMap((value) =>
-      Schema.decodeUnknown(UserPtoolsConfig)(value, {
+      Schema.decodeUnknownEffect(UserPtoolsConfig)(value, {
         errors: "all",
         onExcessProperty: "error",
       }),

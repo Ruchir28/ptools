@@ -3,7 +3,7 @@
  * runtimes. Short durations exercise real expiry/grace fibers, while Deferred
  * values make operation admission and completion ordering deterministic.
  */
-import { Deferred, Duration, Effect, Either, Fiber, Option } from "effect";
+import { Deferred, Duration, Effect, Result, Fiber, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeNodeHostActorDaemonLeaseManager } from "../src/hostActorDaemon/leases/services/nodeHostActorDaemonLeaseManager.js";
 
@@ -79,7 +79,7 @@ describe("Node host-actor daemon lease manager", () => {
           const gate = yield* Deferred.make<string>();
           const entered = yield* Deferred.make<void>();
           const operation = yield* Deferred.succeed(entered, undefined).pipe(
-            Effect.zipRight(Deferred.await(gate)),
+            Effect.andThen(Deferred.await(gate)),
             // The lease manager wraps this lazy operation without interpreting
             // it. Its in-flight slot stays held until `gate` lets the operation
             // finish and the acquire/use/release bracket runs its finalizer.
@@ -117,7 +117,7 @@ describe("Node host-actor daemon lease manager", () => {
 
           const entered = yield* Deferred.make<void>();
           const interrupted = yield* Deferred.succeed(entered, undefined).pipe(
-            Effect.zipRight(Effect.never),
+            Effect.andThen(Effect.never),
             manager.withOperationAdmission(lease.leaseId),
             Effect.forkScoped,
           );
@@ -144,20 +144,20 @@ describe("Node host-actor daemon lease manager", () => {
             ...options,
             leaseTtlMs: 10,
           });
-          const unknown = yield* manager.renew("missing").pipe(Effect.either);
-          expect(Either.isLeft(unknown)).toBe(true);
-          if (Either.isLeft(unknown))
-            expect(unknown.left.reason).toBe("unknown");
+          const unknown = yield* manager.renew("missing").pipe(Effect.result);
+          expect(Result.isFailure(unknown)).toBe(true);
+          if (Result.isFailure(unknown))
+            expect(unknown.failure.reason).toBe("unknown");
 
           const lease = yield* manager.acquire;
           yield* Effect.sleep(Duration.millis(20));
           const expired = yield* Effect.void.pipe(
             manager.withOperationAdmission(lease.leaseId),
-            Effect.either,
+            Effect.result,
           );
-          expect(Either.isLeft(expired)).toBe(true);
-          if (Either.isLeft(expired))
-            expect(expired.left.reason).toBe("expired");
+          expect(Result.isFailure(expired)).toBe(true);
+          if (Result.isFailure(expired))
+            expect(expired.failure.reason).toBe("expired");
         }),
       ),
     );

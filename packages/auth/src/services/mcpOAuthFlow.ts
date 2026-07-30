@@ -1,5 +1,5 @@
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
-import { Effect, Option } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   AuthCoordinatorCore,
   type AuthCoordinatorCoreService,
@@ -33,10 +33,10 @@ export interface McpOAuthFlowService {
  * `AuthCoordinatorCore`; it does not know about Cloudflare, Node, or HTTP
  * routing.
  */
-export class McpOAuthFlow extends Effect.Service<McpOAuthFlow>()(
+export class McpOAuthFlow extends Context.Service<McpOAuthFlow>()(
   "@ptools/McpOAuthFlow",
   {
-    effect: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const core = yield* AuthCoordinatorCore;
 
       return {
@@ -55,7 +55,9 @@ export class McpOAuthFlow extends Effect.Service<McpOAuthFlow>()(
       } satisfies McpOAuthFlowService;
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 const beginMcpOAuthAuthorization = (input: {
   readonly core: AuthCoordinatorCoreService;
@@ -89,7 +91,7 @@ const beginMcpOAuthAuthorization = (input: {
           cause,
         }),
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         handleAuthStartError(input.core, input.serverName, error.cause).pipe(
           Effect.flatMap(() => Effect.fail(error)),
         ),

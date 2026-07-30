@@ -3,9 +3,8 @@
  * directory. These tests use real temporary files and real kernel locks; the
  * Effect scope stands in for the lifetime of the daemon process.
  */
-import { FileSystem } from "@effect/platform";
-import * as NodeContext from "@effect/platform-node/NodeContext";
-import { Effect, Exit } from "effect";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { Effect, Exit, FileSystem } from "effect";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -133,4 +132,4 @@ const makeDirectory = async (): Promise<string> => {
 const run = <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem>,
 ): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(NodeContext.layer)));
+  Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)));

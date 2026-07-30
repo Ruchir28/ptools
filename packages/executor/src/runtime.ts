@@ -44,11 +44,11 @@ export class SandboxRuntimeExecution extends Data.Class<{
  * running: each `execute` call may acquire a fresh process, isolate, container,
  * or remote session and must own that resource's cleanup.
  */
-export class SandboxRuntime extends Context.Tag("@ptools/SandboxRuntime")<
+export class SandboxRuntime extends Context.Service<
   SandboxRuntime,
   {
     readonly execute: (
       execution: SandboxRuntimeExecution,
     ) => Effect.Effect<SandboxCompletion, ExecutorError>;
   }
->() {}
+>()("@ptools/SandboxRuntime") {}

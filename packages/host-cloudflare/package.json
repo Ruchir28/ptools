@@ -51,7 +51,6 @@
   },
   "dependencies": {
     "@cloudflare/workers-types": "4.20260607.1",
-    "@effect/platform": "0.96.1",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@ptools/auth": "workspace:*",
     "@ptools/code-mode": "workspace:*",
@@ -62,12 +61,13 @@
     "@ptools/host-context": "workspace:*",
     "@ptools/host-runtime": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
-    "effect": "3.21.2"
+    "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.16.6",
     "@types/node": "^26.1.1",
     "esbuild": "^0.28.0",
+    "vitest": "4.1.7",
     "zod": "4.4.3"
   }
 }

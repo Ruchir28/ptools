@@ -2,7 +2,10 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Tool as McpTool } from "@modelcontextprotocol/sdk/types.js";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { discoverAllTools, discoverAllToolsDegraded } from "../src/discovery.js";
+import {
+  discoverAllTools,
+  discoverAllToolsDegraded,
+} from "../src/discovery.js";
 import type { ConnectedMcpClient } from "../src/types.js";
 
 describe("discoverAllTools", () => {
@@ -215,7 +218,7 @@ describe("discoverAllToolsDegraded", () => {
   it("leaves name-collision cleanup to the caller-owned scope", async () => {
     const closed: Array<string> = [];
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         discoverAllToolsDegraded([
           {
             serverName: "healthy",
@@ -260,7 +263,7 @@ describe("discoverAllToolsDegraded", () => {
       ),
     );
 
-    expect(result._tag).toBe("Left");
+    expect(result._tag).toBe("Failure");
     expect(closed).toEqual([]);
   });
 });
@@ -288,11 +291,10 @@ const mcpTool = (
   ({
     name,
     description,
-    inputSchema:
-      options.inputSchema ?? {
-        type: "object",
-        properties: {},
-      },
+    inputSchema: options.inputSchema ?? {
+      type: "object",
+      properties: {},
+    },
     ...(options.outputSchema === undefined
       ? {}
       : { outputSchema: options.outputSchema }),

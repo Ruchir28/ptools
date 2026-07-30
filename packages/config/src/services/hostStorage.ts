@@ -8,7 +8,7 @@
  * logical exact keys and never participate in host selection.
  */
 import { HostIdentity } from "@ptools/host-context";
-import { Context, Data, Effect, Option, Scope } from "effect";
+import { Context, Data, Effect, Layer, Option, Scope } from "effect";
 
 export class HostStorageError extends Data.TaggedError("HostStorageError")<{
   readonly storage: "state" | "secret";
@@ -43,10 +43,11 @@ export interface HostStateStorageBackendService {
   ) => Effect.Effect<HostStorageOperations, HostStorageError, Scope.Scope>;
 }
 
-/** Platform implementation required by `HostStateStorage.Default`. */
-export class HostStateStorageBackend extends Context.Tag(
-  "@ptools/HostStateStorageBackend",
-)<HostStateStorageBackend, HostStateStorageBackendService>() {}
+/** Platform implementation required by `HostStateStorage.layer`. */
+export class HostStateStorageBackend extends Context.Service<
+  HostStateStorageBackend,
+  HostStateStorageBackendService
+>()("@ptools/HostStateStorageBackend") {}
 
 /** Platform port that opens secret physical storage for one requested host. */
 export interface HostSecretStorageBackendService {
@@ -55,10 +56,11 @@ export interface HostSecretStorageBackendService {
   ) => Effect.Effect<HostStorageOperations, HostStorageError, Scope.Scope>;
 }
 
-/** Platform implementation required by `HostSecretStorage.Default`. */
-export class HostSecretStorageBackend extends Context.Tag(
-  "@ptools/HostSecretStorageBackend",
-)<HostSecretStorageBackend, HostSecretStorageBackendService>() {}
+/** Platform implementation required by `HostSecretStorage.layer`. */
+export class HostSecretStorageBackend extends Context.Service<
+  HostSecretStorageBackend,
+  HostSecretStorageBackendService
+>()("@ptools/HostSecretStorageBackend") {}
 
 /** Non-secret exact-key storage selected for one stable host identity. */
 export interface HostStateStorageService extends HostStorageOperations {
@@ -69,14 +71,14 @@ export interface HostStateStorageService extends HostStorageOperations {
 /**
  * Final non-secret host storage service.
  *
- * Its generated `.Default` layer requires `HostIdentity` and the platform's
+ * Its package-owned Layer requires `HostIdentity` and the platform's
  * `HostStateStorageBackend`, making host selection part of shared composition
  * rather than a convention repeated by each platform.
  */
-export class HostStateStorage extends Effect.Service<HostStateStorage>()(
+export class HostStateStorage extends Context.Service<HostStateStorage>()(
   "@ptools/HostStateStorage",
   {
-    scoped: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const identity = yield* HostIdentity;
       const backend = yield* HostStateStorageBackend;
       const operations = yield* backend.forHost(identity.hostId);
@@ -87,7 +89,9 @@ export class HostStateStorage extends Effect.Service<HostStateStorage>()(
       } satisfies HostStateStorageService;
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 /** Secret exact-key storage selected for one stable host identity. */
 export interface HostSecretStorageService extends HostStorageOperations {
@@ -95,11 +99,11 @@ export interface HostSecretStorageService extends HostStorageOperations {
   readonly hostId: string;
 }
 
-/** Shared final secret storage; `.Default` performs identity-based selection. */
-export class HostSecretStorage extends Effect.Service<HostSecretStorage>()(
+/** Shared final secret storage; its Layer performs identity-based selection. */
+export class HostSecretStorage extends Context.Service<HostSecretStorage>()(
   "@ptools/HostSecretStorage",
   {
-    scoped: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const identity = yield* HostIdentity;
       const backend = yield* HostSecretStorageBackend;
       const operations = yield* backend.forHost(identity.hostId);
@@ -110,4 +114,6 @@ export class HostSecretStorage extends Effect.Service<HostSecretStorage>()(
       } satisfies HostSecretStorageService;
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}

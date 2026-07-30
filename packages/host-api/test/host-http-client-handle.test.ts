@@ -57,7 +57,7 @@ describe("shared Host HTTP client constructors", () => {
   it("acquires the supplied HostHttpClient layer once for both handle capabilities", async () => {
     let acquisitions = 0;
     let releases = 0;
-    const hostLayer = Layer.scoped(
+    const hostLayer = Layer.effect(
       HostHttpClient,
       Effect.acquireRelease(
         Effect.sync(() => {

@@ -13,7 +13,7 @@
  *   parses and validates JSON into PtoolsConfig
  *   calls ConfiguredHostConfigStore.replace({ config })
  *
- * ConfiguredHostConfigStore.Default
+ * ConfiguredHostConfigStore.layer
  *   writes exact logical key: config/blob
  *   stored JSON: { config, updatedAt, serverCount }
  *
@@ -28,7 +28,7 @@
  * parsing, platform-specific validation, response metadata, physical host
  * scoping, and runtime invalidation.
  */
-import { Data, Effect, Option, Schema } from "effect";
+import { Context, Data, Effect, Layer, Option, Schema } from "effect";
 import { PtoolsConfig } from "../contracts/index.js";
 import { HostStateStorage } from "./hostStorage.js";
 
@@ -44,12 +44,15 @@ export class ConfiguredHostConfigBlob extends Schema.Class<ConfiguredHostConfigB
   /** Timestamp captured when this blob was stored. */
   updatedAt: Schema.String,
   /** Number of configured MCP servers, returned by host configure APIs. */
-  serverCount: Schema.NonNegativeInt,
+  serverCount: Schema.Number.pipe(
+    Schema.check(Schema.isInt()),
+    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
 }) {
   declare private readonly _configuredHostConfigBlobBrand: void;
 }
 
-const EncodedConfiguredHostConfigBlob = Schema.parseJson(
+const EncodedConfiguredHostConfigBlob = Schema.fromJsonString(
   ConfiguredHostConfigBlob,
 );
 
@@ -96,10 +99,10 @@ export interface ConfiguredHostConfigStoreService {
 }
 
 /** Shared configured-host config store backed by host-scoped state storage. */
-export class ConfiguredHostConfigStore extends Effect.Service<ConfiguredHostConfigStore>()(
+export class ConfiguredHostConfigStore extends Context.Service<ConfiguredHostConfigStore>()(
   "@ptools/ConfiguredHostConfigStore",
   {
-    effect: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const storage = yield* HostStateStorage;
 
       return {
@@ -125,7 +128,7 @@ export class ConfiguredHostConfigStore extends Effect.Service<ConfiguredHostConf
             }),
           ),
           Effect.flatMap((storedBlobJson) =>
-            Schema.decodeUnknown(EncodedConfiguredHostConfigBlob)(
+            Schema.decodeUnknownEffect(EncodedConfiguredHostConfigBlob)(
               storedBlobJson,
               { onExcessProperty: "error" },
             ).pipe(
@@ -149,9 +152,9 @@ export class ConfiguredHostConfigStore extends Effect.Service<ConfiguredHostConf
               updatedAt,
               serverCount,
             });
-            const encodedBlob = yield* Schema.encode(ConfiguredHostConfigBlob)(
-              blob,
-            ).pipe(
+            const encodedBlob = yield* Schema.encodeEffect(
+              ConfiguredHostConfigBlob,
+            )(blob).pipe(
               Effect.mapError(
                 (cause) =>
                   new ConfiguredHostConfigStoreError({
@@ -183,4 +186,6 @@ export class ConfiguredHostConfigStore extends Effect.Service<ConfiguredHostConf
       } satisfies ConfiguredHostConfigStoreService;
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}

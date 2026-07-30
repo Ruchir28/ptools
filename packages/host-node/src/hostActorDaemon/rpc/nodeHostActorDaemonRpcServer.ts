@@ -2,14 +2,14 @@
  * @file HTTP carrier and listener lifecycle for the private daemon RPC surface.
  *
  * Created once after process ownership, leases, and actor management exist. It
- * binds one ephemeral `127.0.0.1` port, mounts the typed `@effect/rpc` group at
+ * binds one ephemeral `127.0.0.1` port, mounts the typed `effect/unstable/rpc` group at
  * `/rpc`, and returns only the origin needed for ready metadata.
  *
  * It does not publish metadata or own procedure interpretation.
  */
-import { HttpRouter, HttpServer } from "@effect/platform";
+import { HttpRouter, HttpServer } from "effect/unstable/http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import { RpcSerialization, RpcServer } from "@effect/rpc";
+import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Context, Effect, Layer, Scope } from "effect";
 import { createServer } from "node:http";
 import {
@@ -53,11 +53,13 @@ export const startNodeHostActorDaemonRpcServer = (
       ]),
     );
 
-    const serverLayer = HttpRouter.Default.serve().pipe(
-      Layer.provide(rpc),
-      Layer.provideMerge(
-        RpcServer.layerProtocolHttp({ path: NODE_HOST_ACTOR_DAEMON_RPC_PATH }),
-      ),
+    const protocol = RpcServer.layerProtocolHttp({
+      path: NODE_HOST_ACTOR_DAEMON_RPC_PATH,
+    }).pipe(Layer.provide(HttpRouter.layer));
+    const rpcApp = rpc.pipe(Layer.provideMerge(protocol));
+    const serverLayer = HttpRouter.serve(rpcApp, {
+      disableListenLog: true,
+    }).pipe(
       Layer.provide(RpcSerialization.layerJson),
       Layer.provideMerge(
         NodeHttpServer.layer(() => createServer(), {

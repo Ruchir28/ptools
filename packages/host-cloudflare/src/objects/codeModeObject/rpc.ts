@@ -13,7 +13,7 @@ export type CloudflareHostOperationRpcResponse = HostOperationResponse;
 
 /** Validate and restore the shared domain value after the Workers RPC boundary. */
 export const decodeCloudflareHostOperationRpcInput = (input: unknown) =>
-  Schema.decodeUnknown(HostOperationDispatchInput)(input, {
+  Schema.decodeUnknownEffect(HostOperationDispatchInput)(input, {
     errors: "all",
     onExcessProperty: "error",
   });

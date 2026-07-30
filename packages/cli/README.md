@@ -3,8 +3,8 @@
 Command-line composition surface for ptools.
 
 The Effect-native CLI owns command parsing, host selection, authored-file
-bootstrap, and adapter wiring. It uses `@effect/cli` for commands and options and
-Effect scopes for the acquired host lifetime. Adapter packages such as
+bootstrap, and adapter wiring. It uses `effect/unstable/cli` for commands and
+options and Effect scopes for the acquired host lifetime. Adapter packages such as
 `@ptools/mcp-server` remain host-neutral; host packages such as
 `@ptools/host-node` receive explicit configuration values and never discover
 files or environment variables.

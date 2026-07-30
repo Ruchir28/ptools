@@ -10,7 +10,7 @@
  * kernel file-lock operation. This module does not start the listener or create
  * actor runtimes.
  */
-import { FileSystem } from "@effect/platform";
+import { FileSystem } from "effect";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -169,7 +169,7 @@ export const acquireNodeHostActorDaemonOwnership = (
         internalStateDirectory,
         ownerGeneration,
       ).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.logError(
             `Failed to invalidate Node daemon ready metadata: ${error.message}`,
           ),
@@ -262,7 +262,7 @@ export const readNodeHostActorDaemonReadyMetadata = (
           cause,
         }),
     });
-    return yield* Schema.decodeUnknown(NodeHostActorDaemonReadyMetadata)(
+    return yield* Schema.decodeUnknownEffect(NodeHostActorDaemonReadyMetadata)(
       unknownValue,
     ).pipe(
       Effect.mapError(
@@ -300,14 +300,16 @@ const invalidateReadyMetadata = (
           }),
         ),
         Effect.flatMap((value) =>
-          Schema.decodeUnknown(NodeHostActorDaemonReadyMetadata)(value).pipe(
+          Schema.decodeUnknownEffect(NodeHostActorDaemonReadyMetadata)(
+            value,
+          ).pipe(
             Effect.map(
               (metadata) => metadata.ownerGeneration === ownerGeneration,
             ),
-            Effect.catchAll(() => Effect.succeed(true)),
+            Effect.catch(() => Effect.succeed(true)),
           ),
         ),
-        Effect.catchAll(() => Effect.succeed(true)),
+        Effect.catch(() => Effect.succeed(true)),
         Effect.flatMap((shouldRemove) =>
           shouldRemove ? removeFileIfPresent(fileSystem, path) : Effect.void,
         ),

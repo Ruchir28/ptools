@@ -43,7 +43,7 @@ import type {
   SandboxToHostMessage,
 } from "@ptools/executor";
 import { ExecutorProtocolError, ExecutorStartError } from "@ptools/executor";
-import { Chunk, Effect, Option, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Queue, Scope, Stream } from "effect";
 import {
   decodeSandboxMessage,
   encodeHostMessage,
@@ -202,14 +202,14 @@ export const acquireDenoSandboxProcess = (
 export const readSandboxMessages = (
   process: DenoSandboxProcess,
 ): Stream.Stream<SandboxToHostMessage, ExecutorProtocolError> =>
-  Stream.asyncScoped<SandboxToHostMessage, ExecutorProtocolError>((emit) => {
+  Stream.callback<SandboxToHostMessage, ExecutorProtocolError>((queue) => {
     let buffered = "";
     let emittedTerminal = false;
 
     const fail = (error: ExecutorProtocolError): void => {
       if (!emittedTerminal) {
         emittedTerminal = true;
-        emit(Effect.fail(Option.some(error)));
+        Queue.failCauseUnsafe(queue, Cause.fail(error));
       }
     };
     const onData = (chunk: Buffer): void => {
@@ -228,12 +228,13 @@ export const readSandboxMessages = (
         const line = buffered.slice(0, newline);
         buffered = buffered.slice(newline + 1);
         if (line.length === 0) continue;
-        emit(
-          decodeSandboxMessage(line).pipe(
-            Effect.map(Chunk.of),
-            Effect.mapError(Option.some),
-          ),
-        );
+        const decoded = Effect.runSyncExit(decodeSandboxMessage(line));
+        if (Exit.isSuccess(decoded)) {
+          Queue.offerUnsafe(queue, decoded.value);
+        } else {
+          emittedTerminal = true;
+          Queue.failCauseUnsafe(queue, decoded.cause);
+        }
       }
     };
     const onError = (cause: Error): void =>
@@ -253,7 +254,7 @@ export const readSandboxMessages = (
           );
         } else {
           emittedTerminal = true;
-          emit(Effect.fail(Option.none()));
+          Queue.endUnsafe(queue);
         }
       }
     };
@@ -268,7 +269,7 @@ export const readSandboxMessages = (
         process.child.stdout.off("end", onEnd);
       }),
     );
-  }, "unbounded");
+  });
 
 const makeProcess = (config: DenoSandboxRuntimeConfig): DenoSandboxProcess => {
   const workerPath = resolveWorkerPath();

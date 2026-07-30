@@ -75,7 +75,7 @@ describe("Node MCP connector layers", () => {
             })
             .pipe(
               Effect.provide(makeTestAuthCoordinatorLive(calls)),
-              Effect.either,
+              Effect.result,
             );
         }).pipe(Effect.provide(NodeHttpMcpConnectorLive)),
       ),
@@ -106,7 +106,7 @@ describe("Node MCP connector layers", () => {
               })
               .pipe(
                 Effect.provide(makeTestAuthCoordinatorLive(calls)),
-                Effect.either,
+                Effect.result,
               );
           }).pipe(Effect.provide(NodeHttpMcpConnectorLive)),
         ),
@@ -132,7 +132,7 @@ const emptyAuthConfig = (): ResolvedHttpMcpAuthConfig =>
 const makeTestAuthCoordinatorLive = (calls: { providerFor: number }) =>
   Layer.succeed(
     AuthCoordinator,
-    AuthCoordinator.make({
+    AuthCoordinator.of({
       origin: Effect.succeed("http://127.0.0.1/auth"),
       callbackUrl: (serverName) =>
         Effect.succeed(

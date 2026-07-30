@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { Command, Options, ValidationError } from "@effect/cli";
-import * as NodeContext from "@effect/platform-node/NodeContext";
+import { CliError, Command, Flag } from "effect/unstable/cli";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { access, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import {
@@ -42,23 +42,23 @@ class NodeHostBootstrapError extends Data.TaggedError(
   readonly cause?: unknown;
 }> {}
 
-const hostOption = Options.choice("host", ["node"] as const).pipe(
-  Options.withDefault("node"),
-  Options.withDescription(
+const hostOption = Flag.choice("host", ["node"] as const).pipe(
+  Flag.withDefault("node"),
+  Flag.withDescription(
     "Host implementation to use. Only the embedded local Node host is available today.",
   ),
 );
 
-const hostIdOption = Options.text("host-id").pipe(
-  Options.withDefault(NODE_LOCAL_HOST_ID),
-  Options.withDescription(
+const hostIdOption = Flag.string("host-id").pipe(
+  Flag.withDefault(NODE_LOCAL_HOST_ID),
+  Flag.withDescription(
     `Logical host identity inside the Node state namespace. Defaults to ${NODE_LOCAL_HOST_ID}.`,
   ),
 );
 
-const configOption = Options.text("config").pipe(
-  Options.optional,
-  Options.withDescription(
+const configOption = Flag.string("config").pipe(
+  Flag.optional,
+  Flag.withDescription(
     "Authored config file selected and explicitly submitted to the local host.",
   ),
 );
@@ -185,7 +185,7 @@ const collectReferencedSecrets = (
     const names = collectUserPtoolsConfigEnvReferences(config);
     const env = yield* Effect.sync(() => process.env);
     const entries = yield* Effect.forEach(names, (name) =>
-      Effect.fromNullable(env[name]).pipe(
+      Effect.fromNullishOr(env[name]).pipe(
         Effect.mapError(
           () =>
             new MissingConfigSecretError({
@@ -302,20 +302,17 @@ const exists = (path: string): Promise<boolean> =>
   );
 
 const runCli = Command.run(rootCommand, {
-  name: "ptools",
   version: "0.1.0-alpha.0",
 });
 
-const program = Effect.suspend(() =>
-  runCli(process.argv.filter((arg) => arg !== "--")),
-).pipe(Effect.provide(NodeContext.layer));
+const program = runCli.pipe(Effect.provide(NodeServices.layer));
 
 void Effect.runPromiseExit(program).then((exit) => {
   if (Exit.isSuccess(exit)) return;
 
-  const failure = Cause.failureOption(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (Option.isSome(failure)) {
-    if (!ValidationError.isValidationError(failure.value)) {
+    if (!CliError.isCliError(failure.value)) {
       process.stderr.write(`${safeErrorMessage(failure.value)}\n`);
     }
   } else {

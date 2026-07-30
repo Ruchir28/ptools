@@ -25,7 +25,7 @@ export const makeNodeDaemonHostInstanceHandle = (options: {
       );
     }
 
-    return Schema.encode(HostOperationDispatchInput)(input).pipe(
+    return Schema.encodeEffect(HostOperationDispatchInput)(input).pipe(
       Effect.mapError(
         (cause) =>
           new HostOperationDispatchError({
@@ -45,7 +45,7 @@ export const makeNodeDaemonHostInstanceHandle = (options: {
         ),
       ),
       Effect.flatMap((response) =>
-        Schema.decodeUnknown(HostOperationResponse)(response, {
+        Schema.decodeUnknownEffect(HostOperationResponse)(response, {
           errors: "all",
         }).pipe(
           Effect.mapError(

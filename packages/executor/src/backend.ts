@@ -32,7 +32,7 @@ import type { PreparedExecuteRequest } from "./types.js";
 import { invokeProviderCall } from "./execution.js";
 import { SandboxRuntime, SandboxRuntimeExecution } from "./runtime.js";
 
-export class ExecutorBackend extends Context.Tag("@ptools/ExecutorBackend")<
+export class ExecutorBackend extends Context.Service<
   ExecutorBackend,
   {
     /**
@@ -44,7 +44,7 @@ export class ExecutorBackend extends Context.Tag("@ptools/ExecutorBackend")<
       request: PreparedExecuteRequest,
     ) => Effect.Effect<SandboxCompletion, ExecutorError>;
   }
->() {}
+>()("@ptools/ExecutorBackend") {}
 
 /**
  * Host-neutral `ExecutorBackend` implementation requiring a concrete

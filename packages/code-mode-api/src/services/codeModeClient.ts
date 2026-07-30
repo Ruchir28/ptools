@@ -10,7 +10,7 @@ import type { CodeModeClientError } from "../codeModeErrors.js";
 import type { CodeModeRequest, CodeModeResponse } from "../contracts/index.js";
 
 /** Effect-native Code Mode client capability. */
-export class CodeModeClient extends Context.Tag("@ptools/CodeModeClient")<
+export class CodeModeClient extends Context.Service<
   CodeModeClient,
   {
     /** Send one schema-backed Code Mode request. */
@@ -18,4 +18,4 @@ export class CodeModeClient extends Context.Tag("@ptools/CodeModeClient")<
       request: CodeModeRequest,
     ) => Effect.Effect<CodeModeResponse, CodeModeClientError>;
   }
->() {}
+>()("@ptools/CodeModeClient") {}

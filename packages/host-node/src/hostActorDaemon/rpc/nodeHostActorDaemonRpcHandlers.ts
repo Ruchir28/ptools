@@ -1,7 +1,7 @@
 /**
  * @file Daemon-side implementations of the private typed procedures.
  *
- * `@effect/rpc` owns envelope/schema decoding and RPC middleware owns
+ * `effect/unstable/rpc` owns envelope/schema decoding and RPC middleware owns
  * credential, protocol, and lease admission checks. These handlers perform
  * daemon-level delegation only: `HandleHostOperation` forwards the complete
  * decoded input to `NodeHostRuntimeManager` without interpreting it.

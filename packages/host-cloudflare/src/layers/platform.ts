@@ -16,7 +16,7 @@ import {
  *
  * Identity and both storage backends derive from one `DurableObjectState`, so a
  * caller cannot pair one host ID with another object's storage. Shared
- * `HostStateStorage.Default` and `HostSecretStorage.Default` later validate and
+ * `HostStateStorage.layer` and `HostSecretStorage.layer` later validate and
  * select these backends using the same `HostIdentity`.
  */
 export const CodeModeObjectPlatformLayer = (options: {
@@ -39,7 +39,7 @@ export const CodeModeObjectPlatformLayer = (options: {
 
 /** Fail fast unless the Durable Object was selected by a stable host name. */
 export const requireDurableObjectHostId = (state: DurableObjectState): string =>
-  Option.fromNullable(state.id.name).pipe(
+  Option.fromNullishOr(state.id.name).pipe(
     Option.getOrThrowWith(
       () => new Error("CodeModeObject must be addressed by name."),
     ),

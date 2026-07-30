@@ -367,7 +367,7 @@ const makeTestAuthCoordinatorLive = (
 ) =>
   Layer.succeed(
     AuthCoordinator,
-    AuthCoordinator.make({
+    AuthCoordinator.of({
       origin: Effect.succeed("http://127.0.0.1/auth"),
       callbackUrl: (serverName) =>
         Effect.succeed(

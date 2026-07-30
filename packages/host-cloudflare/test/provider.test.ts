@@ -5,13 +5,13 @@ import {
   type McpOAuthCredentialIdentity,
   type McpOAuthCredentialSlot,
   type McpOAuthCredentialStoreService,
-  type McpOAuthProviderDependencies,
+  type McpOAuthProviderOperations,
 } from "@ptools/auth";
 import {
   ResolvedHttpMcpAuthConfig,
   ResolvedHttpMcpConfig,
 } from "@ptools/config";
-import { Effect, Option, Runtime } from "effect";
+import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 describe("McpOAuthProvider", () => {
@@ -80,7 +80,7 @@ describe("McpOAuthProvider", () => {
     ]);
     const provider = makeProvider(
       httpConfig("https://mcp.example"),
-      makeDependencies(credentials),
+      makeOperations(credentials),
     );
 
     await expect(provider.tokens()).rejects.toThrow();
@@ -89,13 +89,14 @@ describe("McpOAuthProvider", () => {
 
 const makeProvider = (
   config: HttpMcpConfig,
-  dependencies = makeDependencies(),
+  operations = makeOperations(),
 ): McpOAuthProvider =>
   new McpOAuthProvider({
-    dependencies,
+    operations,
     serverName: "server/name",
     config,
-    onAuthorizationUrl: () => Effect.void,
+    callbackUrl: (serverName) =>
+      `https://ptools.example/hosts/host%20id/oauth/callback/${encodeURIComponent(serverName)}`,
   });
 
 const httpConfig = (
@@ -111,16 +112,16 @@ const httpConfig = (
   ResolvedHttpMcpConfig.make({
     url,
     headers: Option.none(),
-    auth: Option.fromNullable(auth).pipe(
+    auth: Option.fromNullishOr(auth).pipe(
       Option.map((value) =>
         ResolvedHttpMcpAuthConfig.make({
           type: "oauth",
-          scope: Option.fromNullable(value.scope),
+          scope: Option.fromNullishOr(value.scope),
           resourceMetadataUrl: Option.none(),
-          clientId: Option.fromNullable(value.clientId),
-          clientSecret: Option.fromNullable(value.clientSecret),
-          clientMetadataUrl: Option.fromNullable(value.clientMetadataUrl),
-          redirectUri: Option.fromNullable(value.redirectUri),
+          clientId: Option.fromNullishOr(value.clientId),
+          clientSecret: Option.fromNullishOr(value.clientSecret),
+          clientMetadataUrl: Option.fromNullishOr(value.clientMetadataUrl),
+          redirectUri: Option.fromNullishOr(value.redirectUri),
         }),
       ),
     ),
@@ -190,12 +191,16 @@ const readJson = (
   slot: McpOAuthCredentialSlot,
 ) =>
   Effect.sync(() =>
-    Option.fromNullable(credentials.get(makeCredentialKey(identity, slot))),
+    Option.fromNullishOr(credentials.get(makeCredentialKey(identity, slot))),
   ).pipe(
-    Effect.flatMap(
-      Effect.transposeMapOption((value) =>
-        Effect.sync(() => JSON.parse(value) as unknown),
-      ),
+    Effect.flatMap((value) =>
+      Option.match(value, {
+        onNone: () => Effect.succeedNone,
+        onSome: (json) =>
+          Effect.sync(() => JSON.parse(json) as unknown).pipe(
+            Effect.map(Option.some),
+          ),
+      }),
     ),
   );
 
@@ -209,18 +214,44 @@ const writeJson = (
     credentials.set(makeCredentialKey(identity, slot), JSON.stringify(value));
   });
 
-const makeDependencies = (
+const makeOperations = (
   credentials = new Map<string, string>(),
-): McpOAuthProviderDependencies => {
+): McpOAuthProviderOperations => {
+  const identity: McpOAuthCredentialIdentity = {
+    serverName: "server/name",
+    serverUrl: "https://mcp.example",
+  };
+  const store = makeMemoryOAuthCredentialStore(credentials);
+
   return {
-    oauthStateStore: {
-      sign: () => Effect.succeed("signed-state"),
-      verifyAndConsume: () => Effect.die("not used in provider tests"),
-    },
-    hostId: "host id",
-    callbackUrl: (serverName) =>
-      `https://ptools.example/hosts/host%20id/oauth/callback/${encodeURIComponent(serverName)}`,
-    oauthCredentials: makeMemoryOAuthCredentialStore(credentials),
-    runtime: Runtime.defaultRuntime,
+    createState: () => Promise.resolve("signed-state"),
+    getClientInformation: () =>
+      Effect.runPromise(
+        store
+          .getClientInformation(identity)
+          .pipe(Effect.map(Option.getOrUndefined)),
+      ),
+    setClientInformation: (information) =>
+      Effect.runPromise(store.setClientInformation(identity, information)),
+    getTokens: () =>
+      Effect.runPromise(
+        store.getTokens(identity).pipe(Effect.map(Option.getOrUndefined)),
+      ),
+    setTokens: (tokens) => Effect.runPromise(store.setTokens(identity, tokens)),
+    hasStoredCredentials: () => store.hasStoredCredentials(identity),
+    notifyAuthorizationUrl: () => undefined,
+    setCodeVerifier: (verifier) =>
+      Effect.runPromise(store.setCodeVerifier(identity, verifier)),
+    getCodeVerifier: () => Effect.runPromise(store.getCodeVerifier(identity)),
+    invalidateCredentials: (scope) =>
+      Effect.runPromise(store.invalidate(identity, scope)),
+    setDiscoveryState: (state) =>
+      Effect.runPromise(store.setDiscoveryState(identity, state)),
+    getDiscoveryState: () =>
+      Effect.runPromise(
+        store
+          .getDiscoveryState(identity)
+          .pipe(Effect.map(Option.getOrUndefined)),
+      ),
   };
 };

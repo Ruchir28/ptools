@@ -18,12 +18,15 @@ import {
   type ExecutorBackend,
   type ExecutorError,
   type SandboxCompletion,
+  type SandboxProviderCallHandler,
+  type SandboxProviderCallResult,
   type SandboxRuntimeExecution,
+  type SerializedSandboxError,
 } from "@ptools/executor";
-import { Duration, Effect, Layer, Runtime } from "effect";
+import { Cause, Context, Duration, Effect, Exit, Layer } from "effect";
 import { injectableBindingKeys } from "@ptools/executor/sandbox";
 import { buildDynamicWorkerDefinition } from "./dynamicWorkerDefinition.js";
-import { ProviderBridge } from "./providerBridge.js";
+import { ProviderBridge, type ProviderBridgeCall } from "./providerBridge.js";
 import {
   CodeModeObjectWorkerLoader,
   type CodeModeObjectWorkerLoaderService,
@@ -44,15 +47,23 @@ export const CloudflareDynamicWorkerSandboxRuntimeLayer: Layer.Layer<
   Effect.gen(function* () {
     const loader = yield* CodeModeObjectWorkerLoader;
 
-    // Capture the currently composed Effect runtime as a plain JS value. This
-    // does not create a new runtime. ProviderBridge is called later by
-    // Cloudflare Workers RPC outside `Effect.gen`, so it needs this handle to
-    // re-enter the same host runtime with Runtime.runPromiseExit(...).
-    const runtime = yield* Effect.runtime<never>();
-
     return {
       execute: (execution: SandboxRuntimeExecution) =>
-        executeInDynamicWorker({ execution, loader, runtime }),
+        Effect.gen(function* () {
+          // Capture references from this execution fiber's already-built
+          // Context; this is a lookup, not a layer rebuild. The provider-call
+          // handler has no tagged service requirements (`R = never`), but
+          // Workers RPC invokes it later from plain JavaScript. Retaining the
+          // Context lets that new root fiber keep this execution's configured
+          // loggers, tracer, and other default Context.Reference values instead
+          // of silently falling back to Effect's defaults.
+          const services = yield* Effect.context<never>();
+          return yield* executeInDynamicWorker({
+            execution,
+            loader,
+            services,
+          });
+        }),
     };
   }),
 );
@@ -80,13 +91,13 @@ export const CloudflareDynamicWorkerExecutorLayer = (
 const executeInDynamicWorker = (options: {
   readonly execution: SandboxRuntimeExecution;
   readonly loader: CodeModeObjectWorkerLoaderService;
-  readonly runtime: Runtime.Runtime<never>;
+  readonly services: Context.Context<never>;
 }): Effect.Effect<SandboxCompletion, ExecutorError> =>
   Effect.gen(function* () {
     const providerHandles = buildProviderBridges({
       providers: options.execution.payload.providers,
       handleProviderCall: options.execution.handleProviderCall,
-      runtime: options.runtime,
+      services: options.services,
     });
 
     const workerCode = yield* buildDynamicWorkerDefinition(
@@ -112,10 +123,14 @@ const executeInDynamicWorker = (options: {
           cause,
         }),
     }).pipe(
-      Effect.timeoutFail({
+      Effect.timeoutOrElse({
         duration: Duration.millis(options.execution.timeoutMs),
-        onTimeout: () =>
-          new ExecutorTimeoutError({ timeoutMs: options.execution.timeoutMs }),
+        orElse: () =>
+          Effect.fail(
+            new ExecutorTimeoutError({
+              timeoutMs: options.execution.timeoutMs,
+            }),
+          ),
       }),
     );
   });
@@ -123,15 +138,63 @@ const executeInDynamicWorker = (options: {
 const buildProviderBridges = (options: {
   readonly providers: SandboxRuntimeExecution["payload"]["providers"];
   readonly handleProviderCall: SandboxRuntimeExecution["handleProviderCall"];
-  readonly runtime: Runtime.Runtime<never>;
+  readonly services: Context.Context<never>;
 }): DynamicExecutorProviderHandles =>
   Object.fromEntries(
     options.providers.map((provider) => [
       provider.name,
       new ProviderBridge({
-        providerName: provider.name,
-        handleProviderCall: options.handleProviderCall,
-        runtime: options.runtime,
+        callProvider: makeProviderBridgeCall({
+          providerName: provider.name,
+          handleProviderCall: options.handleProviderCall,
+          services: options.services,
+        }),
       }),
     ]),
   );
+
+/**
+ * Bind one execution's Effect handler into the plain Workers RPC callback.
+ *
+ * `handleProviderCall` closes over the prepared provider map, so it requires no
+ * application service tags. `runPromiseExitWith` is still intentional: it
+ * preserves ambient Effect configuration across the plain-JavaScript Workers
+ * RPC boundary. `runPromiseExit` would dispatch correctly but would use the
+ * default logger/tracer context instead of the context captured for this run.
+ */
+const makeProviderBridgeCall = (options: {
+  readonly providerName: string;
+  readonly handleProviderCall: SandboxProviderCallHandler;
+  readonly services: Context.Context<never>;
+}): ProviderBridgeCall => {
+  const runPromiseExit = Effect.runPromiseExitWith(options.services);
+
+  return async (tool, input, callId): Promise<SandboxProviderCallResult> => {
+    const exit = await runPromiseExit(
+      options.handleProviderCall({
+        callId,
+        provider: options.providerName,
+        tool,
+        input,
+      }),
+    );
+
+    return Exit.match(exit, {
+      onSuccess: (result) => result,
+      onFailure: (cause) => ({
+        callId,
+        ok: false as const,
+        error: serializeCause(cause, "ProviderBridgeFailure"),
+      }),
+    });
+  };
+};
+
+const serializeCause = (
+  cause: Cause.Cause<unknown>,
+  code: string,
+): SerializedSandboxError => ({
+  name: "ProviderBridgeFailure",
+  code,
+  message: Cause.pretty(cause),
+});

@@ -9,8 +9,5 @@
 import { Schema } from "effect";
 
 /** Map of secret names to resolved string values supplied to a host. */
-export const PtoolsSecretValues = Schema.Record({
-  key: Schema.String,
-  value: Schema.String,
-});
+export const PtoolsSecretValues = Schema.Record(Schema.String, Schema.String);
 export type PtoolsSecretValues = typeof PtoolsSecretValues.Type;

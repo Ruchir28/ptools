@@ -79,7 +79,7 @@ const ConfiguredCodeModeLayerFromResolvedConfig: Layer.Layer<
   CodeMode,
   ConfiguredHostContextError | ServerConfigError,
   ResolvedPtoolsConfigSource | AuthCoordinator | McpConnector | SandboxRuntime
-> = Layer.unwrapEffect(
+> = Layer.unwrap(
   Effect.gen(function* () {
     const source = yield* ResolvedPtoolsConfigSource;
     const config = yield* source.load;
@@ -94,7 +94,12 @@ const ConfiguredCodeModeLayerFromResolvedConfig: Layer.Layer<
 
     return makeCodeModeLive().pipe(
       Layer.provide(Layer.merge(registryLayer, executorLayer)),
-      Layer.mapError(toConfiguredHostContextError),
+      Layer.catch(
+        (error): Layer.Layer<CodeMode, ConfiguredHostContextError, never> =>
+          Layer.unwrap(
+            Effect.fail(toConfiguredHostContextError(error)),
+          ) as Layer.Layer<CodeMode, ConfiguredHostContextError, never>,
+      ),
     );
   }),
 );
@@ -109,7 +114,7 @@ const ConfiguredAuthProviderAndPolicyLayer = McpOAuthProviderFactoryLayer.pipe(
 );
 
 /** One in-memory auth state machine shared by route and MCP consumers. */
-const ConfiguredAuthCoreLayer = AuthCoordinatorCore.Default.pipe(
+const ConfiguredAuthCoreLayer = AuthCoordinatorCore.layer.pipe(
   Layer.provide(ConfiguredAuthProviderAndPolicyLayer),
 );
 
@@ -121,12 +126,12 @@ const ConfiguredAuthLayer: Layer.Layer<
   AuthCoordinator | McpOAuthFlow,
   never,
   McpOAuthCredentialStore | McpOAuthStateStore | HostIdentity | HostPublicOrigin
-> = Layer.merge(AuthCoordinator.Default, McpOAuthFlow.Default).pipe(
+> = Layer.merge(AuthCoordinator.layer, McpOAuthFlow.layer).pipe(
   Layer.provide(ConfiguredAuthCoreLayer),
 );
 
 /** Resolve the stored authored config through the stable configured stores. */
-const ResolvedConfigSourceLayer = ResolvedPtoolsConfigSource.Default;
+const ResolvedConfigSourceLayer = ResolvedPtoolsConfigSource.layer;
 const ConfiguredCodeModeLayer = ConfiguredCodeModeLayerFromResolvedConfig.pipe(
   Layer.provide(ResolvedConfigSourceLayer),
   Layer.provide(ConfiguredAuthLayer),

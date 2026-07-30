@@ -15,8 +15,8 @@ import type {
   UpstreamMcpServers,
 } from "./types.js";
 
-type AuthCoordinatorService = Context.Tag.Service<typeof AuthCoordinator>;
-type McpConnectorService = Context.Tag.Service<typeof McpConnector>;
+type AuthCoordinatorService = Context.Service.Shape<typeof AuthCoordinator>;
+type McpConnectorService = Context.Service.Shape<typeof McpConnector>;
 
 export interface ConnectConfiguredMcpClientsResult {
   readonly clients: ReadonlyArray<ConnectedMcpClient>;
@@ -56,20 +56,20 @@ export const connectConfiguredMcpClients = (
         })
         .pipe(
           Effect.provideService(AuthCoordinator, authCoordinator),
-          Effect.either,
+          Effect.result,
         );
 
-      if (result._tag === "Left") {
+      if (result._tag === "Failure") {
         yield* authCoordinator.noteConnectionError(
           serverName,
-          result.left.cause,
+          result.failure.cause,
         );
         diagnostics.push(
-          yield* toConnectionDiagnostic(result.left, authCoordinator),
+          yield* toConnectionDiagnostic(result.failure, authCoordinator),
         );
       } else {
         yield* authCoordinator.noteConnected(serverName);
-        clients.push(result.right);
+        clients.push(result.success);
       }
     }
 
@@ -136,6 +136,6 @@ export const closeClients = (
             serverName: connected.serverName,
             cause,
           }),
-      }).pipe(Effect.catchAll(() => Effect.void));
+      }).pipe(Effect.catch(() => Effect.void));
     }
   });

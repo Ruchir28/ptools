@@ -4,7 +4,7 @@ import {
   HttpClient,
   HttpClientRequest,
   HttpClientResponse,
-} from "@effect/platform";
+} from "effect/unstable/http";
 import {
   CodeModeInvalidRequestError,
   CodeModeRemoteError,
@@ -50,7 +50,7 @@ export class HostHttpClientError extends Data.TaggedError(
 }> {}
 
 /** Endpoint-shaped client for the shared Host HTTP API. */
-export class HostHttpClient extends Context.Tag("@ptools/HostHttpClient")<
+export class HostHttpClient extends Context.Service<
   HostHttpClient,
   {
     readonly codeMode: (
@@ -70,7 +70,7 @@ export class HostHttpClient extends Context.Tag("@ptools/HostHttpClient")<
       input: StartMcpAuthClientInput,
     ) => Effect.Effect<StartHostMcpAuthResponse, HostHttpClientError>;
   }
->() {}
+>()("@ptools/HostHttpClient") {}
 
 /**
  * Shared HTTP implementation; platform assemblies must provide HttpClient.
@@ -87,7 +87,7 @@ export const HostHttpClientLive = (
   HostHttpClientConfigError,
   HttpClient.HttpClient
 > =>
-  Layer.unwrapEffect(
+  Layer.unwrap(
     normalizeHostHttpClientConfig(config).pipe(
       Effect.map((options) => makeHostHttpClientLive(options)),
     ),
@@ -103,23 +103,30 @@ const makeHostHttpClientLive = (
       const http = yield* HttpClient.HttpClient;
       const baseUrl = options.baseUrl;
 
+      /**
+       * Shared JSON route caller for this host client.
+       *
+       * Input: method, path under baseUrl, domain payload, plus schemas that
+       * define the wire contract (encode outbound body, decode inbound body).
+       * Output: Effect of the decoded response type, or HostHttpClientError.
+       *
+       * Flow: encode payload → bearer JSON request → execute → require 2xx →
+       * decode response body. Endpoint methods only supply route-specific args.
+       */
       const requestJson = <
-        Payload,
-        PayloadEncoded,
-        Response,
-        ResponseEncoded,
+        PayloadSchema extends Schema.Codec<any, any, never, never>,
+        ResponseSchema extends Schema.Codec<any, any, never, never>,
       >(input: {
         readonly method: "POST" | "PUT";
         readonly path: string;
-        readonly payload: Payload;
-        // Request schemas are the outbound half of the HTTP contract: encode
-        // internal domain values such as Schema.Class/Option fields into the
-        // plain JSON shape declared by the matching server route. Response
-        // schemas perform the inbound decode back into the typed domain shape.
-        readonly payloadSchema: Schema.Schema<Payload, PayloadEncoded, never>;
-        readonly response: Schema.Schema<Response, ResponseEncoded, never>;
-      }): Effect.Effect<Response, HostHttpClientError> =>
-        Schema.encode(input.payloadSchema)(input.payload).pipe(
+        /** Domain value before JSON encoding (may include Option/Class fields). */
+        readonly payload: PayloadSchema["Type"];
+        /** Encodes payload into the plain JSON shape the server route expects. */
+        readonly payloadSchema: PayloadSchema;
+        /** Decodes a successful JSON body back into the typed domain response. */
+        readonly response: ResponseSchema;
+      }): Effect.Effect<ResponseSchema["Type"], HostHttpClientError> =>
+        Schema.encodeEffect(input.payloadSchema)(input.payload).pipe(
           Effect.mapError(toHostHttpClientError),
           Effect.flatMap((payload) => {
             const request = HttpClientRequest.make(input.method)(

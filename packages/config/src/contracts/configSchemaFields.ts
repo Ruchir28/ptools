@@ -8,36 +8,21 @@
 import { Schema } from "effect";
 
 /** String-keyed record used for environment variables, headers, and secrets. */
-export const StringRecord = Schema.Record({
-  key: Schema.String,
-  value: Schema.String,
-});
+export const StringRecord = Schema.Record(Schema.String, Schema.String);
 
 /** Optional executor settings shared across authored, normalized, and resolved config. */
 export const ExecutorConfig = Schema.Struct({
-  defaultTimeoutMs: Schema.optionalWith(Schema.Number, {
-    exact: true,
-    as: "Option",
-  }),
+  defaultTimeoutMs: Schema.OptionFromOptionalKey(Schema.Number),
 });
 
 /** OAuth settings before host secret placeholders have been resolved. */
 export const UnresolvedHttpMcpAuthConfig = Schema.Struct({
   type: Schema.tag("oauth"),
-  scope: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  resourceMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientId: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  clientSecret: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
+  scope: Schema.OptionFromOptionalKey(Schema.String),
+  resourceMetadataUrl: Schema.OptionFromOptionalKey(Schema.String),
+  clientId: Schema.OptionFromOptionalKey(Schema.String),
+  clientSecret: Schema.OptionFromOptionalKey(Schema.String),
+  clientMetadataUrl: Schema.OptionFromOptionalKey(Schema.String),
   /**
    * Override the OAuth redirect URI sent to the upstream IdP.
    *
@@ -45,10 +30,7 @@ export const UnresolvedHttpMcpAuthConfig = Schema.Struct({
    * (discovered from the host runtime). Set this field when the upstream IdP
    * requires a specific redirect URI that differs from ptools' default.
    */
-  redirectUri: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
+  redirectUri: Schema.OptionFromOptionalKey(Schema.String),
 });
 
 /** Decoded unresolved OAuth auth settings. */

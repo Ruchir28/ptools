@@ -21,12 +21,11 @@
  * replaced: the test spawner forks the replacement daemon in-process so its
  * fiber and generation can be observed deterministically.
  */
-import * as NodeContext from "@effect/platform-node/NodeContext";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   Data,
   Deferred,
   Effect,
-  ExecutionStrategy,
   Exit,
   Fiber,
   Layer,
@@ -74,7 +73,7 @@ it("reconnects and reacquires a lease after the owning daemon restarts", async (
           // production connectOrStart/discovery against real filesystem and RPC.
           const spawnerLayer = Layer.succeed(
             NodeHostActorDaemonSpawner,
-            NodeHostActorDaemonSpawner.make({
+            NodeHostActorDaemonSpawner.of({
               start: () =>
                 Effect.gen(function* () {
                   starts += 1;
@@ -89,12 +88,12 @@ it("reconnects and reacquires a lease after the owning daemon restarts", async (
           // prove recovered resources remain children of this original owner.
           const connectionOwnerScope = yield* Scope.fork(
             parentScope,
-            ExecutionStrategy.sequential,
+            "sequential",
           );
           // Layer acquisition discovers generation one, authenticates, acquires
           // its lease, and starts heartbeat before the fault is introduced.
           yield* Layer.buildWithScope(
-            NodeHostActorDaemonConnection.Default({
+            NodeHostActorDaemonConnection.layer({
               internalStateDirectory: directory,
               keyringServiceName: "ptools-daemon-reconnect-test",
               heartbeatIntervalMs: 25,
@@ -108,12 +107,14 @@ it("reconnects and reacquires a lease after the owning daemon restarts", async (
           // metadata before heartbeat recovery starts the next generation.
           yield* Fiber.interrupt(firstDaemon);
           const replacement = yield* Deferred.await(replacementStarted).pipe(
-            Effect.timeoutFail({
+            Effect.timeoutOrElse({
               duration: "5 seconds",
-              onTimeout: () =>
-                new ReconnectTestError({
-                  message: "Heartbeat did not start a replacement daemon.",
-                }),
+              orElse: () =>
+                Effect.fail(
+                  new ReconnectTestError({
+                    message: "Heartbeat did not start a replacement daemon.",
+                  }),
+                ),
             }),
           );
           const secondReady = yield* waitForReady(
@@ -128,19 +129,23 @@ it("reconnects and reacquires a lease after the owning daemon restarts", async (
           // beyond it proves recovery acquired and heartbeat-renewed a new lease.
           yield* Effect.sleep("2200 millis");
           expect(starts).toBe(1);
-          expect(Option.isNone(yield* Fiber.poll(replacement))).toBe(true);
+          expect(
+            Option.isNone(Option.fromNullishOr(replacement.pollUnsafe())),
+          ).toBe(true);
 
           // The recovered lease belongs to the same connection owner and must be
           // released when that owner closes, allowing replacement shutdown.
           yield* Scope.close(connectionOwnerScope, Exit.void);
           yield* Fiber.join(replacement).pipe(
-            Effect.timeoutFail({
+            Effect.timeoutOrElse({
               duration: "10 seconds",
-              onTimeout: () =>
-                new ReconnectTestError({
-                  message:
-                    "Replacement daemon did not exit after recovered lease release.",
-                }),
+              orElse: () =>
+                Effect.fail(
+                  new ReconnectTestError({
+                    message:
+                      "Replacement daemon did not exit after recovered lease release.",
+                  }),
+                ),
             }),
           );
         }),
@@ -162,7 +167,7 @@ const startDaemon = (internalStateDirectory: string) =>
       expirationSweepMs: 20,
       shutdownDrainTimeoutMs: 1_000,
     },
-  }).pipe(Effect.provide(NodeContext.layer));
+  }).pipe(Effect.provide(NodeServices.layer));
 
 /** Poll for ready metadata, optionally requiring a generation replacement. */
 const waitForReady = (

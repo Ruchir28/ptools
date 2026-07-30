@@ -1,6 +1,6 @@
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import { ResolvedHttpMcpConfig } from "@ptools/config";
-import { Context, Data, Effect, Option, SynchronizedRef } from "effect";
+import { Context, Data, Effect, Layer, Option, SynchronizedRef } from "effect";
 import {
   AuthError,
   CredentialError,
@@ -21,9 +21,7 @@ import type {
  * This is not mutable state and it does not perform OAuth. It only tells the
  * shared auth core how to build host-specific URLs and user-facing messages.
  */
-export class AuthCoordinatorPolicy extends Context.Tag(
-  "@ptools/AuthCoordinatorPolicy",
-)<
+export class AuthCoordinatorPolicy extends Context.Service<
   AuthCoordinatorPolicy,
   {
     /** Public origin for this host's auth surface. */
@@ -50,7 +48,7 @@ export class AuthCoordinatorPolicy extends Context.Tag(
       serverName: string,
     ) => string;
   }
->() {}
+>()("@ptools/AuthCoordinatorPolicy") {}
 
 export interface AuthCoordinatorOAuthProvider extends OAuthClientProvider {
   /**
@@ -68,9 +66,7 @@ export interface AuthCoordinatorOAuthProvider extends OAuthClientProvider {
  * decides how that provider is constructed because credential storage,
  * callback state, and redirect behavior differ per platform.
  */
-export class AuthProviderFactory extends Context.Tag(
-  "@ptools/AuthProviderFactory",
-)<
+export class AuthProviderFactory extends Context.Service<
   AuthProviderFactory,
   {
     /**
@@ -89,7 +85,7 @@ export class AuthProviderFactory extends Context.Tag(
       ) => Effect.Effect<void, AuthError>;
     }) => Effect.Effect<AuthCoordinatorOAuthProvider, AuthError>;
   }
->() {}
+>()("@ptools/AuthProviderFactory") {}
 
 /** Effect-native work invoked after one server completes authorization. */
 export type AuthServerHandler = (
@@ -175,12 +171,14 @@ export interface AuthCoordinatorCoreService {
  * It owns only in-memory runtime coordination state; host providers own
  * credential persistence.
  */
-export class AuthCoordinatorCore extends Effect.Service<AuthCoordinatorCore>()(
+export class AuthCoordinatorCore extends Context.Service<AuthCoordinatorCore>()(
   "@ptools/AuthCoordinatorCore",
   {
-    effect: makeAuthCoordinatorCore(),
+    make: makeAuthCoordinatorCore(),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 interface AuthServerRecord {
   readonly serverName: string;
@@ -295,7 +293,7 @@ function makeAuthCoordinatorCore(): Effect.Effect<
               ? markOAuthServer(snapshot, serverName)
               : Effect.void,
           ),
-          Effect.catchAll(() => Effect.succeed(false)),
+          Effect.catch(() => Effect.succeed(false)),
         ),
       providerFor: (serverName, config) =>
         getOrCreateProvider(snapshot, providerFactory, serverName, config, {
@@ -398,7 +396,7 @@ const noteConfigured = (
 
 const noteConnectionError = (
   snapshot: SynchronizedRef.SynchronizedRef<AuthCoordinatorCoreSnapshot>,
-  policy: Context.Tag.Service<typeof AuthCoordinatorPolicy>,
+  policy: Context.Service.Shape<typeof AuthCoordinatorPolicy>,
   serverName: string,
   error: unknown,
 ): Effect.Effect<void, AuthError> => {
@@ -435,12 +433,12 @@ const noteConnectionError = (
 
 const getOrCreateProvider = (
   snapshot: SynchronizedRef.SynchronizedRef<AuthCoordinatorCoreSnapshot>,
-  providerFactory: Context.Tag.Service<typeof AuthProviderFactory>,
+  providerFactory: Context.Service.Shape<typeof AuthProviderFactory>,
   serverName: string,
   config: HttpMcpConfig,
   options: {
     readonly attach: boolean;
-    readonly policy: Context.Tag.Service<typeof AuthCoordinatorPolicy>;
+    readonly policy: Context.Service.Shape<typeof AuthCoordinatorPolicy>;
   },
 ): Effect.Effect<AuthCoordinatorOAuthProvider, AuthError> =>
   // Provider lookup/creation and cache publication happen under one
@@ -631,7 +629,7 @@ const markAuthorized = (
 
 const authStatus = (
   snapshot: SynchronizedRef.SynchronizedRef<AuthCoordinatorCoreSnapshot>,
-  policy: Context.Tag.Service<typeof AuthCoordinatorPolicy>,
+  policy: Context.Service.Shape<typeof AuthCoordinatorPolicy>,
 ): Effect.Effect<McpAuthStatus> =>
   SynchronizedRef.get(snapshot).pipe(
     Effect.map((state) => ({
@@ -643,7 +641,7 @@ const authStatus = (
   );
 
 const toPublicStatus = (
-  policy: Context.Tag.Service<typeof AuthCoordinatorPolicy>,
+  policy: Context.Service.Shape<typeof AuthCoordinatorPolicy>,
   record: AuthServerRecord,
 ): McpAuthServerStatus => ({
   serverName: record.serverName,
@@ -670,7 +668,7 @@ type PublicAuthStatusFields = Pick<
  * those rules later from loose optional fields and status-condition checks.
  */
 const publicStatusFields = (
-  policy: Context.Tag.Service<typeof AuthCoordinatorPolicy>,
+  policy: Context.Service.Shape<typeof AuthCoordinatorPolicy>,
   serverName: string,
   state: HttpMcpAuthState,
 ): PublicAuthStatusFields =>
@@ -713,13 +711,13 @@ const publicStatusFields = (
 
 const getAuthorizationUrl = (state: HttpMcpAuthState): Option.Option<string> =>
   HttpMcpAuthState.$match(state, {
-    Connected: Option.none,
-    StaticCredentials: Option.none,
+    Connected: () => Option.none<string>(),
+    StaticCredentials: () => Option.none<string>(),
     AuthorizationRequired: ({ authorizationUrl }) => authorizationUrl,
     AuthorizationInProgress: ({ authorizationUrl }) =>
       Option.some(authorizationUrl),
-    ClientConfigurationRequired: Option.none,
-    ConnectionFailed: Option.none,
+    ClientConfigurationRequired: () => Option.none<string>(),
+    ConnectionFailed: () => Option.none<string>(),
   });
 
 const httpConfigFromRecord = (record: AuthServerRecord): HttpMcpConfig =>

@@ -59,10 +59,9 @@
     "test": "vitest run --dir test"
   },
   "dependencies": {
-    "@effect/platform": "0.96.1",
     "@ptools/auth": "workspace:*",
     "@ptools/code-mode-api": "workspace:*",
     "@ptools/config": "workspace:*",
-    "effect": "3.21.2"
+    "effect": "4.0.0-beta.102"
   }
 }

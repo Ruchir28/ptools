@@ -6,7 +6,7 @@
  * singleton).
  *
  * Platforms supply only physical storage backends. Package-owned
- * `HostStateStorage.Default` / `HostSecretStorage.Default` combine those
+ * `HostStateStorage.layer` / `HostSecretStorage.layer` combine those
  * backends with `HostIdentity` so semantic stores own logical keys, schemas,
  * encoding, replacement, nonce, and credential invalidation — never host IDs or
  * platform paths.
@@ -39,8 +39,8 @@ export type HostStableSharedStores =
 
 /** Shared final storage construction that enforces identity-based selection. */
 const HostStorageLayer = Layer.merge(
-  HostStateStorage.Default,
-  HostSecretStorage.Default,
+  HostStateStorage.layer,
+  HostSecretStorage.layer,
 );
 
 /**
@@ -61,8 +61,8 @@ export const HostStableSharedStoresLayer: Layer.Layer<
   HostStorageError,
   HostIdentity | HostStateStorageBackend | HostSecretStorageBackend
 > = Layer.mergeAll(
-  ConfiguredHostConfigStore.Default,
-  ConfiguredSecretStore.Default,
-  McpOAuthStateStore.Default,
-  McpOAuthCredentialStore.Default,
+  ConfiguredHostConfigStore.layer,
+  ConfiguredSecretStore.layer,
+  McpOAuthStateStore.layer,
+  McpOAuthCredentialStore.layer,
 ).pipe(Layer.provide(HostStorageLayer));

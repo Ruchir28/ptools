@@ -230,7 +230,7 @@ describe("ConfiguredHostContextLayer with Cloudflare primitives", () => {
       }),
     });
 
-    await expect(runtime.runtime()).rejects.toMatchObject({
+    await expect(runtime.context()).rejects.toMatchObject({
       message: "Configured host config has not been configured.",
     });
   });
@@ -242,7 +242,7 @@ const makeConfiguredHostConfigBlob = (options: {
 }): string =>
   JSON.stringify(
     Effect.runSync(
-      Schema.encode(ConfiguredHostConfigBlob)(
+      Schema.encodeEffect(ConfiguredHostConfigBlob)(
         ConfiguredHostConfigBlob.make({
           config: PtoolsConfig.make({
             mcpServers: options.mcpServers,

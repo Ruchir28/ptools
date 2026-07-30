@@ -26,9 +26,10 @@ export interface CodeModeObjectWorkerLoaderService {
 }
 
 /** Worker Loader binding owned by the CodeModeObject Durable Object env. */
-export class CodeModeObjectWorkerLoader extends Context.Tag(
-  "@ptools/host-cloudflare/CodeModeObjectWorkerLoader",
-)<CodeModeObjectWorkerLoader, CodeModeObjectWorkerLoaderService>() {}
+export class CodeModeObjectWorkerLoader extends Context.Service<
+  CodeModeObjectWorkerLoader,
+  CodeModeObjectWorkerLoaderService
+>()("@ptools/host-cloudflare/CodeModeObjectWorkerLoader") {}
 
 /**
  * Converts the raw Cloudflare WorkerLoader binding into the narrow service

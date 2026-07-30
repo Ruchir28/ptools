@@ -163,14 +163,14 @@ const resolveStdioConfig = (
       config.command,
       lookupSecret,
     );
-    const args = yield* Effect.transposeMapOption(config.args, (args) =>
+    const args = yield* mapEffectOption(config.args, (args) =>
       Effect.all(
         args.map((arg, index) =>
           resolveEnvString(serverName, `args[${index}]`, arg, lookupSecret),
         ),
       ),
     );
-    const cwd = yield* Effect.transposeMapOption(config.cwd, (cwd) =>
+    const cwd = yield* mapEffectOption(config.cwd, (cwd) =>
       resolveEnvString(serverName, "cwd", cwd, lookupSecret).pipe(
         Effect.map((resolvedCwd) =>
           options.baseDir !== undefined && !isAbsolutePortablePath(resolvedCwd)
@@ -182,7 +182,7 @@ const resolveStdioConfig = (
         ),
       ),
     );
-    const resolvedEnv = yield* Effect.transposeMapOption(config.env, (env) =>
+    const resolvedEnv = yield* mapEffectOption(config.env, (env) =>
       resolveStringRecord(serverName, "env", env, lookupSecret),
     );
 
@@ -206,12 +206,10 @@ const resolveHttpConfig = (
       config.url,
       lookupSecret,
     );
-    const headers = yield* Effect.transposeMapOption(
-      config.headers,
-      (headers) =>
-        resolveStringRecord(serverName, "headers", headers, lookupSecret),
+    const headers = yield* mapEffectOption(config.headers, (headers) =>
+      resolveStringRecord(serverName, "headers", headers, lookupSecret),
     );
-    const auth = yield* Effect.transposeMapOption(config.auth, (auth) =>
+    const auth = yield* mapEffectOption(config.auth, (auth) =>
       resolveHttpAuthConfig(serverName, auth, lookupSecret),
     );
 
@@ -229,7 +227,7 @@ const resolveHttpAuthConfig = (
 ): Effect.Effect<ResolvedHttpMcpAuthConfig, ServerConfigError> =>
   Effect.gen(function* () {
     const resolveField = (fieldName: string, value: Option.Option<string>) =>
-      Effect.transposeMapOption(value, (value) =>
+      mapEffectOption(value, (value) =>
         resolveEnvString(serverName, fieldName, value, lookupSecret),
       );
     const scope = yield* resolveField("auth.scope", config.scope);
@@ -260,6 +258,15 @@ const resolveHttpAuthConfig = (
       clientMetadataUrl,
       redirectUri,
     });
+  });
+
+const mapEffectOption = <A, B, E, R>(
+  self: Option.Option<A>,
+  f: (value: A) => Effect.Effect<B, E, R>,
+): Effect.Effect<Option.Option<B>, E, R> =>
+  Option.match(self, {
+    onNone: () => Effect.succeedNone,
+    onSome: (value) => Effect.map(f(value), Option.some),
   });
 
 const resolveStringRecord = (
@@ -319,7 +326,7 @@ const parsePtoolsConfigValue = (
   source: string,
 ): Effect.Effect<PtoolsConfig, ServerConfigError> =>
   Effect.gen(function* () {
-    const userConfig: UserPtoolsConfig = yield* Schema.decodeUnknown(
+    const userConfig: UserPtoolsConfig = yield* Schema.decodeUnknownEffect(
       UserPtoolsConfig,
     )(value, {
       errors: "all",

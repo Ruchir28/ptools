@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Either, Layer, Option, Schema } from "effect";
+import { Effect, Result, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   hashResolvedPtoolsConfig,
@@ -83,7 +83,7 @@ describe("host storage construction", () => {
   it("selects the backend with HostIdentity and publishes that host ID", async () => {
     const storage = makeMemoryHostStorage();
     let requestedHostId: string | undefined;
-    const layer = HostStateStorage.Default.pipe(
+    const layer = HostStateStorage.layer.pipe(
       Layer.provide(
         Layer.merge(
           HostIdentityLayer("host-a"),
@@ -186,7 +186,7 @@ describe("server config", () => {
     });
 
     const encoded = await Effect.runPromise(
-      Schema.encode(ResolvedPtoolsConfig)(resolved),
+      Schema.encodeEffect(ResolvedPtoolsConfig)(resolved),
     );
 
     expect(encoded).toEqual({
@@ -229,17 +229,17 @@ describe("server config", () => {
 
   it("exposes the normalized unresolved config as a runtime schema", async () => {
     const result = await Effect.runPromise(
-      Schema.decodeUnknown(PtoolsConfig)({
+      Schema.decodeUnknownEffect(PtoolsConfig)({
         mcpServers: {
           remote: {
             transport: "http",
             url: 42,
           },
         },
-      }).pipe(Effect.either),
+      }).pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
   });
 
   it("validates package-owned config construction", () => {
@@ -459,14 +459,14 @@ describe("server config", () => {
     });
 
     const result = await Effect.runPromise(
-      resolvePtoolsConfig(config, {}).pipe(Effect.either),
+      resolvePtoolsConfig(config, {}).pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left.message).toContain("MISSING_TOKEN");
-      expect(result.left).toBeInstanceOf(ServerConfigError);
+    if (Result.isFailure(result)) {
+      expect(result.failure.message).toContain("MISSING_TOKEN");
+      expect(result.failure).toBeInstanceOf(ServerConfigError);
     }
   });
 
@@ -609,16 +609,16 @@ describe("server config", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const source = yield* ResolvedPtoolsConfigSource;
-        return yield* Effect.either(source.load);
+        return yield* Effect.result(source.load);
       }).pipe(
         Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage)),
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(ServerConfigError);
-      expect(result.left.message).toBe(
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(ServerConfigError);
+      expect(result.failure.message).toBe(
         "Missing environment variable MISSING_TOKEN for headers.Authorization on MCP server remote",
       );
     }
@@ -644,16 +644,16 @@ describe("server config", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const source = yield* ResolvedPtoolsConfigSource;
-        return yield* Effect.either(source.load);
+        return yield* Effect.result(source.load);
       }).pipe(
         Effect.provide(configuredHostResolvedConfigSourceTestLayer(storage)),
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(ServerConfigError);
-      expect(result.left.message).toBe(
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(ServerConfigError);
+      expect(result.failure.message).toBe(
         "Stored configured host config is invalid.",
       );
     }
@@ -679,7 +679,7 @@ describe("server config", () => {
         });
         const keep = yield* store.get("KEEP");
         const newest = yield* store.get("NEW");
-        const stale = yield* store.get("STALE").pipe(Effect.either);
+        const stale = yield* store.get("STALE").pipe(Effect.result);
 
         return { replacement, keep, newest, stale };
       }).pipe(Effect.provide(configuredSecretStoreTestLayer(storage))),
@@ -688,7 +688,7 @@ describe("server config", () => {
     expect(result.replacement.secretCount).toBe(2);
     expect(result.keep).toBe("second");
     expect(result.newest).toBe("new");
-    expect(Either.isLeft(result.stale)).toBe(true);
+    expect(Result.isFailure(result.stale)).toBe(true);
   });
 
   it("infers stdio and HTTP transport from command and url", async () => {
@@ -716,13 +716,13 @@ describe("server config", () => {
             },
           },
         }),
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left.message).toContain("not both");
+    if (Result.isFailure(result)) {
+      expect(result.failure.message).toContain("not both");
     }
   });
 
@@ -736,13 +736,13 @@ describe("server config", () => {
             },
           },
         }),
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left.message).toContain("must provide command");
+    if (Result.isFailure(result)) {
+      expect(result.failure.message).toContain("must provide command");
     }
   });
 
@@ -758,14 +758,14 @@ describe("server config", () => {
               },
             },
           }),
-        ).pipe(Effect.either),
+        ).pipe(Effect.result),
       );
 
-      expect(Either.isLeft(result), field).toBe(true);
+      expect(Result.isFailure(result), field).toBe(true);
 
-      if (Either.isLeft(result)) {
-        expect(result.left.message).toContain(field);
-        expect(result.left.message).toContain("is unexpected");
+      if (Result.isFailure(result)) {
+        expect(result.failure.message).toContain(field);
+        expect(result.failure.message).toContain("Unexpected key");
       }
     }
   });
@@ -781,14 +781,14 @@ describe("server config", () => {
             },
           },
         }),
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
-    if (Either.isLeft(result)) {
-      expect(result.left.message).toContain("envFile");
-      expect(result.left.message).toContain("is unexpected");
+    if (Result.isFailure(result)) {
+      expect(result.failure.message).toContain("envFile");
+      expect(result.failure.message).toContain("Unexpected key");
     }
   });
 
@@ -846,10 +846,10 @@ describe("server config", () => {
             },
           },
         }),
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
   });
 
   it("hashes resolved configs deterministically", () => {
@@ -902,7 +902,7 @@ const makeMemoryHostStorage = (): HostStorageOperations => {
   const values = new Map<string, string>();
 
   return {
-    get: (key) => Effect.sync(() => Option.fromNullable(values.get(key))),
+    get: (key) => Effect.sync(() => Option.fromNullishOr(values.get(key))),
     put: (key, value) =>
       Effect.sync(() => {
         values.set(key, value);
@@ -915,7 +915,7 @@ const makeMemoryHostStorage = (): HostStorageOperations => {
 };
 
 const hostStorageTestLayer = (storage: HostStorageOperations) =>
-  Layer.merge(HostStateStorage.Default, HostSecretStorage.Default).pipe(
+  Layer.merge(HostStateStorage.layer, HostSecretStorage.layer).pipe(
     Layer.provide(
       Layer.mergeAll(
         HostIdentityLayer("test-host"),
@@ -930,22 +930,22 @@ const hostStorageTestLayer = (storage: HostStorageOperations) =>
   );
 
 const configuredSecretStoreTestLayer = (storage: HostStorageOperations) =>
-  ConfiguredSecretStore.Default.pipe(
+  ConfiguredSecretStore.layer.pipe(
     Layer.provide(hostStorageTestLayer(storage)),
   );
 
 const configuredHostStoreTestLayer = (storage: HostStorageOperations) =>
   Layer.merge(
-    ConfiguredHostConfigStore.Default,
-    ConfiguredSecretStore.Default,
+    ConfiguredHostConfigStore.layer,
+    ConfiguredSecretStore.layer,
   ).pipe(Layer.provide(hostStorageTestLayer(storage)));
 
 const configuredHostResolvedConfigSourceTestLayer = (
   storage: HostStorageOperations,
 ) =>
-  ResolvedPtoolsConfigSource.Default.pipe(
-    Layer.provide(ConfiguredHostConfigStore.Default),
-    Layer.provide(ConfiguredSecretStore.Default),
+  ResolvedPtoolsConfigSource.layer.pipe(
+    Layer.provide(ConfiguredHostConfigStore.layer),
+    Layer.provide(ConfiguredSecretStore.layer),
     Layer.provide(hostStorageTestLayer(storage)),
   );
 

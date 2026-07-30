@@ -20,10 +20,7 @@ export type HostApiCaller = Schema.Schema.Type<typeof HostApiCaller>;
 export const HostOperationDispatchInput = Schema.Struct({
   hostId: Schema.String,
   publicOrigin: Schema.String,
-  caller: Schema.optionalWith(HostApiCaller, {
-    exact: true,
-    as: "Option",
-  }),
+  caller: Schema.OptionFromOptionalKey(HostApiCaller),
   request: HostOperationRequest,
 });
 
@@ -32,6 +29,5 @@ export type HostOperationDispatchInput = Schema.Schema.Type<
 >;
 
 /** Plain carrier representation produced by encoding the dispatch input. */
-export type EncodedHostOperationDispatchInput = Schema.Schema.Encoded<
-  typeof HostOperationDispatchInput
->;
+export type EncodedHostOperationDispatchInput =
+  (typeof HostOperationDispatchInput)["Encoded"];

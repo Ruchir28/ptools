@@ -15,7 +15,7 @@ import {
   type ConnectedMcpClient,
   type ConnectMcpInput,
 } from "@ptools/mcp-registry";
-import { Deferred, Effect, Either, Layer, Option, Schema } from "effect";
+import { Deferred, Effect, Fiber, Result, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   makeNodeHostActorRuntimeFromPlatformLayers,
@@ -80,16 +80,16 @@ describe("NodeHostRuntimeManager", () => {
               }),
           });
 
-          const first = yield* Effect.fork(
+          const first = yield* Effect.forkChild(
             manager.dispatch(inputFor("host-a")),
           );
           yield* Deferred.await(activationStarted);
-          const second = yield* Effect.fork(
+          const second = yield* Effect.forkChild(
             manager.dispatch(inputFor("host-a")),
           );
           yield* Deferred.succeed(releaseActivation, undefined);
-          yield* first;
-          yield* second;
+          yield* Fiber.join(first);
+          yield* Fiber.join(second);
         }),
       ),
     );
@@ -119,16 +119,16 @@ describe("NodeHostRuntimeManager", () => {
               }),
           });
 
-          const hostA = yield* Effect.fork(
+          const hostA = yield* Effect.forkChild(
             manager.dispatch(inputFor("host-a")),
           );
-          const hostB = yield* Effect.fork(
+          const hostB = yield* Effect.forkChild(
             manager.dispatch(inputFor("host-b")),
           );
           yield* Deferred.await(bothStarted);
           yield* Deferred.succeed(release, undefined);
-          yield* hostA;
-          yield* hostB;
+          yield* Fiber.join(hostA);
+          yield* Fiber.join(hostB);
         }),
       ),
     );
@@ -154,17 +154,17 @@ describe("NodeHostRuntimeManager", () => {
 
           const first = yield* manager
             .dispatch(inputFor("host-a"))
-            .pipe(Effect.either);
+            .pipe(Effect.result);
           const second = yield* manager
             .dispatch(inputFor("host-a"))
-            .pipe(Effect.either);
+            .pipe(Effect.result);
           return { first, second };
         }),
       ),
     );
 
-    expect(Either.isLeft(results.first)).toBe(true);
-    expect(Either.isRight(results.second)).toBe(true);
+    expect(Result.isFailure(results.first)).toBe(true);
+    expect(Result.isSuccess(results.second)).toBe(true);
     expect(attempts).toBe(2);
   });
 
@@ -199,13 +199,13 @@ describe("NodeHostRuntimeManager", () => {
       Effect.gen(function* () {
         const runtime = yield* actorHarness.runtimeFor("host-a");
         yield* runtime.dispose;
-        return yield* runtime.dispatch(inputFor("host-a")).pipe(Effect.either);
+        return yield* runtime.dispatch(inputFor("host-a")).pipe(Effect.result);
       }),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.phase).toBe(NodeHostActorRuntimePhase.Execute);
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.phase).toBe(NodeHostActorRuntimePhase.Execute);
     }
   });
 
@@ -323,7 +323,7 @@ const makeTestManager = (
   makeNodeHostRuntimeManager.pipe(
     Effect.provideService(
       NodeDaemonHostActorRuntimeActivator,
-      NodeDaemonHostActorRuntimeActivator.make(runtimeActivator),
+      NodeDaemonHostActorRuntimeActivator.of(runtimeActivator),
     ),
   );
 
@@ -413,7 +413,8 @@ const makeInMemoryActorPlatformHarness = () => {
         }),
     }),
     sandboxRuntime: Layer.succeed(SandboxRuntime, {
-      execute: () => Effect.dieMessage("Sandbox execution is not used here."),
+      execute: () =>
+        Effect.die(new Error("Sandbox execution is not used here.")),
     }),
   };
 
@@ -434,7 +435,7 @@ const storageFor = (
   const values = stores.get(hostId) ?? new Map<string, string>();
   stores.set(hostId, values);
   return {
-    get: (key) => Effect.sync(() => Option.fromNullable(values.get(key))),
+    get: (key) => Effect.sync(() => Option.fromNullishOr(values.get(key))),
     put: (key, value) =>
       Effect.sync(() => {
         values.set(key, value);

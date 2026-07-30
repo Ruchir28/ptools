@@ -12,7 +12,7 @@
  *   This daemon is started with `{ detached: true }`. The parent wants to hand
  *   off and not stay coupled to the child. `unref()` tells Node not to keep the
  *   parent alive for that child — but that handoff is only safe after launch
- *   actually succeeded. The Effect adapts this with `Effect.async`, parking
+ *   actually succeeded. The Effect adapts this with `Effect.callback`, parking
  *   until `spawn` or `error` instead of trusting the synchronous return value.
  *
  * What this proves:
@@ -27,7 +27,7 @@
  * `node:child_process.spawn` is mocked; no real daemon process is started.
  */
 import { EventEmitter } from "node:events";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { beforeEach, expect, it, vi } from "vitest";
 
 const { spawnChildProcess } = vi.hoisted(() => ({
@@ -59,10 +59,10 @@ it("fails through the Effect channel when ChildProcess emits an asynchronous lau
   child.emit("error", cause);
 
   const result = await resultPromise;
-  expect(Either.isLeft(result)).toBe(true);
-  if (Either.isLeft(result)) {
-    expect(result.left).toBeInstanceOf(NodeHostActorDaemonSpawnError);
-    expect(result.left.cause).toBe(cause);
+  expect(Result.isFailure(result)).toBe(true);
+  if (Result.isFailure(result)) {
+    expect(result.failure).toBeInstanceOf(NodeHostActorDaemonSpawnError);
+    expect(result.failure.cause).toBe(cause);
   }
   // Failed launch must not detach/unref; there is nothing healthy to orphan.
   expect(child.unref).not.toHaveBeenCalled();
@@ -78,11 +78,11 @@ it("succeeds and unreferences the child only after Node emits spawn", async () =
   expect(child.unref).not.toHaveBeenCalled();
   child.emit("spawn");
 
-  expect(Either.isRight(await resultPromise)).toBe(true);
+  expect(Result.isSuccess(await resultPromise)).toBe(true);
   expect(child.unref).toHaveBeenCalledOnce();
 });
 
-/** Run Default spawner.start and capture success/failure as Either. */
+/** Run Default spawner.start and capture success/failure as Result. */
 const runStart = () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -92,6 +92,6 @@ const runStart = () =>
           internalStateDirectory: "/tmp/ptools-spawner-test",
           keyringServiceName: "ptools-spawner-test",
         })
-        .pipe(Effect.either);
-    }).pipe(Effect.provide(NodeHostActorDaemonSpawner.Default)),
+        .pipe(Effect.result);
+    }).pipe(Effect.provide(NodeHostActorDaemonSpawner.layer)),
   );

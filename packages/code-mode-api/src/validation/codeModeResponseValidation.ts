@@ -13,7 +13,7 @@ import type { CodeModeRequest } from "../contracts/codeModeRequest.js";
 export const parseCodeModeResponse = (
   value: unknown,
 ): Effect.Effect<CodeModeResponse, CodeModeInvalidResponseError> =>
-  Schema.decodeUnknown(CodeModeResponse)(value, {
+  Schema.decodeUnknownEffect(CodeModeResponse)(value, {
     errors: "all",
     onExcessProperty: "error",
   }).pipe(

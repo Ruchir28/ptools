@@ -10,16 +10,16 @@
     "playground": "tsx apps/playground/src/playground.ts",
     "build": "tsc -b && pnpm --filter @ptools/host-node build:worker",
     "typecheck": "tsc -b --pretty && pnpm --recursive --if-present typecheck",
-    "test": "vitest run --exclude \"**/dist/**\" --exclude \"packages/host-cloudflare/test/worker.test.ts\" && pnpm --filter @ptools/host-cloudflare test:worker",
+    "test": "vitest run --exclude \"**/dist/**\" --exclude \"packages/host-cloudflare/test/*.integration.test.ts\" --exclude \"packages/host-cloudflare/test/codeModeRuntime.test.ts\" --exclude \"packages/host-cloudflare/test/worker.test.ts\" && pnpm --filter @ptools/host-cloudflare test:worker",
     "check:publishable": "node scripts/check-publishable-packages.mjs && node scripts/check-packed-artifacts.mjs",
     "pack:dry-run": "node scripts/check-packed-artifacts.mjs",
     "smoke:packed-install": "node scripts/smoke-packed-install.mjs"
   },
   "dependencies": {
-    "effect": "3.21.2"
+    "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.86.2",
+    "@effect/language-service": "0.87.1",
     "@types/node": "25.9.1",
     "deno": "2.8.3",
     "prettier": "3.8.3",

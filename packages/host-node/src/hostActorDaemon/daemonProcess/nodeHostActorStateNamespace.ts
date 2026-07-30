@@ -59,9 +59,13 @@ export const resolveNodeHostActorRuntimeOptions = (
     const keyringServiceName = yield* resolveKeyringServiceName(
       overrides.keyringServiceName,
     );
-    const denoExecutable = yield* Effect.transposeMapOption(
-      Option.fromNullable(overrides.denoExecutable),
-      validateDenoExecutable,
+    const denoExecutable = yield* Option.match(
+      Option.fromNullishOr(overrides.denoExecutable),
+      {
+        onNone: () => Effect.succeedNone,
+        onSome: (value) =>
+          validateDenoExecutable(value).pipe(Effect.map(Option.some)),
+      },
     );
 
     return {

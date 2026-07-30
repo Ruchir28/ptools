@@ -67,7 +67,7 @@ it("rejects a bound host mismatch before daemon RPC", async () => {
 it("schema-encodes the complete input and decodes the complete response", async () => {
   let forwarded: EncodedHostOperationDispatchInput | undefined;
   const encodedResponse = await Effect.runPromise(
-    Schema.encode(ConfigureHostResponse)(response),
+    Schema.encodeEffect(ConfigureHostResponse)(response),
   );
   const handle = makeNodeDaemonHostInstanceHandle({
     hostId: "alpha",
@@ -85,7 +85,7 @@ it("schema-encodes the complete input and decodes the complete response", async 
   // Wire boundary is encoded JSON-shaped input, not the domain class instance.
   expect(forwarded).toEqual(
     await Effect.runPromise(
-      Schema.encode(HostOperationDispatchInput)(operation),
+      Schema.encodeEffect(HostOperationDispatchInput)(operation),
     ),
   );
 });

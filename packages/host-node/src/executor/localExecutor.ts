@@ -100,7 +100,7 @@ export const LocalSandboxExecutorLayer = (
   options?: LocalSandboxExecutorOptions,
 ): Layer.Layer<CodeExecutor, ExecutorStartError> =>
   CodeExecutorLayer({
-    defaultTimeoutMs: Option.fromNullable(options?.defaultTimeoutMs),
+    defaultTimeoutMs: Option.fromNullishOr(options?.defaultTimeoutMs),
   }).pipe(Layer.provide(localExecutorBackendLayer(options)));
 
 interface ProtocolState {
@@ -137,7 +137,7 @@ const runDenoSandbox = (
           { concurrency: "unbounded" },
         ),
         Stream.runDrain,
-        Effect.zipRight(
+        Effect.andThen(
           Deferred.fail(
             completion,
             new ExecutorProtocolError({
@@ -145,7 +145,7 @@ const runDenoSandbox = (
             }),
           ),
         ),
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Deferred.fail(completion, error).pipe(Effect.asVoid),
         ),
         Effect.forkScoped,
@@ -162,7 +162,7 @@ const runDenoSandbox = (
             }),
           ),
         ),
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Deferred.fail(completion, error).pipe(Effect.asVoid),
         ),
         Effect.forkScoped,
@@ -174,10 +174,12 @@ const runDenoSandbox = (
       });
 
       return yield* Deferred.await(completion).pipe(
-        Effect.timeoutFail({
+        Effect.timeoutOrElse({
           duration: Duration.millis(execution.timeoutMs),
-          onTimeout: () =>
-            new ExecutorTimeoutError({ timeoutMs: execution.timeoutMs }),
+          orElse: () =>
+            Effect.fail(
+              new ExecutorTimeoutError({ timeoutMs: execution.timeoutMs }),
+            ),
         }),
       );
     }),
@@ -192,7 +194,7 @@ const handleSandboxMessage = (options: {
 }): Effect.Effect<void, ExecutorProtocolError> => {
   if (options.message._tag === "Complete") {
     return claimCompletion(options.state).pipe(
-      Effect.zipRight(
+      Effect.andThen(
         Deferred.succeed(options.completion, options.message.completion),
       ),
       Effect.asVoid,
@@ -200,7 +202,7 @@ const handleSandboxMessage = (options: {
   }
 
   return claimCallId(options.state, options.message.call.callId).pipe(
-    Effect.zipRight(options.handleProviderCall(options.message.call)),
+    Effect.andThen(options.handleProviderCall(options.message.call)),
     Effect.map((result) =>
       HostToSandboxProviderResultMessage.make({
         result,

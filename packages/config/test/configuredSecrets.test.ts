@@ -3,7 +3,7 @@ import {
   Context,
   Deferred,
   Effect,
-  Either,
+  Result,
   Fiber,
   Layer,
   Option,
@@ -57,18 +57,18 @@ describe("ConfiguredSecretStore replacement serialization", () => {
 
           const first = yield* store
             .replaceAll({ secrets: { FIRST: "one" } })
-            .pipe(Effect.fork);
+            .pipe(Effect.forkChild);
           yield* Deferred.await(firstReadEntered);
 
           const second = yield* Effect.gen(function* () {
             yield* Deferred.succeed(secondStarted, undefined);
             return yield* store.replaceAll({ secrets: { SECOND: "two" } });
-          }).pipe(Effect.fork);
+          }).pipe(Effect.forkChild);
           yield* Deferred.await(secondStarted);
           // The second fiber has started, but the store-instance semaphore keeps
           // it outside the index protocol until the first replacement finishes.
-          yield* Effect.yieldNow();
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
+          yield* Effect.yieldNow;
           expect(indexReads).toBe(1);
 
           yield* Deferred.succeed(releaseFirstRead, undefined);
@@ -101,7 +101,7 @@ describe("ConfiguredSecretStore replacement serialization", () => {
           ? Effect.sync(() => {
               failNextIndexRead = false;
             }).pipe(
-              Effect.zipRight(
+              Effect.andThen(
                 Effect.fail(
                   new HostStorageError({
                     storage: "state",
@@ -121,7 +121,7 @@ describe("ConfiguredSecretStore replacement serialization", () => {
         const store = yield* ConfiguredSecretStore;
         const failed = yield* store
           .replaceAll({ secrets: { FIRST: "one" } })
-          .pipe(Effect.either);
+          .pipe(Effect.result);
         const succeeded = yield* store.replaceAll({
           secrets: { SECOND: "two" },
         });
@@ -129,7 +129,7 @@ describe("ConfiguredSecretStore replacement serialization", () => {
       }).pipe(Effect.provide(configuredSecretStoreLayer(state, secrets))),
     );
 
-    expect(Either.isLeft(result.failed)).toBe(true);
+    expect(Result.isFailure(result.failed)).toBe(true);
     expect(result.succeeded.secretCount).toBe(1);
     expect(secretValues.get(configuredSecretValueKey("SECOND"))).toBe("two");
   });
@@ -148,7 +148,7 @@ describe("ConfiguredSecretStore replacement serialization", () => {
             beforeGet: (key) =>
               key === CONFIGURED_SECRET_INDEX_KEY
                 ? Deferred.succeed(firstReadEntered, undefined).pipe(
-                    Effect.zipRight(Deferred.await(releaseFirstRead)),
+                    Effect.andThen(Deferred.await(releaseFirstRead)),
                   )
                 : Effect.void,
           });
@@ -160,7 +160,7 @@ describe("ConfiguredSecretStore replacement serialization", () => {
             Effect.provide(
               configuredSecretStoreLayer(firstState, firstSecrets),
             ),
-            Effect.fork,
+            Effect.forkChild,
           );
           yield* Deferred.await(firstReadEntered);
 
@@ -199,9 +199,7 @@ const memoryStorage = (
 ): HostStorageOperations => ({
   get: (key) =>
     (hooks.beforeGet?.(key) ?? Effect.void).pipe(
-      Effect.zipRight(
-        Effect.sync(() => Option.fromNullable(values.get(key))),
-      ),
+      Effect.andThen(Effect.sync(() => Option.fromNullishOr(values.get(key)))),
     ),
   put: (key, value) =>
     Effect.sync(() => {
@@ -217,9 +215,9 @@ const configuredSecretStoreLayer = (
   state: HostStorageOperations,
   secrets: HostStorageOperations,
 ) =>
-  ConfiguredSecretStore.Default.pipe(
+  ConfiguredSecretStore.layer.pipe(
     Layer.provide(
-      Layer.merge(HostStateStorage.Default, HostSecretStorage.Default).pipe(
+      Layer.merge(HostStateStorage.layer, HostSecretStorage.layer).pipe(
         Layer.provide(
           Layer.mergeAll(
             HostIdentityLayer("test-host"),

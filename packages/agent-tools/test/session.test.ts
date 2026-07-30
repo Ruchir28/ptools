@@ -1,10 +1,11 @@
 import type {
   CodeModeClientHandle,
   CodeModeDiagnostic,
-  CodeModeRequest,
   CodeModeResponse,
   CodeModeToolName,
 } from "@ptools/code-mode-api";
+import { CodeModeRequest } from "@ptools/code-mode-api";
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { makePtoolsSession } from "../src/session.js";
 
@@ -78,7 +79,13 @@ describe("PtoolsSession", () => {
       }),
     ).resolves.toEqual({ value: "async () => 1", logs: [], warnings: [] });
 
-    expect(calls).toEqual([
+    const encodedCalls = await Promise.all(
+      calls.map((request) =>
+        Effect.runPromise(Schema.encodeEffect(CodeModeRequest)(request)),
+      ),
+    );
+
+    expect(encodedCalls).toEqual([
       { operation: "auth_status" },
       { operation: "refresh" },
       { operation: "search_providers", input: {} },
@@ -215,34 +222,32 @@ describe("input parsing", () => {
     it("rejects non-string provider query", async () => {
       await expect(
         session().callCodeModeTool("search_providers", { query: 42 }),
-      ).rejects.toThrow(
-        "search_providers.query must be a string when provided",
-      );
+      ).rejects.toThrow("Invalid search_providers input");
     });
   });
 
   describe("search input", () => {
     it("rejects null input", async () => {
       await expect(session().callCodeModeTool("search", null)).rejects.toThrow(
-        "search input must be an object",
+        "Invalid search input",
       );
     });
 
     it("rejects array input", async () => {
       await expect(session().callCodeModeTool("search", [])).rejects.toThrow(
-        "search input must be an object",
+        "Invalid search input",
       );
     });
 
     it("rejects a non-string query", async () => {
       await expect(
         session().callCodeModeTool("search", { query: 42 }),
-      ).rejects.toThrow("search.query must be a non-blank string");
+      ).rejects.toThrow("Invalid search input");
     });
 
     it("rejects a missing query", async () => {
       await expect(session().callCodeModeTool("search", {})).rejects.toThrow(
-        "search.query must be a non-blank string",
+        "Invalid search input",
       );
     });
 
@@ -257,13 +262,13 @@ describe("input parsing", () => {
     it("rejects null input", async () => {
       await expect(
         session().callCodeModeTool("get_tool_schema", null),
-      ).rejects.toThrow("get_tool_schema input must be an object");
+      ).rejects.toThrow("Invalid get_tool_schema input");
     });
 
     it("rejects missing selector fields", async () => {
       await expect(
         session().callCodeModeTool("get_tool_schema", {}),
-      ).rejects.toThrow("get_tool_schema.toolIds must be an array");
+      ).rejects.toThrow("Invalid get_tool_schema input");
     });
 
     it("accepts toolIds", async () => {
@@ -281,13 +286,13 @@ describe("input parsing", () => {
     it("rejects empty toolIds", async () => {
       await expect(
         session().callCodeModeTool("get_tool_schema", { toolIds: [] }),
-      ).rejects.toThrow("get_tool_schema requires at least one toolId");
+      ).rejects.toThrow("Invalid get_tool_schema input");
     });
 
     it("rejects non-array toolIds field", async () => {
       await expect(
         session().callCodeModeTool("get_tool_schema", { toolIds: "echo" }),
-      ).rejects.toThrow("get_tool_schema.toolIds must be an array");
+      ).rejects.toThrow("Invalid get_tool_schema input");
     });
 
     it("rejects a blank toolId", async () => {
@@ -295,29 +300,27 @@ describe("input parsing", () => {
         session().callCodeModeTool("get_tool_schema", {
           toolIds: [""],
         }),
-      ).rejects.toThrow(
-        "get_tool_schema.toolIds[0] must be a non-blank string",
-      );
+      ).rejects.toThrow("Invalid get_tool_schema input");
     });
   });
 
   describe("execute input", () => {
     it("rejects null input", async () => {
       await expect(session().callCodeModeTool("execute", null)).rejects.toThrow(
-        "execute input must be an object",
+        "Invalid execute input",
       );
     });
 
     it("rejects missing code field", async () => {
       await expect(session().callCodeModeTool("execute", {})).rejects.toThrow(
-        "execute.code must be a string",
+        "Invalid execute input",
       );
     });
 
     it("rejects non-string code field", async () => {
       await expect(
         session().callCodeModeTool("execute", { code: 42 }),
-      ).rejects.toThrow("execute.code must be a string");
+      ).rejects.toThrow("Invalid execute input");
     });
 
     it("rejects non-number timeoutMs when provided", async () => {
@@ -326,7 +329,7 @@ describe("input parsing", () => {
           code: "async () => 1",
           timeoutMs: "fast",
         }),
-      ).rejects.toThrow("execute.timeoutMs must be a number when provided");
+      ).rejects.toThrow("Invalid execute input");
     });
 
     it("accepts code without timeoutMs", async () => {

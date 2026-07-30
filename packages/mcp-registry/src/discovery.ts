@@ -45,23 +45,23 @@ export const discoverAllToolsDegraded = (
 
     for (const connected of clients) {
       const result = yield* discoverClientToolsDegraded(connected).pipe(
-        Effect.either,
+        Effect.result,
       );
 
-      if (result._tag === "Left") {
-        if (result.left instanceof NameCollisionError) {
-          return yield* Effect.fail(result.left);
+      if (result._tag === "Failure") {
+        if (result.failure instanceof NameCollisionError) {
+          return yield* result.failure;
         }
 
-        diagnostics.push(toDiscoveryDiagnostic(result.left));
+        diagnostics.push(toDiscoveryDiagnostic(result.failure));
         yield* closeClient(connected);
-      } else if (result.right.excludeServer) {
-        diagnostics.push(...result.right.diagnostics);
+      } else if (result.success.excludeServer) {
+        diagnostics.push(...result.success.diagnostics);
         yield* closeClient(connected);
       } else {
         healthyClients.push(connected);
-        allTools.push(...result.right.tools);
-        diagnostics.push(...result.right.diagnostics);
+        allTools.push(...result.success.tools);
+        diagnostics.push(...result.success.diagnostics);
       }
     }
 

@@ -25,7 +25,7 @@
  * fake: returning operation-matched responses avoids Deno, keyring, MCP network,
  * and browser OAuth side effects while keeping both transport seams observable.
  */
-import * as NodeContext from "@effect/platform-node/NodeContext";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { HostHttpClient } from "@ptools/host-api/effect";
 import type {
   HostOperationDispatchInput,
@@ -75,7 +75,7 @@ it("forwards config, secrets, auth, and callback routes through the daemon", asy
           });
           // Recording manager marks the exact daemon/actor handoff. Everything
           // before dispatch is real; only operation execution is controlled.
-          const runtimes = NodeHostRuntimeManager.make({
+          const runtimes = NodeHostRuntimeManager.of({
             dispatch: (input) =>
               Effect.sync(() => {
                 received.push(input);
@@ -88,7 +88,7 @@ it("forwards config, secrets, auth, and callback routes through the daemon", asy
           ).pipe(
             Effect.provideService(
               NodeHostActorDaemonLeaseManager,
-              NodeHostActorDaemonLeaseManager.make(leases),
+              NodeHostActorDaemonLeaseManager.of(leases),
             ),
             Effect.provideService(NodeHostRuntimeManager, runtimes),
           );
@@ -142,7 +142,7 @@ it("forwards config, secrets, auth, and callback routes through the daemon", asy
           expect(yield* Effect.promise(() => postResponse.text())).toBe(
             "OAuth POST complete",
           );
-        }).pipe(Effect.provide(NodeContext.layer)),
+        }).pipe(Effect.provide(NodeServices.layer)),
       ),
     );
   } finally {

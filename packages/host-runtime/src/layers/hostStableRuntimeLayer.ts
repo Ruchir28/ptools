@@ -75,13 +75,13 @@ export const HostStableRuntimeLayer = (
   | McpConnector
   | SandboxRuntime
 > => {
-  const stableServices = ConfiguredHostContextRunner.Default.pipe(
+  const stableServices = ConfiguredHostContextRunner.layer.pipe(
     Layer.provideMerge(HostStableSharedStoresLayer),
     // Re-export the platform-owned identity: it is both captured by the runner
     // and part of the stable runtime surface used by the handler and callers.
-    Layer.provideMerge(Layer.service(HostIdentity)),
+    Layer.provideMerge(Layer.effect(HostIdentity, HostIdentity)),
   );
-  const handler = HostInstanceHandler.Default(options).pipe(
+  const handler = HostInstanceHandler.layer(options).pipe(
     Layer.provide(stableServices),
   );
   return Layer.mergeAll(stableServices, handler);

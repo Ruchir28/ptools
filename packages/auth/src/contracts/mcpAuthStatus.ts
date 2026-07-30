@@ -8,7 +8,7 @@
 import { Schema } from "effect";
 
 /** Canonical public status values for upstream MCP authentication. */
-export const McpAuthStatusValue = Schema.Literal(
+export const McpAuthStatusValue = Schema.Literals([
   "connected",
   "requires_auth",
   "auth_in_progress",
@@ -17,14 +17,14 @@ export const McpAuthStatusValue = Schema.Literal(
   "static_credentials",
   "unsupported_auth",
   "disabled",
-);
+]);
 export type McpAuthStatusValue = Schema.Schema.Type<typeof McpAuthStatusValue>;
 
 /** Per-server MCP authentication status exposed at host and Code Mode boundaries. */
 export const McpAuthServerStatus = Schema.Struct({
   serverName: Schema.String,
   jsServerName: Schema.String,
-  transport: Schema.Literal("http", "stdio"),
+  transport: Schema.Literals(["http", "stdio"]),
   status: McpAuthStatusValue,
   authUrl: Schema.optional(Schema.String),
   authorizeUrl: Schema.optional(Schema.String),

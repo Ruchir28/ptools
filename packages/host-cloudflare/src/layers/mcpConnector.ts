@@ -13,7 +13,7 @@ import {
 } from "@ptools/mcp-registry";
 import { Context, Effect, Layer, Option, Scope } from "effect";
 
-type AuthCoordinatorService = Context.Tag.Service<typeof AuthCoordinator>;
+type AuthCoordinatorService = Context.Service.Shape<typeof AuthCoordinator>;
 
 export const CloudflareHttpMcpConnectorLayer: Layer.Layer<HttpMcpConnector> =
   Layer.succeed(HttpMcpConnector, {
@@ -115,7 +115,7 @@ const closeConnectedClient = (
         serverName: connected.serverName,
         cause,
       }),
-  }).pipe(Effect.catchAll(() => Effect.void));
+  }).pipe(Effect.catch(() => Effect.void));
 
 const createHttpTransport = (
   serverName: string,

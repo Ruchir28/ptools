@@ -20,7 +20,7 @@ export type HostCodeModeRequest = Schema.Schema.Type<
 >;
 
 /** Operation-owned result for a dispatched Code Mode host operation. */
-export const HostCodeModeResult = Schema.Union(
+export const HostCodeModeResult = Schema.Union([
   Schema.Struct({
     ok: Schema.Literal(true),
     response: CodeModeResponse,
@@ -28,14 +28,14 @@ export const HostCodeModeResult = Schema.Union(
   Schema.Struct({
     ok: Schema.Literal(false),
     error: Schema.Struct({
-      code: Schema.Literal(
+      code: Schema.Literals([
         "invalid_code_mode_request",
         "code_mode_server_failure",
-      ),
+      ]),
       message: Schema.String,
     }),
   }),
-);
+]);
 export type HostCodeModeResult = Schema.Schema.Type<typeof HostCodeModeResult>;
 
 /** Response for a dispatched code_mode operation. */

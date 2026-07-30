@@ -76,6 +76,30 @@ describe("ConfiguredHostContextRunner", () => {
     ).resolves.toBeDefined();
   });
 
+  it("does not invalidate a healthy context when an operation fails", async () => {
+    const connections = connectionTracker();
+    const runtime = makeRuntime(connections);
+    await storeHttpConfig(runtime);
+
+    const beforeFailure = await configuredAuth(runtime, "https://one.example");
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const runner = yield* ConfiguredHostContextRunner;
+        return yield* runner
+          .run(
+            { origin: "https://one.example" },
+            Effect.fail("operation failed"),
+          )
+          .pipe(Effect.result);
+      }),
+    );
+    const afterFailure = await configuredAuth(runtime, "https://one.example");
+
+    expect(result._tag).toBe("Failure");
+    expect(afterFailure).toBe(beforeFailure);
+    expect(connections.acquired).toEqual([1]);
+  });
+
   it("keeps an invalidated context alive until its in-flight lease completes", async () => {
     const connections = connectionTracker();
     const runtime = makeRuntime(connections);
@@ -86,7 +110,7 @@ describe("ConfiguredHostContextRunner", () => {
         const runner = yield* ConfiguredHostContextRunner;
         const entered = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
-        const operation = yield* Effect.fork(
+        const operation = yield* Effect.forkChild(
           runner.run(
             { origin: "https://one.example" },
             Effect.gen(function* () {
@@ -118,7 +142,7 @@ describe("ConfiguredHostContextRunner", () => {
         const runner = yield* ConfiguredHostContextRunner;
         const entered = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
-        const firstOrigin = yield* Effect.fork(
+        const firstOrigin = yield* Effect.forkChild(
           runner.run(
             { origin: "https://one.example" },
             Effect.gen(function* () {
@@ -145,7 +169,7 @@ describe("ConfiguredHostContextRunner", () => {
     const connectStarted = await Effect.runPromise(Deferred.make<void>());
     const allowConnect = await Effect.runPromise(Deferred.make<void>());
     const connections = connectionTracker(
-      Effect.zipRight(
+      Effect.andThen(
         Deferred.succeed(connectStarted, undefined),
         Deferred.await(allowConnect),
       ),
@@ -156,10 +180,10 @@ describe("ConfiguredHostContextRunner", () => {
     await runtime.runPromise(
       Effect.gen(function* () {
         const runner = yield* ConfiguredHostContextRunner;
-        const first = yield* Effect.fork(
+        const first = yield* Effect.forkChild(
           runner.run({ origin: "https://one.example" }, AuthCoordinator),
         );
-        const second = yield* Effect.fork(
+        const second = yield* Effect.forkChild(
           runner.run({ origin: "https://one.example" }, AuthCoordinator),
         );
 
@@ -303,7 +327,7 @@ const memoryStorage = (): HostStorageOperations => {
   const values = new Map<string, string>();
 
   return {
-    get: (key) => Effect.sync(() => Option.fromNullable(values.get(key))),
+    get: (key) => Effect.sync(() => Option.fromNullishOr(values.get(key))),
     put: (key, value) =>
       Effect.sync(() => {
         values.set(key, value);

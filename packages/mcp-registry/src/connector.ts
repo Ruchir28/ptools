@@ -10,7 +10,7 @@ export interface ConnectMcpInput {
 }
 
 /** Platform-selected connector; HTTP connections consume configured auth state. */
-export class McpConnector extends Context.Tag("@ptools/McpConnector")<
+export class McpConnector extends Context.Service<
   McpConnector,
   {
     readonly connect: (
@@ -21,20 +21,20 @@ export class McpConnector extends Context.Tag("@ptools/McpConnector")<
       Scope.Scope | AuthCoordinator
     >;
   }
->() {}
+>()("@ptools/McpConnector") {}
 
 /** Platform stdio transport primitive. It does not require auth services. */
-export class StdioMcpConnector extends Context.Tag("@ptools/StdioMcpConnector")<
+export class StdioMcpConnector extends Context.Service<
   StdioMcpConnector,
   {
     readonly connect: (
       input: ConnectMcpInput,
     ) => Effect.Effect<ConnectedMcpClient, McpConnectionError, Scope.Scope>;
   }
->() {}
+>()("@ptools/StdioMcpConnector") {}
 
 /** Platform HTTP transport primitive that receives configured auth at call time. */
-export class HttpMcpConnector extends Context.Tag("@ptools/HttpMcpConnector")<
+export class HttpMcpConnector extends Context.Service<
   HttpMcpConnector,
   {
     readonly connect: (
@@ -45,7 +45,7 @@ export class HttpMcpConnector extends Context.Tag("@ptools/HttpMcpConnector")<
       Scope.Scope | AuthCoordinator
     >;
   }
->() {}
+>()("@ptools/HttpMcpConnector") {}
 
 export const BaseMcpConnectorLive: Layer.Layer<
   McpConnector,

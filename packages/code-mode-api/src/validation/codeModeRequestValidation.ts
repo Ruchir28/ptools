@@ -107,12 +107,16 @@ export const parseExecuteInput = (
 ): Effect.Effect<CodeModeExecuteRequest, CodeModeInvalidRequestError> =>
   decode(CodeModeExecuteRequest, input, "execute input");
 
-const decode = <A, I, R>(
-  schema: Schema.Schema<A, I, R>,
+const decode = <S extends Schema.Constraint>(
+  schema: S,
   input: unknown,
   label: string,
-): Effect.Effect<A, CodeModeInvalidRequestError, R> =>
-  Schema.decodeUnknown(schema)(input).pipe(
+): Effect.Effect<
+  S["Type"],
+  CodeModeInvalidRequestError,
+  S["DecodingServices"]
+> =>
+  Schema.decodeUnknownEffect(schema)(input).pipe(
     Effect.mapError(
       (cause) =>
         new CodeModeInvalidRequestError({

@@ -15,7 +15,7 @@ import {
   type CodeModeResponse,
 } from "@ptools/code-mode-api";
 import { CodeModeClient } from "@ptools/code-mode-api/effect";
-import { Effect, Option, Runtime, Scope } from "effect";
+import { Effect, Option, Scope } from "effect";
 import { z } from "zod";
 
 const SearchProvidersInputSchema = {
@@ -198,10 +198,10 @@ export const serveMcpWithCodeModeClientService: Effect.Effect<
   CodeModeClient | Scope.Scope
 > = Effect.gen(function* () {
   const client = yield* CodeModeClient;
-  const runtime = yield* Effect.runtime<never>();
+  const services = yield* Effect.context<never>();
 
   yield* runMcpServer({
-    call: (request) => Runtime.runPromise(runtime)(client.call(request)),
+    call: (request) => Effect.runPromiseWith(services)(client.call(request)),
   });
 });
 
@@ -257,33 +257,29 @@ export const registerCodeModeTools = (
     },
   );
 
-  server.registerTool(
-    "refresh",
-    CodeModeToolDefinitions.refresh,
-    async () => {
-      const result = await callClient(client, { operation: "refresh" });
+  server.registerTool("refresh", CodeModeToolDefinitions.refresh, async () => {
+    const result = await callClient(client, { operation: "refresh" });
 
-      return result.ok
-        ? {
-            content: [
-              {
-                type: "text" as const,
-                text: "Refreshed upstream MCP registry.",
-              },
-            ],
-            structuredContent: toStructuredContent(result.output),
-          }
-        : toToolError(result.cause);
-    },
-  );
+    return result.ok
+      ? {
+          content: [
+            {
+              type: "text" as const,
+              text: "Refreshed upstream MCP registry.",
+            },
+          ],
+          structuredContent: toStructuredContent(result.output),
+        }
+      : toToolError(result.cause);
+  });
 
   server.registerTool(
     "search_providers",
     CodeModeToolDefinitions.searchProviders,
     async ({ query, limit }) => {
       const request = CodeModeSearchProvidersRequest.make({
-        query: Option.fromNullable(query),
-        limit: Option.fromNullable(limit),
+        query: Option.fromNullishOr(query),
+        limit: Option.fromNullishOr(limit),
       });
       const result = await callClient(client, {
         operation: "search_providers",
@@ -310,8 +306,8 @@ export const registerCodeModeTools = (
     async ({ query, provider, limit }) => {
       const request = CodeModeSearchRequest.make({
         query,
-        provider: Option.fromNullable(provider),
-        limit: Option.fromNullable(limit),
+        provider: Option.fromNullishOr(provider),
+        limit: Option.fromNullishOr(limit),
       });
       const result = await callClient(client, {
         operation: "search",
@@ -359,7 +355,7 @@ export const registerCodeModeTools = (
     async ({ code, timeoutMs }) => {
       const request = CodeModeExecuteRequest.make({
         code,
-        timeoutMs: Option.fromNullable(timeoutMs),
+        timeoutMs: Option.fromNullishOr(timeoutMs),
       });
       const result = await callClient(client, {
         operation: "execute",
@@ -437,7 +433,7 @@ const callClient = async <Operation extends CodeModeRequest["operation"]>(
   }
 };
 
-const waitForProcessClose: Effect.Effect<void> = Effect.async<void>(
+const waitForProcessClose: Effect.Effect<void> = Effect.callback<void>(
   (resume) => {
     const done = (): void => {
       process.stdin.off("close", done);

@@ -12,10 +12,7 @@ import { StringRecord } from "./configSchemaFields.js";
 export class ResolvedExecutorConfig extends Schema.Class<ResolvedExecutorConfig>(
   "ResolvedExecutorConfig",
 )({
-  defaultTimeoutMs: Schema.optionalWith(Schema.Number, {
-    exact: true,
-    as: "Option",
-  }),
+  defaultTimeoutMs: Schema.OptionFromOptionalKey(Schema.Number),
 }) {
   declare private readonly _resolvedExecutorConfigBrand: void;
 }
@@ -25,24 +22,12 @@ export class ResolvedHttpMcpAuthConfig extends Schema.Class<ResolvedHttpMcpAuthC
   "ResolvedHttpMcpAuthConfig",
 )({
   type: Schema.Literal("oauth"),
-  scope: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  resourceMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientId: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
-  clientSecret: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  clientMetadataUrl: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
-  redirectUri: Schema.optionalWith(Schema.String, {
-    exact: true,
-    as: "Option",
-  }),
+  scope: Schema.OptionFromOptionalKey(Schema.String),
+  resourceMetadataUrl: Schema.OptionFromOptionalKey(Schema.String),
+  clientId: Schema.OptionFromOptionalKey(Schema.String),
+  clientSecret: Schema.OptionFromOptionalKey(Schema.String),
+  clientMetadataUrl: Schema.OptionFromOptionalKey(Schema.String),
+  redirectUri: Schema.OptionFromOptionalKey(Schema.String),
 }) {
   declare private readonly _resolvedHttpMcpAuthConfigBrand: void;
 }
@@ -51,17 +36,11 @@ export class ResolvedHttpMcpAuthConfig extends Schema.Class<ResolvedHttpMcpAuthC
 export class ResolvedStdioMcpConfig extends Schema.Class<ResolvedStdioMcpConfig>(
   "ResolvedStdioMcpConfig",
 )({
-  transport: Schema.Literal("stdio").pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => "stdio"),
-  ),
+  transport: Schema.tag("stdio"),
   command: Schema.String,
-  args: Schema.optionalWith(Schema.Array(Schema.String), {
-    exact: true,
-    as: "Option",
-  }),
-  env: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  cwd: Schema.optionalWith(Schema.String, { exact: true, as: "Option" }),
+  args: Schema.OptionFromOptionalKey(Schema.Array(Schema.String)),
+  env: Schema.OptionFromOptionalKey(StringRecord),
+  cwd: Schema.OptionFromOptionalKey(Schema.String),
 }) {
   declare private readonly _resolvedStdioMcpConfigBrand: void;
 }
@@ -70,16 +49,10 @@ export class ResolvedStdioMcpConfig extends Schema.Class<ResolvedStdioMcpConfig>
 export class ResolvedHttpMcpConfig extends Schema.Class<ResolvedHttpMcpConfig>(
   "ResolvedHttpMcpConfig",
 )({
-  transport: Schema.Literal("http").pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => "http"),
-  ),
+  transport: Schema.tag("http"),
   url: Schema.String,
-  headers: Schema.optionalWith(StringRecord, { exact: true, as: "Option" }),
-  auth: Schema.optionalWith(ResolvedHttpMcpAuthConfig, {
-    exact: true,
-    as: "Option",
-  }),
+  headers: Schema.OptionFromOptionalKey(StringRecord),
+  auth: Schema.OptionFromOptionalKey(ResolvedHttpMcpAuthConfig),
 }) {
   declare private readonly _resolvedHttpMcpConfigBrand: void;
 }
@@ -94,14 +67,11 @@ export type ResolvedMcpServers = Readonly<Record<string, ResolvedMcpConfig>>;
 export class ResolvedPtoolsConfig extends Schema.Class<ResolvedPtoolsConfig>(
   "ResolvedPtoolsConfig",
 )({
-  mcpServers: Schema.Record({
-    key: Schema.String,
-    value: Schema.Union(ResolvedStdioMcpConfig, ResolvedHttpMcpConfig),
-  }),
-  executor: Schema.optionalWith(ResolvedExecutorConfig, {
-    exact: true,
-    as: "Option",
-  }),
+  mcpServers: Schema.Record(
+    Schema.String,
+    Schema.Union([ResolvedStdioMcpConfig, ResolvedHttpMcpConfig]),
+  ),
+  executor: Schema.OptionFromOptionalKey(ResolvedExecutorConfig),
 }) {
   declare private readonly _resolvedPtoolsConfigBrand: void;
 }

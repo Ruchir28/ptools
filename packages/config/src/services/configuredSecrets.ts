@@ -14,7 +14,7 @@
  *   platform parses request JSON
  *   calls ConfiguredSecretStore.replaceAll({ secrets })
  *
- * ConfiguredSecretStore.Default
+ * ConfiguredSecretStore.layer
  *   writes secret key: configured-secrets/values/OPENAI_API_KEY
  *   writes non-secret exact index: configured-secrets/index
  *
@@ -28,12 +28,19 @@
  * not child keys. This store therefore owns stale deletion and index publishing
  * so Cloudflare and Node cannot drift on the replacement protocol.
  */
-import { Data, Effect, Option, Schema } from "effect";
+import {
+  Context,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Schema,
+  Semaphore,
+} from "effect";
 import { HostSecretStorage, HostStateStorage } from "./hostStorage.js";
 
 /** Prefix for individual configured-secret values stored in HostSecretStorage. */
-export const CONFIGURED_SECRET_VALUE_KEY_PREFIX =
-  "configured-secrets/values/";
+export const CONFIGURED_SECRET_VALUE_KEY_PREFIX = "configured-secrets/values/";
 
 /**
  * Exact key that stores the complete set of configured-secret value keys.
@@ -49,7 +56,9 @@ export const CONFIGURED_SECRET_INDEX_KEY = "configured-secrets/index";
 export const configuredSecretValueKey = (name: string): string =>
   `${CONFIGURED_SECRET_VALUE_KEY_PREFIX}${encodeURIComponent(name)}`;
 
-const ConfiguredSecretIndexJson = Schema.parseJson(Schema.Array(Schema.String));
+const ConfiguredSecretIndexJson = Schema.fromJsonString(
+  Schema.Array(Schema.String),
+);
 
 export class ConfiguredSecretStoreError extends Data.TaggedError(
   "ConfiguredSecretStoreError",
@@ -85,7 +94,10 @@ export interface ConfiguredSecretStoreService {
    */
   readonly replaceAll: (input: {
     readonly secrets: Readonly<Record<string, string>>;
-  }) => Effect.Effect<ConfiguredSecretReplaceResult, ConfiguredSecretStoreError>;
+  }) => Effect.Effect<
+    ConfiguredSecretReplaceResult,
+    ConfiguredSecretStoreError
+  >;
 }
 
 /**
@@ -96,16 +108,16 @@ export interface ConfiguredSecretStoreService {
  * Platforms only provide host-scoped `HostStateStorage` / `HostSecretStorage`;
  * they do not choose configured-secret key names or replacement behavior.
  */
-export class ConfiguredSecretStore extends Effect.Service<ConfiguredSecretStore>()(
+export class ConfiguredSecretStore extends Context.Service<ConfiguredSecretStore>()(
   "@ptools/ConfiguredSecretStore",
   {
-    effect: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       const stateStorage = yield* HostStateStorage;
       const secretStorage = yield* HostSecretStorage;
       // `replaceAll` is an index-backed, multi-write protocol. Serialize the
       // complete protocol per host-scoped store instance so two replacements
       // cannot interleave their index reads, value writes, and final publish.
-      const replacementSemaphore = yield* Effect.makeSemaphore(1);
+      const replacementSemaphore = yield* Semaphore.make(1);
 
       return {
         get: (name: string) =>
@@ -152,7 +164,9 @@ export class ConfiguredSecretStore extends Effect.Service<ConfiguredSecretStore>
                   Option.match({
                     onNone: () => Effect.succeed([] as ReadonlyArray<string>),
                     onSome: (rawIndex) =>
-                      Schema.decodeUnknown(ConfiguredSecretIndexJson)(rawIndex).pipe(
+                      Schema.decodeUnknownEffect(ConfiguredSecretIndexJson)(
+                        rawIndex,
+                      ).pipe(
                         Effect.mapError(
                           (cause) =>
                             new ConfiguredSecretStoreError({
@@ -220,4 +234,6 @@ export class ConfiguredSecretStore extends Effect.Service<ConfiguredSecretStore>
       } satisfies ConfiguredSecretStoreService;
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}

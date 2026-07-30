@@ -5,23 +5,22 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { HostIdentity } from "@ptools/host-context";
-import { Data, Effect, Layer, Option, Runtime } from "effect";
+import { Context, Data, Effect, Layer, Option } from "effect";
 import {
   type AuthCoordinatorOAuthProvider,
   AuthCoordinatorPolicy,
   AuthProviderFactory,
 } from "../coordinatorCore.js";
-import { AuthError } from "../authErrors.js";
+import { AuthError, CredentialError } from "../authErrors.js";
 import type { HttpMcpConfig } from "../authTypes.js";
 import {
   McpOAuthCredentialStore,
   type McpOAuthCredentialIdentity,
-  type McpOAuthCredentialStoreService,
+  type McpOAuthCredentialInvalidationScope,
 } from "./mcpOAuthCredentialStore.js";
-import {
-  McpOAuthStateStore,
-  type McpOAuthStateStoreService,
-} from "./mcpOAuthStateStore.js";
+import { McpOAuthStateStore } from "./mcpOAuthStateStore.js";
+
+type McpOAuthProviderServices = McpOAuthCredentialStore | McpOAuthStateStore;
 
 /**
  * Shared factory for MCP SDK OAuth providers.
@@ -40,69 +39,201 @@ export const McpOAuthProviderFactoryLayer: Layer.Layer<
 > = Layer.effect(
   AuthProviderFactory,
   Effect.gen(function* () {
-    const oauthCredentials = yield* McpOAuthCredentialStore;
-    const oauthStateStore = yield* McpOAuthStateStore;
     const identity = yield* HostIdentity;
     const policy = yield* AuthCoordinatorPolicy;
-    const runtime = yield* Effect.runtime<never>();
-    const dependencies: McpOAuthProviderDependencies = {
-      oauthCredentials,
-      oauthStateStore,
-      hostId: identity.hostId,
-      callbackUrl: policy.callbackUrl,
-      runtime,
-    };
+    const services = yield* Effect.context<McpOAuthProviderServices>();
 
     return AuthProviderFactory.of({
       makeProvider: (input) =>
         Effect.succeed(
           new McpOAuthProvider({
-            dependencies,
             serverName: input.serverName,
             config: input.config,
-            onAuthorizationUrl: input.onAuthorizationUrl,
+            callbackUrl: policy.callbackUrl,
+            operations: makeMcpOAuthProviderOperations({
+              services,
+              hostId: identity.hostId,
+              serverName: input.serverName,
+              serverUrl: input.config.url,
+              onAuthorizationUrl: input.onAuthorizationUrl,
+            }),
           }),
         ),
     });
   }),
 );
 
-export interface McpOAuthProviderDependencies {
-  readonly oauthCredentials: ContextMcpOAuthCredentialStore;
-  readonly oauthStateStore: ContextMcpOAuthStateStore;
-  readonly hostId: string;
-  readonly callbackUrl: (serverName: string) => string;
-  /** Runtime captured when the configured auth layer is built. */
-  readonly runtime: Runtime.Runtime<never>;
+/**
+ * Identity-bound operations used by the plain-JavaScript MCP SDK adapter.
+ *
+ * The factory creates these callbacks while it has access to the configured
+ * Effect services. The provider can therefore implement the SDK contract
+ * without retaining a broad Effect context or the underlying stores.
+ */
+export interface McpOAuthProviderOperations {
+  readonly createState: () => Promise<string>;
+  readonly getClientInformation: () => Promise<
+    OAuthClientInformationMixed | undefined
+  >;
+  readonly setClientInformation: (
+    clientInformation: OAuthClientInformationMixed,
+  ) => Promise<void>;
+  readonly getTokens: () => Promise<OAuthTokens | undefined>;
+  readonly setTokens: (tokens: OAuthTokens) => Promise<void>;
+  readonly hasStoredCredentials: () => Effect.Effect<boolean, CredentialError>;
+  readonly notifyAuthorizationUrl: (authorizationUrl: URL) => void;
+  readonly setCodeVerifier: (codeVerifier: string) => Promise<void>;
+  readonly getCodeVerifier: () => Promise<string>;
+  readonly invalidateCredentials: (
+    scope: McpOAuthCredentialInvalidationScope,
+  ) => Promise<void>;
+  readonly setDiscoveryState: (state: OAuthDiscoveryState) => Promise<void>;
+  readonly getDiscoveryState: () => Promise<OAuthDiscoveryState | undefined>;
 }
 
-type ContextMcpOAuthCredentialStore = McpOAuthCredentialStoreService;
-type ContextMcpOAuthStateStore = McpOAuthStateStoreService;
+/** Bind one provider identity to the already-built, typed Effect context. */
+const makeMcpOAuthProviderOperations = (options: {
+  readonly services: Context.Context<McpOAuthProviderServices>;
+  readonly hostId: string;
+  readonly serverName: string;
+  readonly serverUrl: string;
+  readonly onAuthorizationUrl: (
+    authorizationUrl: URL,
+  ) => Effect.Effect<void, AuthError>;
+}): McpOAuthProviderOperations => {
+  const credentialIdentity: McpOAuthCredentialIdentity = {
+    serverName: options.serverName,
+    serverUrl: options.serverUrl,
+  };
+  const runPromise = Effect.runPromiseWith(options.services);
+  const runSync = Effect.runSyncWith(options.services);
+  const withServices = Effect.provide(options.services);
+
+  return {
+    createState: () =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthStateStore = yield* McpOAuthStateStore;
+
+          return yield* oauthStateStore.sign({
+            payload: {
+              provider: options.serverName,
+              hostId: options.hostId,
+              serverName: options.serverName,
+              nonce: crypto.randomUUID(),
+              issuedAt: new Date().toISOString(),
+              expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+            },
+          });
+        }),
+      ),
+    getClientInformation: () =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials
+            .getClientInformation(credentialIdentity)
+            .pipe(Effect.map(Option.getOrUndefined));
+        }),
+      ),
+    setClientInformation: (clientInformation) =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials.setClientInformation(
+            credentialIdentity,
+            clientInformation,
+          );
+        }),
+      ),
+    getTokens: () =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials
+            .getTokens(credentialIdentity)
+            .pipe(Effect.map(Option.getOrUndefined));
+        }),
+      ),
+    setTokens: (tokens) =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials.setTokens(credentialIdentity, tokens);
+        }),
+      ),
+    hasStoredCredentials: () =>
+      Effect.gen(function* () {
+        const oauthCredentials = yield* McpOAuthCredentialStore;
+        return yield* oauthCredentials.hasStoredCredentials(credentialIdentity);
+      }).pipe(withServices),
+    notifyAuthorizationUrl: (authorizationUrl) => {
+      runSync(options.onAuthorizationUrl(authorizationUrl));
+    },
+    setCodeVerifier: (codeVerifier) =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials.setCodeVerifier(
+            credentialIdentity,
+            codeVerifier,
+          );
+        }),
+      ),
+    getCodeVerifier: () =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials.getCodeVerifier(credentialIdentity);
+        }),
+      ),
+    invalidateCredentials: (scope) =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials.invalidate(credentialIdentity, scope);
+        }),
+      ),
+    setDiscoveryState: (state) =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials.setDiscoveryState(
+            credentialIdentity,
+            state,
+          );
+        }),
+      ),
+    getDiscoveryState: () =>
+      runPromise(
+        Effect.gen(function* () {
+          const oauthCredentials = yield* McpOAuthCredentialStore;
+          return yield* oauthCredentials
+            .getDiscoveryState(credentialIdentity)
+            .pipe(Effect.map(Option.getOrUndefined));
+        }),
+      ),
+  };
+};
 
 /** MCP SDK OAuth provider adapter for one configured HTTP MCP server. */
 export class McpOAuthProvider implements AuthCoordinatorOAuthProvider {
-  readonly #dependencies: McpOAuthProviderDependencies;
+  readonly #operations: McpOAuthProviderOperations;
+  readonly #callbackUrl: (serverName: string) => string;
   readonly #serverName: string;
-  readonly #serverUrl: string;
   readonly #auth: OAuthProviderAuth;
-  readonly #onAuthorizationUrl: (
-    authorizationUrl: URL,
-  ) => Effect.Effect<void, AuthError>;
   readonly clientMetadataUrl?: string;
 
   constructor(options: {
-    readonly dependencies: McpOAuthProviderDependencies;
+    readonly operations: McpOAuthProviderOperations;
+    readonly callbackUrl: (serverName: string) => string;
     readonly serverName: string;
     readonly config: HttpMcpConfig;
-    readonly onAuthorizationUrl: (
-      authorizationUrl: URL,
-    ) => Effect.Effect<void, AuthError>;
   }) {
-    this.#dependencies = options.dependencies;
+    this.#operations = options.operations;
+    this.#callbackUrl = options.callbackUrl;
     this.#serverName = options.serverName;
-    this.#serverUrl = options.config.url;
     this.#auth = makeOAuthProviderAuth(options.config);
-    this.#onAuthorizationUrl = options.onAuthorizationUrl;
 
     const clientMetadataUrl = Option.flatMap(
       options.config.auth,
@@ -115,7 +246,7 @@ export class McpOAuthProvider implements AuthCoordinatorOAuthProvider {
 
   get redirectUrl(): string {
     return redirectUrlFor(
-      this.#dependencies,
+      { callbackUrl: this.#callbackUrl },
       this.#serverName,
       this.#auth.redirectUri,
     );
@@ -143,30 +274,12 @@ export class McpOAuthProvider implements AuthCoordinatorOAuthProvider {
   }
 
   state(): Promise<string> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthStateStore.sign({
-        payload: {
-          provider: this.#serverName,
-          hostId: this.#dependencies.hostId,
-          serverName: this.#serverName,
-          nonce: crypto.randomUUID(),
-          issuedAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        },
-      }),
-    );
+    return this.#operations.createState();
   }
 
   clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
     return ClientRegistration.$match(this.#auth.clientRegistration, {
-      Dynamic: () =>
-        Runtime.runPromise(
-          this.#dependencies.runtime,
-          this.#dependencies.oauthCredentials
-            .getClientInformation(this.#credentialIdentity())
-            .pipe(Effect.map(Option.getOrUndefined)),
-        ),
+      Dynamic: this.#operations.getClientInformation,
       PreRegistered: ({ clientId, clientSecret }) =>
         Promise.resolve({
           client_id: clientId,
@@ -181,102 +294,45 @@ export class McpOAuthProvider implements AuthCoordinatorOAuthProvider {
   saveClientInformation(
     clientInformation: OAuthClientInformationMixed,
   ): Promise<void> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials.setClientInformation(
-        this.#credentialIdentity(),
-        clientInformation,
-      ),
-    );
+    return this.#operations.setClientInformation(clientInformation);
   }
 
   tokens(): Promise<OAuthTokens | undefined> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials
-        .getTokens(this.#credentialIdentity())
-        .pipe(Effect.map(Option.getOrUndefined)),
-    );
+    return this.#operations.getTokens();
   }
 
   saveTokens(tokens: OAuthTokens): Promise<void> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials.setTokens(
-        this.#credentialIdentity(),
-        tokens,
-      ),
-    );
+    return this.#operations.setTokens(tokens);
   }
 
   hasStoredCredentials() {
-    return this.#dependencies.oauthCredentials.hasStoredCredentials(
-      this.#credentialIdentity(),
-    );
+    return this.#operations.hasStoredCredentials();
   }
 
   redirectToAuthorization(authorizationUrl: URL): void {
-    Runtime.runSync(
-      this.#dependencies.runtime,
-      this.#onAuthorizationUrl(authorizationUrl),
-    );
+    this.#operations.notifyAuthorizationUrl(authorizationUrl);
   }
 
   saveCodeVerifier(codeVerifier: string): Promise<void> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials.setCodeVerifier(
-        this.#credentialIdentity(),
-        codeVerifier,
-      ),
-    );
+    return this.#operations.setCodeVerifier(codeVerifier);
   }
 
   codeVerifier(): Promise<string> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials.getCodeVerifier(
-        this.#credentialIdentity(),
-      ),
-    );
+    return this.#operations.getCodeVerifier();
   }
 
   invalidateCredentials(
     scope: "all" | "client" | "tokens" | "verifier" | "discovery",
   ): Promise<void> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials.invalidate(
-        this.#credentialIdentity(),
-        scope,
-      ),
-    );
+    return this.#operations.invalidateCredentials(scope);
   }
 
   saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials.setDiscoveryState(
-        this.#credentialIdentity(),
-        state,
-      ),
-    );
+    return this.#operations.setDiscoveryState(state);
   }
 
   discoveryState(): Promise<OAuthDiscoveryState | undefined> {
-    return Runtime.runPromise(
-      this.#dependencies.runtime,
-      this.#dependencies.oauthCredentials
-        .getDiscoveryState(this.#credentialIdentity())
-        .pipe(Effect.map(Option.getOrUndefined)),
-    );
-  }
-
-  #credentialIdentity(): McpOAuthCredentialIdentity {
-    return {
-      serverName: this.#serverName,
-      serverUrl: this.#serverUrl,
-    };
+    return this.#operations.getDiscoveryState();
   }
 }
 
@@ -317,7 +373,9 @@ const makeOAuthProviderAuth = (config: HttpMcpConfig): OAuthProviderAuth => {
 };
 
 export const redirectUrlFor = (
-  dependencies: Pick<McpOAuthProviderDependencies, "callbackUrl">,
+  dependencies: {
+    readonly callbackUrl: (serverName: string) => string;
+  },
   serverName: string,
   redirectUri: Option.Option<string>,
 ): string =>

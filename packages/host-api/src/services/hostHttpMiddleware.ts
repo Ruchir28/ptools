@@ -22,7 +22,7 @@ import {
   HttpApiMiddleware,
   HttpApiSchema,
   HttpApiSecurity,
-} from "@effect/platform";
+} from "effect/unstable/httpapi";
 import type { HostApiCaller } from "../contracts/hostOperationDispatch.js";
 import { Context, Schema } from "effect";
 
@@ -34,20 +34,18 @@ import { Context, Schema } from "effect";
  * normalized caller without knowing where the token came from or how it was
  * checked.
  */
-export class VerifiedHostApiCaller extends Context.Tag(
-  "@ptools/VerifiedHostApiCaller",
-)<
+export class VerifiedHostApiCaller extends Context.Service<
   VerifiedHostApiCaller,
   {
     readonly caller: HostApiCaller;
   }
->() {}
+>()("@ptools/VerifiedHostApiCaller") {}
 
 /** HTTP 401 failure for credentialed Host API routes. */
-export class HostApiUnauthorized extends Schema.TaggedError<HostApiUnauthorized>()(
+export class HostApiUnauthorized extends Schema.TaggedErrorClass<HostApiUnauthorized>()(
   "HostApiUnauthorized",
   { message: Schema.String },
-  HttpApiSchema.annotations({ status: 401 }),
+  { httpApiStatus: 401 },
 ) {}
 
 /**
@@ -62,16 +60,15 @@ export class HostApiUnauthorized extends Schema.TaggedError<HostApiUnauthorized>
  * from, so this package must not implement a generic token verifier or read any
  * platform-specific env/config values.
  */
-export class RequireHostApiAccess extends HttpApiMiddleware.Tag<RequireHostApiAccess>()(
-  "@ptools/RequireHostApiAccess",
-  {
-    failure: HostApiUnauthorized,
-    provides: VerifiedHostApiCaller,
-    security: {
-      bearer: HttpApiSecurity.bearer,
-    },
+export class RequireHostApiAccess extends HttpApiMiddleware.Service<
+  RequireHostApiAccess,
+  { provides: VerifiedHostApiCaller }
+>()("@ptools/RequireHostApiAccess", {
+  error: HostApiUnauthorized,
+  security: {
+    bearer: HttpApiSecurity.bearer,
   },
-) {}
+}) {}
 
 /**
  * Request ingress facts needed by shared Host HTTP handlers.
@@ -81,13 +78,13 @@ export class RequireHostApiAccess extends HttpApiMiddleware.Tag<RequireHostApiAc
  * operation adapters use it for auth links and OAuth `redirect_uri` values, but
  * they do not infer it from Cloudflare/Node request objects themselves.
  */
-export class HostHttpIngress extends Context.Tag("@ptools/HostHttpIngress")<
+export class HostHttpIngress extends Context.Service<
   HostHttpIngress,
   {
     /** Public base URL used for auth links and OAuth redirect_uri values. */
     readonly publicOrigin: string;
   }
->() {}
+>()("@ptools/HostHttpIngress") {}
 
 /**
  * Middleware contract that provides normalized HTTP ingress facts per request.
@@ -97,9 +94,7 @@ export class HostHttpIngress extends Context.Tag("@ptools/HostHttpIngress")<
  * (`HttpServerRequest` for Web/Node handlers, or an explicit configured origin)
  * and provide `HostHttpIngress` only to the current handler fiber.
  */
-export class ProvideHostHttpIngress extends HttpApiMiddleware.Tag<ProvideHostHttpIngress>()(
-  "@ptools/ProvideHostHttpIngress",
-  {
-    provides: HostHttpIngress,
-  },
-) {}
+export class ProvideHostHttpIngress extends HttpApiMiddleware.Service<
+  ProvideHostHttpIngress,
+  { provides: HostHttpIngress }
+>()("@ptools/ProvideHostHttpIngress") {}
