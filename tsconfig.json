@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/host-context" },
+    { "path": "./packages/host-authorization" },
     { "path": "./packages/auth" },
     { "path": "./packages/config" },
     { "path": "./packages/core" },
