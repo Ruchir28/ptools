@@ -33,6 +33,9 @@ describe("host-authorization import boundary", () => {
     await expect(
       fileExists(join(packageRoot, "src/contracts/hostAccessOperations")),
     ).resolves.toBe(true);
+    await expect(
+      fileExists(join(packageRoot, "src/contracts/hostTokenOperations")),
+    ).resolves.toBe(true);
 
     const operationFiles = [
       "createMembership.ts",
@@ -52,6 +55,22 @@ describe("host-authorization import boundary", () => {
             packageRoot,
             "src/contracts/hostAccessOperations",
             operationFile,
+          ),
+        ),
+      ).resolves.toBe(true);
+    }
+
+    for (const tokenOperationFile of [
+      "issueHostToken.ts",
+      "verifyHostToken.ts",
+      "revokeHostToken.ts",
+    ]) {
+      await expect(
+        fileExists(
+          join(
+            packageRoot,
+            "src/contracts/hostTokenOperations",
+            tokenOperationFile,
           ),
         ),
       ).resolves.toBe(true);
@@ -127,6 +146,7 @@ describe("host-authorization import boundary", () => {
       "@ptools/host-runtime",
       "better-auth",
       "drizzle-orm",
+      "prisma",
     ]) {
       expect(combined).not.toMatch(packageImport(forbiddenPackage));
     }
@@ -135,6 +155,7 @@ describe("host-authorization import boundary", () => {
     expect(combined).not.toContain("@cloudflare");
     expect(combined).not.toContain("alchemy");
     expect(combined).not.toContain("sqlite");
+    expect(combined).not.toMatch(/globalThis\.crypto|window\.crypto/);
   });
 });
 

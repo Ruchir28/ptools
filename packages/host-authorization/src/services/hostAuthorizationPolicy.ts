@@ -4,6 +4,7 @@ import {
   type HostPermission as HostPermissionValue,
 } from "../contracts/index.js";
 import { Effect, HashSet, Schema } from "effect";
+import type { HostTokenPermissionSelection } from "../contracts/hostToken.js";
 import { HostAuthorizationContext } from "./hostAuthorizationContext.js";
 
 /** Expected denial produced when a code-owned host policy does not pass. */
@@ -81,4 +82,18 @@ export const HostPolicies = {
   manageAuth: permission(HostPermissions.auth.manage),
   manageTokens: permission(HostPermissions.tokens.manage),
   manageMembers: permission(HostPermissions.members.manage),
+} as const;
+
+/**
+ * Policies for the Host API admission layer, not for `HostTokenService` itself.
+ * Issuance requires `tokens:manage` plus every permission being delegated, so a
+ * user cannot mint authority they do not currently hold. Revocation requires
+ * only `tokens:manage`. Admission resolves current human access, provides
+ * `HostAuthorizationContext`, runs one of these policies, and only then passes
+ * the admitted `UserSessionCaller` to the trusted lifecycle method.
+ */
+export const HostTokenPolicies = {
+  issue: (selection: HostTokenPermissionSelection): HostPolicy =>
+    all(HostPolicies.manageTokens, ...selection.map(permission)),
+  revoke: HostPolicies.manageTokens,
 } as const;

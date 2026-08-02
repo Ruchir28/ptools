@@ -29,12 +29,14 @@
  */
 import {
   HostPermissions,
+  HostTokenPermissionSelection,
   UserSessionCaller,
   type HostPermission,
 } from "../src/contracts/index.js";
 import {
   HostAuthorizationContext,
   HostPolicies,
+  HostTokenPolicies,
   all,
   any,
   permission,
@@ -91,6 +93,51 @@ describe("host authorization policies", () => {
     // Effect.runPromise executes the policy: it reads the context's
     // permission set, finds host.execute, and succeeds with void (undefined).
     await expect(Effect.runPromise(policyWithContext)).resolves.toBeUndefined();
+  });
+
+  /** Token issuance cannot delegate authority absent from the current human access snapshot. */
+  it("requires token management plus every explicitly delegated permission", async () => {
+    const selection = HostTokenPermissionSelection.make([
+      HostPermissions.host.read,
+      HostPermissions.host.execute,
+    ]);
+    const issue = HostTokenPolicies.issue(selection);
+
+    // The admitted caller has both management authority and every selected
+    // grant, so the composed issuance policy may proceed.
+    await expect(
+      Effect.runPromise(
+        provideTestAuthorizationContext(issue, [
+          HostPermissions.tokens.manage,
+          ...selection,
+        ]),
+      ),
+    ).resolves.toBeUndefined();
+
+    // Management permission alone is insufficient when even one delegated
+    // permission is absent; denial identifies the first missing selection.
+    await expect(
+      Effect.runPromise(
+        provideTestAuthorizationContext(issue, [
+          HostPermissions.tokens.manage,
+          HostPermissions.host.read,
+        ]).pipe(Effect.flip),
+      ),
+    ).resolves.toMatchObject({
+      requiredPermission: HostPermissions.host.execute,
+    });
+
+    // Revocation does not delegate grants, so its policy requires only the
+    // dedicated token-management permission.
+    await expect(
+      Effect.runPromise(
+        provideTestAuthorizationContext(HostTokenPolicies.revoke).pipe(
+          Effect.flip,
+        ),
+      ),
+    ).resolves.toMatchObject({
+      requiredPermission: HostPermissions.tokens.manage,
+    });
   });
 
   /** An absent permission becomes a typed denial containing the missing capability. */

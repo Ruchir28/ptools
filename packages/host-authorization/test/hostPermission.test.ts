@@ -103,12 +103,12 @@ describe("host caller principal contract", () => {
     expect(
       decodeStrict({
         _tag: "HostTokenCaller",
-        tokenId: "token-1",
+        tokenId: "00010203-0405-4607-8809-0a0b0c0d0e0f",
         hostId: "host-1",
       }),
     ).toEqual({
       _tag: "HostTokenCaller",
-      tokenId: "token-1",
+      tokenId: "00010203-0405-4607-8809-0a0b0c0d0e0f",
       hostId: "host-1",
     });
 
@@ -128,7 +128,7 @@ describe("host caller principal contract", () => {
     expect(() =>
       decodeStrict({
         _tag: "HostTokenCaller",
-        tokenId: "token-1",
+        tokenId: "00010203-0405-4607-8809-0a0b0c0d0e0f",
         hostId: "host-1",
         rawToken: "private-token",
       }),

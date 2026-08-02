@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { HostTokenId } from "./hostTokenIdentity.js";
 
 /** Human caller authenticated through a Better Auth session. */
 export const UserSessionCaller = Schema.TaggedStruct("UserSessionCaller", {
@@ -9,7 +10,7 @@ export type UserSessionCaller = Schema.Schema.Type<typeof UserSessionCaller>;
 
 /** Unattended caller authenticated through one persisted host-bound token. */
 export const HostTokenCaller = Schema.TaggedStruct("HostTokenCaller", {
-  tokenId: Schema.NonEmptyString,
+  tokenId: HostTokenId,
   hostId: Schema.NonEmptyString,
 });
 export type HostTokenCaller = Schema.Schema.Type<typeof HostTokenCaller>;

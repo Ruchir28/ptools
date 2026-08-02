@@ -5,4 +5,8 @@ export * from "./hostMemberAccess.js";
 export * from "./hostAccessOperations/index.js";
 export * from "./hostPermission.js";
 export * from "./hostRole.js";
+export * from "./hostToken.js";
+export * from "./hostTokenErrors.js";
+export * from "./hostTokenIdentity.js";
+export * from "./hostTokenOperations/index.js";
 export * from "./registeredHost.js";
