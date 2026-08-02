@@ -2,8 +2,11 @@
  * Shared authorization package-boundary coverage.
  *
  * What this proves:
- * 1. Wire contracts and Effect services retain distinct public source roles.
- * 2. The authorization kernel remains independent of authentication,
+ * 1. Domain values, operation contracts, and Effect services retain distinct
+ *    and discoverable source roles.
+ * 2. Every HostAccessStore operation is packaged from its semantic module and
+ *    returns domain successes without optional smart-constructor conventions.
+ * 3. The authorization kernel remains independent of authentication,
  *    persistence, HTTP, actor-runtime, and platform implementation packages.
  *
  * This test inspects real package source files. It does not build platform
@@ -27,6 +30,61 @@ describe("host-authorization import boundary", () => {
     await expect(fileExists(join(packageRoot, "src/internal"))).resolves.toBe(
       true,
     );
+    await expect(
+      fileExists(join(packageRoot, "src/contracts/hostAccessOperations")),
+    ).resolves.toBe(true);
+
+    const operationFiles = [
+      "createMembership.ts",
+      "createOwnedHost.ts",
+      "listHostRoles.ts",
+      "listUserHosts.ts",
+      "replaceMembershipRoles.ts",
+      "getHostRole.ts",
+      "getRegisteredHost.ts",
+      "resolveUserHostAccess.ts",
+    ] as const;
+
+    for (const operationFile of operationFiles) {
+      await expect(
+        fileExists(
+          join(
+            packageRoot,
+            "src/contracts/hostAccessOperations",
+            operationFile,
+          ),
+        ),
+      ).resolves.toBe(true);
+    }
+
+    const operationSources = await Promise.all(
+      operationFiles.map((operationFile) =>
+        readFile(
+          join(
+            packageRoot,
+            "src/contracts/hostAccessOperations",
+            operationFile,
+          ),
+          "utf8",
+        ),
+      ),
+    );
+    expect(operationSources.join("\n")).not.toMatch(/make[A-Z]\w+Result/);
+
+    for (const obsoleteBroadFile of [
+      "hostMemberAccessOperations.ts",
+      "hostRoleOperations.ts",
+      "registeredHostOperations.ts",
+    ]) {
+      await expect(
+        fileExists(join(packageRoot, "src/contracts", obsoleteBroadFile)),
+      ).resolves.toBe(false);
+    }
+    await expect(
+      fileExists(
+        join(packageRoot, "src/services/hostAccessResultConstructors.ts"),
+      ),
+    ).resolves.toBe(false);
 
     for (const genericFileName of [
       "adapter.ts",
@@ -40,6 +98,16 @@ describe("host-authorization import boundary", () => {
         fileExists(join(packageRoot, "src", genericFileName)),
       ).resolves.toBe(false);
     }
+  });
+
+  it("publishes nested operation modules with the contracts artifact", async () => {
+    const manifest = JSON.parse(
+      await readFile(join(packageRoot, "package.json"), "utf8"),
+    ) as { readonly files?: ReadonlyArray<string> };
+
+    expect(manifest.files).toEqual(
+      expect.arrayContaining(["dist/**/*.js", "dist/**/*.d.ts"]),
+    );
   });
 
   it("imports no identity, API, persistence, runtime, or platform package", async () => {
