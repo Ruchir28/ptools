@@ -7,7 +7,7 @@ import {
   normalizeUserPtoolsConfigStdioCwds,
   parseUserPtoolsConfigJson,
 } from "@ptools/config";
-import { NODE_LOCAL_HOST_ID, startEmbeddedNodeHost } from "@ptools/host-node";
+import { NODE_LOCAL_HOST_ID, connectLocalNodeHost } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 import { generateText, stepCountIs } from "ai";
@@ -58,7 +58,7 @@ const main = async (): Promise<void> => {
       return [name, value] as const;
     }),
   );
-  const host = await startEmbeddedNodeHost({ hostId: NODE_LOCAL_HOST_ID });
+  const host = await connectLocalNodeHost({ hostId: NODE_LOCAL_HOST_ID });
   const ptools = makePtoolsSession(host.codeMode);
 
   try {

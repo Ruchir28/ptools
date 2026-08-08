@@ -4,10 +4,19 @@ Command-line composition surface for ptools.
 
 The Effect-native CLI owns command parsing, host selection, authored-file
 bootstrap, and adapter wiring. It uses `effect/unstable/cli` for commands and
-options and Effect scopes for the acquired host lifetime. Adapter packages such as
+options. The foreground `node deployment start` command owns the server scope;
+MCP commands are connect-only clients. Adapter packages such as
 `@ptools/mcp-server` remain host-neutral; host packages such as
 `@ptools/host-node` receive explicit configuration values and never discover
 files or environment variables.
+
+Run the named local deployment in a dedicated terminal:
+
+```bash
+npx -y @ptools/cli node deployment start default
+```
+
+Then connect the MCP-facing command from another process:
 
 ```bash
 npx -y @ptools/cli mcp serve --host node --host-id my-project --config ./ptools.config.json

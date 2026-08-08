@@ -44,7 +44,7 @@ describe("host-node actor-daemon import boundaries", () => {
     );
   });
 
-  it("exports only final embedded constructors and approved Node capabilities", async () => {
+  it("exports only deployment clients and approved Node capabilities", async () => {
     const rootIndex = await readFile(
       join(packageRoot, "src", "index.ts"),
       "utf8",
@@ -70,11 +70,15 @@ describe("host-node actor-daemon import boundaries", () => {
     ]) {
       expect(contents).not.toContain(removed);
     }
-    expect(contents).toContain("startEmbeddedNodeHost");
+    expect(contents).toContain("connectLocalNodeHost");
+    expect(contents).not.toContain("openLocalNodeHost");
     expect(contents).toContain("createNodeCodeModeClient");
+    expect(contents).not.toContain("startEmbeddedNodeHost");
+    expect(contents).not.toContain("NodeEmbeddedHostHttpStackLive");
+    expect(contents).not.toContain("NodeHostHttpServerLive");
   });
 
-  it("deletes legacy config discovery, duplicate auth, and runtime modules", async () => {
+  it("deletes superseded embedded and automatic control-plane lifecycle modules", async () => {
     for (const path of [
       "auth.ts",
       "config.ts",
@@ -85,6 +89,10 @@ describe("host-node actor-daemon import boundaries", () => {
       "layers/platform/configDiscoveryContext.ts",
       "layers/platform/hostSettings.ts",
       "layers/platform/nodePlatform.ts",
+      "hostControlPlaneDaemon/lifecycle",
+      "hostControlPlaneDaemon/http/nodeHostControlPlaneHealth.ts",
+      "services/nodeHostControlPlaneSpawner.ts",
+      "services/nodeLocalDeploymentLeaseClient.ts",
     ]) {
       await expect(fileExists(join(packageRoot, "src", path))).resolves.toBe(
         false,
@@ -92,13 +100,16 @@ describe("host-node actor-daemon import boundaries", () => {
     }
   });
 
-  it("exports only the package-owned daemon entry artifact", async () => {
+  it("exports both package-owned daemon entry artifacts", async () => {
     const packageJson = JSON.parse(
       await readFile(join(packageRoot, "package.json"), "utf8"),
     ) as { readonly exports?: Record<string, unknown> };
 
     expect(packageJson.exports).toHaveProperty(
       "./host-actor-daemon-entrypoint",
+    );
+    expect(packageJson.exports).toHaveProperty(
+      "./host-control-plane-daemon-entrypoint",
     );
     expect(packageJson.exports).not.toHaveProperty("./hostActorDaemon");
   });
@@ -134,11 +145,15 @@ describe("host-node actor-daemon import boundaries", () => {
     expect(contents).not.toContain("extends Context.Tag");
   });
 
-  // Public HTTP should only discover/proxy to the daemon, not embed actor
-  // runtime, MCP connector, Code Mode server, or the old in-process dispatcher.
-  it("keeps public HTTP assembly free of actor/runtime platform layers", async () => {
+  // Control-plane HTTP should only discover/proxy to the actor daemon, not
+  // embed actor runtime, MCP connector, Code Mode server, or the old
+  // in-process dispatcher.
+  it("keeps control-plane HTTP assembly free of actor/runtime platform layers", async () => {
     const contents = await readFile(
-      join(packageRoot, "src/http/hostHttp.ts"),
+      join(
+        packageRoot,
+        "src/hostControlPlaneDaemon/http/nodeHostControlPlaneHttp.ts",
+      ),
       "utf8",
     );
 
@@ -156,6 +171,7 @@ describe("host-node actor-daemon import boundaries", () => {
       expect(contents).not.toContain(forbidden);
     }
     expect(contents).toContain("NodeDaemonHostInstanceDiscoveryLive");
+    expect(contents).not.toContain("HttpRouter.add");
     expect(contents).not.toContain("readFile");
     expect(contents).not.toContain("PTOOLS_CONFIG");
     expect(contents).not.toContain("process.env");

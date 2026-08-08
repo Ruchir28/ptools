@@ -15,6 +15,14 @@ There are two installable alpha paths:
 Use the MCP server when you want a host to load one `ptools` server that proxies
 multiple upstream MCP providers.
 
+Start the local deployment in one terminal:
+
+```bash
+npx -y @ptools/cli node deployment start default
+```
+
+Then connect the MCP server from another terminal or MCP host:
+
 ```bash
 npx -y @ptools/cli mcp serve --host node --config .ptools/config.json
 ```
@@ -98,14 +106,22 @@ Use the AI SDK package when you want to embed ptools in your own app:
 npm install @ptools/agent-tools @ptools/host-node
 ```
 
+Start the local deployment in another terminal first:
+
+```bash
+ptools node deployment start default
+```
+
+Then connect from the application:
+
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { startEmbeddedNodeHost } from "@ptools/host-node";
+import { connectLocalNodeHost } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
-const host = await startEmbeddedNodeHost({ hostId: "my-app" });
+const host = await connectLocalNodeHost({ hostId: "my-app" });
 await host.call({ operation: "configure", input: { config: authoredConfig } });
 await host.call({
   operation: "configure_secrets",
@@ -133,7 +149,7 @@ Package docs:
 - `@ptools/mcp-server`: host-neutral MCP stdio adapter
 - `@ptools/agent-tools`: user-facing AI SDK session and adapter package
 - `@ptools/config`: shared config parsing, validation, resolution, and hashing
-- `@ptools/host-node`: embedded daemon-backed Node Host client factories
+- `@ptools/host-node`: explicit foreground Node deployments and connect-only clients
 - `@ptools/host-api/http`: client for any existing Host HTTP deployment
 - `@ptools/mcp-registry`: upstream MCP connection, discovery, and dispatch
 - `@ptools/code-mode`: Code Mode search, schema, and execute orchestration

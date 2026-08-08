@@ -1,37 +1,58 @@
 # @ptools/host-node
 
-Daemon-backed embedded Node hosting for ptools.
+Named, explicitly started local Node deployments for ptools.
 
 ## Mental model
 
 ```txt
-startEmbeddedNodeHost({ hostId })
-  -> starts an embedded local Host HTTP listener
-  -> listener acquires a lease on the state-namespace daemon
-  -> shared HostHttpClient calls the listener
-  -> daemon selects the authoritative actor for hostId
+Terminal A
+  ptools node deployment start default
+    -> creates the conventional descriptor if missing
+    -> owns the control-plane lock and fixed loopback listener in foreground
+    -> owns one private actor-daemon connection/lease
+    -> stays alive until Ctrl-C or process-supervisor interruption
+
+Application / Terminal B
+  connectLocalNodeHost({ deploymentName: "default", hostId })
+    -> resolves the existing deployment descriptor
+    -> maps the descriptor's fixed port to its canonical origin
+    -> returns an ordinary HTTP client without a network preflight
+    -> never starts, retains, or stops the server
 ```
 
-`hostId` is required. Product entrypoints may explicitly choose `"node-local"`,
-but the library does not silently make unrelated embedders share that actor.
-Embedded ingress is loopback-only; deploy a separately authenticated Node Host
-HTTP server rather than exposing the package's internal local credential.
+The default deployment uses `http://127.0.0.1:19876`. Its state root is
+`~/.ptools/node-deployments/default/state`, or the equivalent under
+`PTOOLS_HOME`.
 
-`internalStateDirectory` selects the application/profile and daemon namespace.
-File state and OS-keyring account names are both isolated by that namespace and
-`hostId`. Secrets remain in the operating-system keyring; they are not files in
-the state directory.
+## Deployment lifecycle
+
+Run the deployment in a dedicated terminal:
+
+```sh
+ptools node deployment start default
+```
+
+Additional deployments are created explicitly:
+
+```sh
+ptools node deployment create work --port 19877
+ptools node deployment start work
+ptools node deployment list
+```
+
+`start` remains in the foreground. Ordinary clients do not implicitly start the
+process and their `close()` methods never stop it; use Ctrl-C in the owning
+terminal to shut the deployment down.
 
 ## Explicit initialization
 
-Constructors do not read config files, discover projects, upload ambient process
-environment, or warm Code Mode. Initialize through shared Host API operations:
+After starting the deployment, initialize a selected host through ordinary Host
+API operations:
 
 ```ts
-import { startEmbeddedNodeHost } from "@ptools/host-node";
+import { connectLocalNodeHost } from "@ptools/host-node";
 
-const host = await startEmbeddedNodeHost({ hostId: "local-main" });
-
+const host = await connectLocalNodeHost({ hostId: "local-main" });
 try {
   await host.call({
     operation: "configure",
@@ -41,24 +62,18 @@ try {
     operation: "configure_secrets",
     input: { secrets: explicitlySelectedSecrets },
   });
-
   await host.codeMode.call(request);
 } finally {
-  await host.close();
+  await host.close(); // closes only this HTTP client/runtime
 }
 ```
 
-`createNodeCodeModeClient(options)` is a focused convenience for a host that is
-already configured. It performs no initialization or warmup.
+`createNodeCodeModeClient(options)` is also connect-only and exposes just the
+focused Code Mode handle.
 
-Closing the handle closes its embedded ingress and releases that ingress's daemon
-lease. It does not directly dispose authoritative actors; another live ingress
-lease can continue using the same daemon and actor.
+## Explicit URL connections
 
-## Existing or remote servers
-
-Do not use `startEmbeddedNodeHost` merely to connect to an existing URL. Use the
-shared transport constructor:
+Use the platform-neutral constructor when the URL is already known:
 
 ```ts
 import { createHostHttpClient } from "@ptools/host-api/http";
@@ -70,5 +85,5 @@ const host = await createHostHttpClient({
 });
 ```
 
-That handle owns only its local client runtime and sends no remote shutdown
-operation when closed.
+This path performs no catalog lookup or lifecycle operation. The target server
+must already be running.

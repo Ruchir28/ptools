@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CliError, Command, Flag } from "effect/unstable/cli";
+import { Argument, CliError, Command, Flag } from "effect/unstable/cli";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { access, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
@@ -10,7 +10,17 @@ import {
   parseUserPtoolsConfigJson,
   type ServerConfigError,
 } from "@ptools/config";
-import { startEmbeddedNodeHost, NODE_LOCAL_HOST_ID } from "@ptools/host-node";
+import {
+  assertNodeDeploymentStateQuiescent,
+  configureNodeLocalDeployment,
+  createNodeLocalDeployment,
+  DEFAULT_NODE_DEPLOYMENT_NAME,
+  listNodeLocalDeployments,
+  NodeDeploymentName,
+  NODE_LOCAL_HOST_ID,
+  connectLocalNodeHost,
+  startNodeLocalDeployment,
+} from "@ptools/host-node";
 import { serveMcpWithCodeModeClient } from "@ptools/mcp-server";
 import { Cause, Data, Effect, Exit, Option } from "effect";
 
@@ -34,7 +44,7 @@ class MissingConfigSecretError extends Data.TaggedError(
   readonly configPath: string;
 }> {}
 
-/** Starting the embedded Node host or crossing its Host API boundary failed. */
+/** Starting a local Node deployment or crossing its Host API boundary failed. */
 class NodeHostBootstrapError extends Data.TaggedError(
   "NodeHostBootstrapError",
 )<{
@@ -45,7 +55,7 @@ class NodeHostBootstrapError extends Data.TaggedError(
 const hostOption = Flag.choice("host", ["node"] as const).pipe(
   Flag.withDefault("node"),
   Flag.withDescription(
-    "Host implementation to use. Only the embedded local Node host is available today.",
+    "Host implementation to use. The local Node deployment must already be running.",
   ),
 );
 
@@ -54,6 +64,11 @@ const hostIdOption = Flag.string("host-id").pipe(
   Flag.withDescription(
     `Logical host identity inside the Node state namespace. Defaults to ${NODE_LOCAL_HOST_ID}.`,
   ),
+);
+
+const deploymentOption = Flag.string("deployment").pipe(
+  Flag.withDefault(DEFAULT_NODE_DEPLOYMENT_NAME),
+  Flag.withDescription("Named running local Node deployment to connect to."),
 );
 
 const configOption = Flag.string("config").pipe(
@@ -67,12 +82,13 @@ const serveCommand = Command.make("serve", {
   host: hostOption,
   hostId: hostIdOption,
   configPath: configOption,
+  deployment: deploymentOption,
 }).pipe(
   Command.withDescription(
     "Serve the combined Code Mode MCP server over stdio.",
   ),
-  Command.withHandler(({ configPath, hostId }) =>
-    serveLocalNodeMcp(configPath, hostId),
+  Command.withHandler(({ configPath, deployment, hostId }) =>
+    serveLocalNodeMcp(configPath, hostId, deployment),
   ),
 );
 
@@ -81,9 +97,101 @@ const mcpCommand = Command.make("mcp").pipe(
   Command.withSubcommands([serveCommand]),
 );
 
+const deploymentNameArgument = Argument.string("name");
+const deploymentPortFlag = Flag.integer("port").pipe(Flag.optional);
+const requiredDeploymentPortFlag = Flag.integer("port");
+const stateDirectoryFlag = Flag.string("state-directory").pipe(Flag.optional);
+const denoExecutableFlag = Flag.string("deno-executable").pipe(Flag.optional);
+const useDefaultDenoFlag = Flag.boolean("use-default-deno");
+
+const createDeploymentCommand = Command.make("create", {
+  name: deploymentNameArgument,
+  port: requiredDeploymentPortFlag,
+  stateDirectory: stateDirectoryFlag,
+  denoExecutable: denoExecutableFlag,
+}).pipe(
+  Command.withHandler(({ name, port, stateDirectory, denoExecutable }) =>
+    createNodeLocalDeployment({
+      name,
+      port,
+      ...Option.match(stateDirectory, {
+        onNone: () => ({}),
+        onSome: (value) => ({ stateDirectory: value }),
+      }),
+      ...Option.match(denoExecutable, {
+        onNone: () => ({}),
+        onSome: (value) => ({ denoExecutable: value }),
+      }),
+    }).pipe(
+      Effect.tap((descriptor) => printJson(descriptor)),
+      Effect.asVoid,
+    ),
+  ),
+);
+
+const configureDeploymentCommand = Command.make("configure", {
+  name: deploymentNameArgument,
+  port: deploymentPortFlag,
+  denoExecutable: denoExecutableFlag,
+  useDefaultDeno: useDefaultDenoFlag,
+}).pipe(
+  Command.withHandler(({ name, port, denoExecutable, useDefaultDeno }) =>
+    configureNodeLocalDeployment(
+      name,
+      {
+        ...Option.match(port, {
+          onNone: () => ({}),
+          onSome: (value) => ({ port: value }),
+        }),
+        ...Option.match(denoExecutable, {
+          onNone: () => ({}),
+          onSome: (value) => ({ denoExecutable: value }),
+        }),
+        useDefaultDeno,
+      },
+      (descriptor) =>
+        assertNodeDeploymentStateQuiescent(descriptor.stateDirectory),
+    ).pipe(
+      Effect.tap((descriptor) => printJson(descriptor)),
+      Effect.asVoid,
+    ),
+  ),
+);
+
+const startDeploymentCommand = Command.make("start", {
+  name: deploymentNameArgument,
+}).pipe(
+  Command.withDescription(
+    "Run a local Node deployment in the foreground until Ctrl-C.",
+  ),
+  Command.withHandler(({ name }) =>
+    Effect.sync(() =>
+      process.stderr.write(
+        `[ptools] starting local Node deployment ${name}; press Ctrl-C to stop\n`,
+      ),
+    ).pipe(Effect.andThen(startNodeLocalDeployment(name))),
+  ),
+);
+const listDeploymentsCommand = Command.make("list").pipe(
+  Command.withHandler(() =>
+    listNodeLocalDeployments().pipe(Effect.tap(printJson), Effect.asVoid),
+  ),
+);
+const deploymentCommand = Command.make("deployment").pipe(
+  Command.withSubcommands([
+    createDeploymentCommand,
+    configureDeploymentCommand,
+    startDeploymentCommand,
+    listDeploymentsCommand,
+  ]),
+);
+const nodeCommand = Command.make("node").pipe(
+  Command.withSubcommands([deploymentCommand]),
+);
+
 const rootCommand = Command.make("ptools").pipe(
   Command.withDescription("MCP-first Code Mode tools."),
-  Command.withSubcommands([mcpCommand]),
+  Command.withSubcommands([mcpCommand, nodeCommand]),
 );
 
 /**
@@ -93,6 +201,7 @@ const rootCommand = Command.make("ptools").pipe(
 const serveLocalNodeMcp = (
   requestedConfigPath: Option.Option<string>,
   hostId: string,
+  deploymentName: string,
 ): Effect.Effect<
   void,
   | ConfigFileReadError
@@ -117,11 +226,15 @@ const serveLocalNodeMcp = (
         resolve(dirname(configPath), cwd),
       );
       const secrets = yield* collectReferencedSecrets(config, configPath);
-      // This starts and owns both the loopback HTTP server and its connected
-      // client. Releasing the scope closes the complete embedded host stack.
+      // Connect to the explicitly started deployment. This command never starts
+      // or retains the server; closing its scope releases only client resources.
       const embeddedNodeHost = yield* Effect.acquireRelease(
         Effect.tryPromise({
-          try: () => startEmbeddedNodeHost({ hostId }),
+          try: () =>
+            connectLocalNodeHost({
+              hostId,
+              deploymentName: NodeDeploymentName.make(deploymentName),
+            }),
           catch: (cause) =>
             new NodeHostBootstrapError({
               message: safeErrorMessage(cause),
@@ -271,6 +384,11 @@ const readResponseErrorMessage = (
   typeof response.error.message === "string"
     ? response.error.message
     : fallbackMessage;
+
+const printJson = (value: unknown): Effect.Effect<void> =>
+  Effect.sync(() =>
+    process.stdout.write(`${JSON.stringify(value, null, 2)}\n`),
+  );
 
 const safeErrorMessage = (cause: unknown): string => {
   if (

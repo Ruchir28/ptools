@@ -47,14 +47,20 @@ Environment variables can be referenced explicitly:
 
 ## Use With AI SDK
 
+Start the local deployment in another terminal before connecting:
+
+```bash
+ptools node deployment start default
+```
+
 ```ts
 import { generateText, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { startEmbeddedNodeHost } from "@ptools/host-node";
+import { connectLocalNodeHost } from "@ptools/host-node";
 import { makePtoolsSession } from "@ptools/agent-tools";
 import { toAISDKTools } from "@ptools/agent-tools/ai-sdk";
 
-const host = await startEmbeddedNodeHost({ hostId: "my-app" });
+const host = await connectLocalNodeHost({ hostId: "my-app" });
 await host.call({ operation: "configure", input: { config: authoredConfig } });
 await host.call({
   operation: "configure_secrets",
@@ -87,7 +93,7 @@ Create one session for the part of your app that needs MCP-backed tools, reuse
 it for model calls, and always close it when that work is finished:
 
 ```ts
-const host = await startEmbeddedNodeHost({ hostId: "my-app" });
+const host = await connectLocalNodeHost({ hostId: "my-app" });
 const ptools = makePtoolsSession(host.codeMode);
 
 try {
@@ -98,8 +104,9 @@ try {
 }
 ```
 
-`close()` delegates to the provided Code Mode client handle. For the embedded Node host,
-it closes local ingress and releases that ingress's daemon lease.
+`close()` delegates to the provided Code Mode client handle. For a local Node
+deployment, this closes only client-side resources. The explicitly started
+foreground deployment continues running until Ctrl-C or process-supervisor interruption.
 
 ## What Tools The Model Sees
 

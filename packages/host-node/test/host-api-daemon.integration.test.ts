@@ -1,29 +1,37 @@
 /**
- * End-to-end coverage: embedded Host clients → public HTTP → shared daemon.
+ * End-to-end coverage: ordinary clients → deployment control plane → actor daemon.
  *
- * Background — each embedded client owns a listener and one daemon lease. Two
- * clients selecting the same internalStateDirectory and hostId intentionally
- * address one authoritative actor. Configuration is explicit Host API work;
- * neither constructor reads a config file or warms Code Mode.
+ * Background — an explicit foreground command owns one named deployment and
+ * fixed listener. Ordinary clients share it and close only client resources.
  *
  * What this proves:
  *   1. Explicit configure followed by Code Mode reaches a real daemon actor.
- *   2. Two listeners/leases share that actor, and closing one leaves the other
- *      functional.
+ *   2. Independent named and generic clients share one explicitly running
+ *      control plane without influencing its process lifetime.
  *
  * HTTP, daemon startup/RPC, MCP stdio, and Deno are real.
  */
-import { execFileSync } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  type ChildProcess,
+} from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodeModeSearchRequest } from "@ptools/code-mode-api";
 import { UserPtoolsConfig } from "@ptools/config/contracts";
-import { Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { startEmbeddedNodeHost } from "../src/clientHandles.js";
+import { createHostHttpClient } from "@ptools/host-api/http";
+import { createNodeLocalDeployment } from "../src/localDeployments/nodeLocalDeploymentCatalog.js";
+import { nodeControlPlanePublicOrigin } from "../src/localDeployments/contracts/nodeLocalDeploymentDescriptor.js";
+import {
+  connectLocalNodeHost,
+} from "../src/services/nodeLocalDeploymentRunner.js";
+import { NODE_INTERNAL_ACCESS_TOKEN } from "../src/options.js";
 
 const fixturePath = fileURLToPath(
   new URL(
@@ -31,6 +39,15 @@ const fixturePath = fileURLToPath(
     import.meta.url,
   ),
 );
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const controlPlaneEntrypoint = join(
+  packageRoot,
+  "src",
+  "hostControlPlaneDaemon",
+  "daemonProcess",
+  "nodeHostControlPlaneDaemonEntrypoint.ts",
+);
+const tsxImport = fileURLToPath(import.meta.resolve("tsx"));
 
 const hasDeno = (() => {
   try {
@@ -42,9 +59,10 @@ const hasDeno = (() => {
 })();
 
 describe.skipIf(!hasDeno)("public Host API to daemon integration", () => {
-  it("shares one explicitly configured actor across independent ingress leases", async () => {
+  it("shares one explicitly configured actor across independent clients", async () => {
     const home = await mkdtemp(join(tmpdir(), "ptools-http-daemon-"));
-    const internalStateDirectory = join(home, "state");
+    const previousHome = process.env.PTOOLS_HOME;
+    process.env.PTOOLS_HOME = home;
     const config = await Schema.decodeUnknownPromise(UserPtoolsConfig)({
       mcpServers: {
         fixture: {
@@ -53,18 +71,42 @@ describe.skipIf(!hasDeno)("public Host API to daemon integration", () => {
         },
       },
     });
-    const [firstPort, secondPort] = await Promise.all([freePort(), freePort()]);
-    const shared = { internalStateDirectory, hostId: "shared-actor" };
-    const first = await startEmbeddedNodeHost({
-      ...shared,
-      publicOrigin: `http://127.0.0.1:${firstPort}`,
-    });
-    const second = await startEmbeddedNodeHost({
-      ...shared,
-      publicOrigin: `http://127.0.0.1:${secondPort}`,
-    });
+    const port = await freePort();
+    const descriptor = await Effect.runPromise(
+      createNodeLocalDeployment({
+        name: "integration",
+        port,
+      }),
+    );
+    let first: Awaited<ReturnType<typeof connectLocalNodeHost>> | undefined;
+    let second: Awaited<ReturnType<typeof connectLocalNodeHost>> | undefined;
+    const server = spawn(
+      process.execPath,
+      [
+        "--import",
+        tsxImport,
+        controlPlaneEntrypoint,
+        "--deployment-name",
+        descriptor.name,
+      ],
+      {
+        cwd: packageRoot,
+        env: { ...process.env, PTOOLS_HOME: home },
+        stdio: "ignore",
+      },
+    );
 
     try {
+      await waitUntilListening(descriptor.controlPlanePort);
+      await waitUntilHttpRouter(descriptor.controlPlanePort);
+      first = await connectLocalNodeHost({
+        deploymentName: descriptor.name,
+        hostId: "shared-actor",
+      });
+      second = await connectLocalNodeHost({
+        deploymentName: descriptor.name,
+        hostId: "shared-actor",
+      });
       await expect(
         first.call({ operation: "configure", input: { config } }),
       ).resolves.toMatchObject({ result: { ok: true } });
@@ -75,17 +117,88 @@ describe.skipIf(!hasDeno)("public Host API to daemon integration", () => {
       );
 
       await first.close();
-      await expect(
-        second.codeMode.call(searchRequest()),
-      ).resolves.toMatchObject({
-        output: { actions: [{ toolId: "fixture.echo" }] },
-      });
-    } finally {
-      await first.close();
       await second.close();
+      // The foreground server remains available because client close has no
+      // server-side lease, heartbeat, or shutdown meaning.
+      const later = await createHostHttpClient({
+        baseUrl: nodeControlPlanePublicOrigin(descriptor.controlPlanePort),
+        hostId: "shared-actor",
+        accessToken: NODE_INTERNAL_ACCESS_TOKEN,
+      });
+      try {
+        await expect(
+          later.codeMode.call(searchRequest()),
+        ).resolves.toMatchObject({
+          output: { actions: [{ toolId: "fixture.echo" }] },
+        });
+      } finally {
+        await later.close();
+      }
+    } finally {
+      await first?.close();
+      await second?.close();
+      // This test owns real Deno/MCP descendants and is about request routing,
+      // not graceful signal cleanup. Force-terminate the isolated foreground
+      // process so a transport keep-alive cannot extend the test lifetime.
+      if (server.exitCode === null) server.kill("SIGKILL");
+      await waitForExit(server, 10_000).catch(() => undefined);
+      if (previousHome === undefined) delete process.env.PTOOLS_HOME;
+      else process.env.PTOOLS_HOME = previousHome;
     }
   }, 30_000);
 });
+
+/** Wait until the foreground listener accepts TCP connections. */
+const waitUntilListening = async (port: number): Promise<void> => {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (await portIsOpen(port)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for foreground listener on ${port}.`);
+};
+
+const portIsOpen = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+  });
+
+/** Wait until the complete shared router, not only its TCP socket, responds. */
+const waitUntilHttpRouter = async (port: number): Promise<void> => {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/__ptools_test_readiness_probe__`,
+        { signal: AbortSignal.timeout(250) },
+      );
+      if (response.status === 404) return;
+    } catch {
+      // The listener may bind before the complete application layer is ready.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for the shared Host HTTP router.");
+};
+
+const waitForExit = (child: ChildProcess, timeoutMs: number): Promise<void> =>
+  child.exitCode !== null
+    ? Promise.resolve()
+    : new Promise((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("Timed out waiting for foreground process.")),
+          timeoutMs,
+        );
+        child.once("exit", () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
 
 const searchRequest = () => ({
   operation: "search" as const,

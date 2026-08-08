@@ -22,7 +22,7 @@ import {
   normalizeUserPtoolsConfigStdioCwds,
   parseUserPtoolsConfigJson,
 } from "@ptools/config";
-import { startEmbeddedNodeHost, NODE_LOCAL_HOST_ID } from "@ptools/host-node";
+import { connectLocalNodeHost, NODE_LOCAL_HOST_ID } from "@ptools/host-node";
 import { Context, Data, Effect, Result, Option, Scope } from "effect";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 
@@ -83,17 +83,7 @@ export const runPlayground = (
       ).pipe(Effect.map(Object.fromEntries));
       const host = yield* Effect.acquireRelease(
         Effect.tryPromise(() =>
-          startEmbeddedNodeHost({
-            hostId: NODE_LOCAL_HOST_ID,
-            ...(nonEmpty(env.PTOOLS_HOME) === undefined
-              ? {}
-              : {
-                  internalStateDirectory: resolve(
-                    nonEmpty(env.PTOOLS_HOME)!,
-                    "state",
-                  ),
-                }),
-          }),
+          connectLocalNodeHost({ hostId: NODE_LOCAL_HOST_ID }),
         ),
         (handle) => Effect.promise(() => handle.close()).pipe(Effect.ignore),
       );

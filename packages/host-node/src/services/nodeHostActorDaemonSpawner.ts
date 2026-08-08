@@ -7,6 +7,7 @@
  */
 import { Context, Data, Effect, Layer } from "effect";
 import { spawn as spawnChildProcess } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { NodeHostActorRuntimeOptions } from "../hostActorDaemon/actorRuntime/contracts/nodeHostActorRuntimeOptions.js";
 
@@ -39,6 +40,8 @@ export interface NodeHostActorDaemonSpawnerOperations {
  * This context remains in the parent process. It is never transferred to the
  * daemon child, which constructs its own independent runtime and services.
  */
+const require = createRequire(import.meta.url);
+
 export class NodeHostActorDaemonSpawner extends Context.Service<NodeHostActorDaemonSpawner>()(
   "@ptools/host-node/NodeHostActorDaemonSpawner",
   {
@@ -82,7 +85,7 @@ const startDetachedDaemon = (
         ),
       );
       const loader = runningFromTypeScript
-        ? [fileURLToPath(import.meta.resolve("tsx/cli")), entrypoint]
+        ? [require.resolve("tsx/cli"), entrypoint]
         : [entrypoint];
       const child = spawnChildProcess(
         process.execPath,

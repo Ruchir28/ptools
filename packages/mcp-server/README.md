@@ -10,8 +10,14 @@ For the local Node binary, use `@ptools/cli`.
 npm install @ptools/cli
 ```
 
-Most MCP hosts do not need a project install. They can start the published
-package with `npx`:
+Most MCP hosts do not need a project install. Start the local deployment in a
+dedicated terminal:
+
+```bash
+npx -y @ptools/cli node deployment start default
+```
+
+Then configure the MCP host to run the connect-only command:
 
 ```bash
 npx -y @ptools/cli mcp serve --host node --config .ptools/config.json
@@ -184,14 +190,28 @@ OpenCode config:
 In both cases, the MCP host starts one `ptools` server. ptools then connects to
 the upstream MCP servers listed in `.ptools/config.json`.
 
-## Embed
+## Run the MCP adapter from your Node program
+
+This does **not** embed the ptools host, its control plane, or upstream MCP
+connections in your application process. Start the local deployment separately
+with `ptools node deployment start default`. Your program then connects to that
+already-running deployment and runs only this package's stdio MCP adapter:
+
+```txt
+your Node program
+  ├─ connects to the separately running ptools local deployment
+  └─ runs @ptools/mcp-server's stdio adapter
+       └─ forwards Code Mode requests through that client connection
+```
+
+Use the connect-only local client after the separate deployment is running:
 
 ```ts
 import { Effect } from "effect";
-import { startEmbeddedNodeHost } from "@ptools/host-node";
+import { connectLocalNodeHost } from "@ptools/host-node";
 import { serveMcpWithCodeModeClient } from "@ptools/mcp-server";
 
-const host = await startEmbeddedNodeHost({ hostId: "my-app" });
+const host = await connectLocalNodeHost({ hostId: "my-app" });
 
 try {
   await host.call({

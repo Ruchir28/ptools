@@ -35,6 +35,10 @@
     "./host-actor-daemon-entrypoint": {
       "types": "./dist/hostActorDaemon/daemonProcess/nodeHostActorDaemonEntrypoint.d.ts",
       "default": "./dist/hostActorDaemon/daemonProcess/nodeHostActorDaemonEntrypoint.js"
+    },
+    "./host-control-plane-daemon-entrypoint": {
+      "types": "./dist/hostControlPlaneDaemon/daemonProcess/nodeHostControlPlaneDaemonEntrypoint.d.ts",
+      "default": "./dist/hostControlPlaneDaemon/daemonProcess/nodeHostControlPlaneDaemonEntrypoint.js"
     }
   },
   "imports": {

@@ -26,7 +26,10 @@
  * and browser OAuth side effects while keeping both transport seams observable.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostHttpClient } from "@ptools/host-api/effect";
+import {
+  HostHttpClient,
+  HostHttpClientFetchLive,
+} from "@ptools/host-api/effect";
 import type {
   HostOperationDispatchInput,
   HostOperationResponse,
@@ -37,7 +40,14 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { NodeEmbeddedHostHttpStackLive } from "../src/http/hostHttp.js";
+import { NodeHostControlPlaneHttpLive } from "../src/hostControlPlaneDaemon/http/nodeHostControlPlaneHttp.js";
+import {
+  NodeLocalDeploymentDescriptor,
+  NodeControlPlanePort,
+  NodeDeploymentStateDirectory,
+} from "../src/localDeployments/contracts/nodeLocalDeploymentDescriptor.js";
+import { NodeDeploymentName } from "../src/localDeployments/contracts/nodeDeploymentName.js";
+import { NODE_INTERNAL_ACCESS_TOKEN } from "../src/options.js";
 import { NodeHostRuntimeManager } from "../src/hostActorDaemon/actorRuntime/services/nodeHostRuntimeManager.js";
 import {
   makeNodeHostActorDaemonLeaseManager,
@@ -99,14 +109,28 @@ it("forwards config, secrets, auth, and callback routes through the daemon", asy
             protocolVersion: NODE_HOST_ACTOR_DAEMON_PROTOCOL_VERSION,
           });
 
-          // Build a real public Node listener plus its fetch-backed client. Its
-          // discovery layer reads <PTOOLS_HOME>/state and acquires one RPC lease.
-          const clientContext = yield* Layer.build(
-            NodeEmbeddedHostHttpStackLive({
+          // Build the deployment-owned listener and an ordinary fetch client.
+          // The control plane and actor daemon deliberately share this exact root.
+          const descriptor = NodeLocalDeploymentDescriptor.make({
+            version: 1,
+            name: NodeDeploymentName.make("route-test"),
+            controlPlanePort: NodeControlPlanePort.make(
+              Number(new URL(publicOrigin).port),
+            ),
+            stateDirectory: NodeDeploymentStateDirectory.make(
               internalStateDirectory,
-              hostId: "route-host",
-              publicOrigin,
-            }),
+            ),
+            denoExecutableOverride: Option.none(),
+          });
+          const clientContext = yield* Layer.build(
+            Layer.merge(
+              NodeHostControlPlaneHttpLive({ descriptor }),
+              HostHttpClientFetchLive({
+                baseUrl: publicOrigin,
+                hostId: "route-host",
+                accessToken: NODE_INTERNAL_ACCESS_TOKEN,
+              }),
+            ),
           );
           const client = Context.get(clientContext, HostHttpClient);
 
