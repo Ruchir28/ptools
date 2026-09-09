@@ -547,7 +547,6 @@ const dispatch = (
       handler.handle({
         hostId,
         publicOrigin: origin,
-        caller: Option.none(),
         request,
       } satisfies HostOperationDispatchInput),
     ),

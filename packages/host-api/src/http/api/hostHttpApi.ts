@@ -32,15 +32,24 @@ import {
 import {
   HostHttpBadRequest,
   HostHttpUnauthorized,
+  HostHttpForbidden,
   HostHttpHostUnavailable,
   HostHttpInternalError,
 } from "../../contracts/hostHttpErrors.js";
 import {
   ProvideHostHttpIngress,
-  RequireHostApiAccess,
+  RequireAuthenticatedHostCaller,
 } from "../../services/hostHttpMiddleware.js";
 
-const HostHttpRouteErrors = [
+const CredentialedHostHttpRouteErrors = [
+  HostHttpBadRequest,
+  HostHttpUnauthorized,
+  HostHttpForbidden,
+  HostHttpHostUnavailable,
+  HostHttpInternalError,
+] as const;
+
+const OAuthCallbackHttpRouteErrors = [
   HostHttpBadRequest,
   HostHttpUnauthorized,
   HostHttpHostUnavailable,
@@ -60,7 +69,7 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
       params: HostPath,
       payload: CodeModeRequest,
       success: HostCodeModeResponse,
-      error: HostHttpRouteErrors,
+      error: CredentialedHostHttpRouteErrors,
     }),
   )
   .add(
@@ -68,7 +77,7 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
       params: HostPath,
       payload: ConfigureHostInput,
       success: ConfigureHostResponse,
-      error: HostHttpRouteErrors,
+      error: CredentialedHostHttpRouteErrors,
     }),
   )
   .add(
@@ -76,7 +85,7 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
       params: HostPath,
       payload: ConfigureHostSecretsInput,
       success: ConfigureHostSecretsResponse,
-      error: HostHttpRouteErrors,
+      error: CredentialedHostHttpRouteErrors,
     }),
   )
   .add(
@@ -84,7 +93,7 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
       params: HostPath,
       payload: EmptyHttpPayload,
       success: HostMcpAuthStatusResponse,
-      error: HostHttpRouteErrors,
+      error: CredentialedHostHttpRouteErrors,
     }),
   )
   .add(
@@ -92,17 +101,17 @@ export class CredentialedHostApiGroup extends HttpApiGroup.make("host.api")
       params: HostMcpServerPath,
       payload: StartMcpAuthHttpPayload,
       success: StartHostMcpAuthResponse,
-      error: HostHttpRouteErrors,
+      error: CredentialedHostHttpRouteErrors,
     }),
   )
   .middleware(ProvideHostHttpIngress)
-  .middleware(RequireHostApiAccess) {}
+  .middleware(RequireAuthenticatedHostCaller) {}
 
 /**
- * Browser/OAuth callback routes; these do not use Host API bearer auth.
+ * Browser/OAuth callback routes; these do not use ordinary Host authentication.
  *
  * `HostHttpUnauthorized` here is for callback-workflow authorization failures
- * such as invalid/signed OAuth state, not for the Host API bearer-token
+ * such as invalid signed OAuth state, not for the Principal/Host-token
  * middleware used by credentialed API routes.
  */
 export class OAuthBrowserGroup extends HttpApiGroup.make("host.oauth")
@@ -115,7 +124,7 @@ export class OAuthBrowserGroup extends HttpApiGroup.make("host.oauth")
         success: Schema.String.pipe(
           HttpApiSchema.asText({ contentType: "text/html" }),
         ),
-        error: HostHttpRouteErrors,
+        error: OAuthCallbackHttpRouteErrors,
       },
     ),
   )
@@ -128,7 +137,7 @@ export class OAuthBrowserGroup extends HttpApiGroup.make("host.oauth")
         success: Schema.String.pipe(
           HttpApiSchema.asText({ contentType: "text/html" }),
         ),
-        error: HostHttpRouteErrors,
+        error: OAuthCallbackHttpRouteErrors,
       },
     ),
   )

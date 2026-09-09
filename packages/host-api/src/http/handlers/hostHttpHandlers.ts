@@ -1,47 +1,69 @@
 /** Shared Effect HttpApi handlers for the Host HTTP API. */
 import { HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { HostPolicies } from "@ptools/host-authorization/effect";
 import { Effect, Option } from "effect";
 import { HostHttpApi } from "../api/hostHttpApi.js";
-import { HostHttpBadRequest } from "../../contracts/hostHttpErrors.js";
+import {
+  HostHttpBadRequest,
+  HostHttpForbidden,
+  HostHttpInternalError,
+  type HostHttpError,
+} from "../../contracts/hostHttpErrors.js";
 import type { CompleteHostMcpOAuthCallbackResponse } from "../../contracts/hostMcpAuth.js";
+import { withHostAuthorization } from "../../services/hostAuthorizationAdmission.js";
 import { HostHttpOperationAdapter } from "../../services/hostHttpOperationAdapter.js";
 
-/** Handlers for bearer-protected Host API JSON routes. */
+/** Handlers for authenticated and Host-authorized JSON routes. */
 export const CredentialedHostApiHandlers = HttpApiBuilder.group(
   HostHttpApi,
   "host.api",
   (handlers) =>
     handlers
       .handle("codeMode", (ctx) =>
-        Effect.gen(function* () {
-          const adapter = yield* HostHttpOperationAdapter;
-          return yield* adapter.codeMode(ctx);
-        }),
+        withHostAuthorization(
+          { hostId: ctx.params.hostId, policy: HostPolicies.execute },
+          () =>
+            Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+              adapter.codeMode(ctx),
+            ),
+        ).pipe(Effect.mapError(toHostAuthorizationHttpError)),
       )
       .handle("configure", (ctx) =>
-        Effect.gen(function* () {
-          const adapter = yield* HostHttpOperationAdapter;
-          return yield* adapter.configure(ctx);
-        }),
+        withHostAuthorization(
+          { hostId: ctx.params.hostId, policy: HostPolicies.configure },
+          () =>
+            Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+              adapter.configure(ctx),
+            ),
+        ).pipe(Effect.mapError(toHostAuthorizationHttpError)),
       )
       .handle("configureSecrets", (ctx) =>
-        Effect.gen(function* () {
-          const adapter = yield* HostHttpOperationAdapter;
-          return yield* adapter.configureSecrets(ctx);
-        }),
+        withHostAuthorization(
+          { hostId: ctx.params.hostId, policy: HostPolicies.manageSecrets },
+          () =>
+            Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+              adapter.configureSecrets(ctx),
+            ),
+        ).pipe(Effect.mapError(toHostAuthorizationHttpError)),
       )
       .handle("mcpAuthStatus", (ctx) =>
-        Effect.gen(function* () {
-          const adapter = yield* HostHttpOperationAdapter;
-          return yield* adapter.mcpAuthStatus(ctx);
-        }),
+        withHostAuthorization(
+          { hostId: ctx.params.hostId, policy: HostPolicies.readAuth },
+          () =>
+            Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+              adapter.mcpAuthStatus(ctx),
+            ),
+        ).pipe(Effect.mapError(toHostAuthorizationHttpError)),
       )
       .handle("startMcpAuth", (ctx) =>
-        Effect.gen(function* () {
-          const adapter = yield* HostHttpOperationAdapter;
-          return yield* adapter.startMcpAuth(ctx);
-        }),
+        withHostAuthorization(
+          { hostId: ctx.params.hostId, policy: HostPolicies.manageAuth },
+          () =>
+            Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+              adapter.startMcpAuth(ctx),
+            ),
+        ).pipe(Effect.mapError(toHostAuthorizationHttpError)),
       ),
 );
 
@@ -89,6 +111,29 @@ export const OAuthBrowserHandlers = HttpApiBuilder.group(
         }),
       ),
 );
+
+/**
+ * Preserve operation-adapter HTTP failures while projecting authorization
+ * failures without exposing persistence or invariant details.
+ */
+const toHostAuthorizationHttpError = (error: {
+  readonly _tag?: string;
+}): HostHttpError | HostHttpForbidden => {
+  switch (error._tag) {
+    case "HostHttpBadRequest":
+    case "HostHttpUnauthorized":
+    case "HostHttpHostUnavailable":
+    case "HostHttpInternalError":
+      return error as HostHttpError;
+    case "HostAuthorizationDenied":
+    case "HostTokenRouteMismatch":
+      return new HostHttpForbidden({ message: "operation was not permitted" });
+    default:
+      return new HostHttpInternalError({
+        message: "Host authorization failed",
+      });
+  }
+};
 
 const browserResponseToHttpServerResponse = (
   result: CompleteHostMcpOAuthCallbackResponse["result"],

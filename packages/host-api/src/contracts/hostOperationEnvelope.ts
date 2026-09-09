@@ -51,8 +51,10 @@ export type HostOperationResultResponse = Schema.Schema.Type<
 >;
 
 /**
- * Failure before a specific host operation can own the result, such as invalid
- * envelope, unauthorized caller, unknown operation, or host unavailability.
+ * Failure inside the trusted actor protocol before a specific operation can
+ * own the result: malformed input, an unknown operation, or a wrong/unavailable
+ * selected Host. Public authentication and authorization finish before this
+ * boundary and therefore are not actor protocol failures.
  */
 export const HostOperationProtocolFailureResponse = Schema.TaggedStruct(
   "HostOperationProtocolFailureResponse",
@@ -60,7 +62,6 @@ export const HostOperationProtocolFailureResponse = Schema.TaggedStruct(
     error: Schema.Struct({
       code: Schema.Literals([
         "invalid_host_api_request",
-        "unauthorized",
         "unknown_operation",
         "host_unavailable",
       ]),

@@ -2,25 +2,16 @@ import { Schema } from "effect";
 import { HostOperationRequest } from "./hostOperationEnvelope.js";
 
 /**
- * Trusted caller principal produced after ingress verifies its carrier
- * credential. The original credential is not included in dispatch data.
- */
-export const HostApiCaller = Schema.Struct({
-  kind: Schema.Literal("HostApiTokenCaller"),
-});
-
-export type HostApiCaller = Schema.Schema.Type<typeof HostApiCaller>;
-
-/**
- * Complete logical operation passed from ingress to one selected host instance.
+ * Trusted operation carrier passed from admitted ingress to one selected Host.
  *
- * The decoded form keeps caller absence as `Option`; the encoded form uses an
- * omitted plain property so platform carriers can transfer ordinary data.
+ * Credentialed operations cross this boundary only after shared Host admission;
+ * public credentials, caller identity, tokens, and effective permissions are
+ * deliberately withheld. OAuth callbacks use the same carrier because their
+ * signed, single-use workflow state is validated by the callback operation.
  */
 export const HostOperationDispatchInput = Schema.Struct({
   hostId: Schema.String,
   publicOrigin: Schema.String,
-  caller: Schema.OptionFromOptionalKey(HostApiCaller),
   request: HostOperationRequest,
 });
 

@@ -28,12 +28,8 @@ import {
   type HostHttpError,
   HostHttpHostUnavailable,
   HostHttpInternalError,
-  HostHttpUnauthorized,
 } from "../contracts/hostHttpErrors.js";
-import {
-  HostHttpIngress,
-  VerifiedHostApiCaller,
-} from "./hostHttpMiddleware.js";
+import { HostHttpIngress } from "./hostHttpMiddleware.js";
 
 export interface CodeModeHttpContext {
   readonly params: { readonly hostId: string };
@@ -68,64 +64,43 @@ export interface CompleteMcpOAuthCallbackHttpContext {
 /**
  * Shared HTTP operation adapter consumed by HttpApi handlers.
  *
- * Method return effects intentionally keep `HostHttpIngress` and
- * `VerifiedHostApiCaller` on their `R` channel instead of sinking them into the
- * `HostHttpOperationAdapterLive` layer. Both are request-scoped services
- * provided per HTTP request by host-specific ingress/auth middleware
- * (`HostHttpIngress` from the origin policy and `VerifiedHostApiCaller` from
- * `RequireHostApiAccess`). Origin and verified caller vary per request, so they
- * do not exist at app layer-construction time.
- *
- * Resolving them inside `Layer.effect` would either fail because the app layer
- * has no request context, or force a platform to provide static values that
- * would be captured for the lifetime of the app. The method `R` channel is the
- * seam that defers resolution until the HttpApi handler is running with the
- * current request context.
- *
- * The `@effect-expect-leaking` directives below record that this forwarding is
- * intentional and silences the Effect Language Service `leakingRequirements`
- * diagnostic that would otherwise suggest providing them at layer build time.
+ * Method return effects intentionally keep request-scoped `HostHttpIngress` on
+ * their `R` channel instead of capturing it in the long-lived adapter Layer.
+ * Credentialed methods receive no caller identity: shared handlers complete
+ * authorization before acquiring this adapter, and trusted actor dispatch
+ * carries only Host, ingress, and operation facts.
  *
  * @effect-expect-leaking HostHttpIngress
- * @effect-expect-leaking VerifiedHostApiCaller
  */
 export class HostHttpOperationAdapter extends Context.Service<
   HostHttpOperationAdapter,
   {
     readonly codeMode: (
       ctx: CodeModeHttpContext,
-    ) => Effect.Effect<
-      HostCodeModeResponse,
-      HostHttpError,
-      HostHttpIngress | VerifiedHostApiCaller
-    >;
+    ) => Effect.Effect<HostCodeModeResponse, HostHttpError, HostHttpIngress>;
     readonly configure: (
       ctx: ConfigureHttpContext,
-    ) => Effect.Effect<
-      ConfigureHostResponse,
-      HostHttpError,
-      HostHttpIngress | VerifiedHostApiCaller
-    >;
+    ) => Effect.Effect<ConfigureHostResponse, HostHttpError, HostHttpIngress>;
     readonly configureSecrets: (
       ctx: ConfigureSecretsHttpContext,
     ) => Effect.Effect<
       ConfigureHostSecretsResponse,
       HostHttpError,
-      HostHttpIngress | VerifiedHostApiCaller
+      HostHttpIngress
     >;
     readonly mcpAuthStatus: (
       ctx: McpAuthStatusHttpContext,
     ) => Effect.Effect<
       HostMcpAuthStatusResponse,
       HostHttpError,
-      HostHttpIngress | VerifiedHostApiCaller
+      HostHttpIngress
     >;
     readonly startMcpAuth: (
       ctx: StartMcpAuthHttpContext,
     ) => Effect.Effect<
       StartHostMcpAuthResponse,
       HostHttpError,
-      HostHttpIngress | VerifiedHostApiCaller
+      HostHttpIngress
     >;
     readonly completeMcpOAuthCallback: (
       ctx: CompleteMcpOAuthCallbackHttpContext,
@@ -166,55 +141,45 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
         ),
       );
 
-    const credentialed = <A>(
-      use: (input: {
-        readonly ingress: Context.Service.Shape<typeof HostHttpIngress>;
-        readonly auth: Context.Service.Shape<typeof VerifiedHostApiCaller>;
-      }) => Effect.Effect<A, HostHttpError>,
-    ) =>
-      Effect.gen(function* () {
-        const ingress = yield* HostHttpIngress;
-        const auth = yield* VerifiedHostApiCaller;
-        return yield* use({ ingress, auth });
-      });
+    const withIngress = <A>(
+      use: (
+        ingress: Context.Service.Shape<typeof HostHttpIngress>,
+      ) => Effect.Effect<A, HostHttpError>,
+    ) => Effect.flatMap(HostHttpIngress, use);
 
     return {
       codeMode: (ctx) =>
-        credentialed(({ ingress, auth }) =>
+        withIngress((ingress) =>
           dispatchExpected("code_mode", {
             hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
-            caller: Option.some(auth.caller),
             request: { operation: "code_mode", input: ctx.payload },
           }),
         ),
 
       configure: (ctx) =>
-        credentialed(({ ingress, auth }) =>
+        withIngress((ingress) =>
           dispatchExpected("configure", {
             hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
-            caller: Option.some(auth.caller),
             request: { operation: "configure", input: ctx.payload },
           }),
         ),
 
       configureSecrets: (ctx) =>
-        credentialed(({ ingress, auth }) =>
+        withIngress((ingress) =>
           dispatchExpected("configure_secrets", {
             hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
-            caller: Option.some(auth.caller),
             request: { operation: "configure_secrets", input: ctx.payload },
           }),
         ),
 
       mcpAuthStatus: (ctx) =>
-        credentialed(({ ingress, auth }) =>
+        withIngress((ingress) =>
           dispatchExpected("mcp_auth_status", {
             hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
-            caller: Option.some(auth.caller),
             request: {
               operation: "mcp_auth_status",
             },
@@ -222,11 +187,10 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
         ),
 
       startMcpAuth: (ctx) =>
-        credentialed(({ ingress, auth }) =>
+        withIngress((ingress) =>
           dispatchExpected("start_mcp_auth", {
             hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
-            caller: Option.some(auth.caller),
             request: {
               operation: "start_mcp_auth",
               input: {
@@ -243,7 +207,6 @@ export const HostHttpOperationAdapterLive: Layer.Layer<
           return yield* dispatchExpected("complete_mcp_oauth_callback", {
             hostId: ctx.params.hostId,
             publicOrigin: ingress.publicOrigin,
-            caller: Option.none(),
             request: {
               operation: "complete_mcp_oauth_callback",
               input: {
@@ -296,8 +259,6 @@ const protocolFailureToHostHttpError = (
     case "invalid_host_api_request":
     case "unknown_operation":
       return new HostHttpBadRequest({ message: response.error.message });
-    case "unauthorized":
-      return new HostHttpUnauthorized({ message: response.error.message });
     case "host_unavailable":
       return new HostHttpHostUnavailable({ message: response.error.message });
   }

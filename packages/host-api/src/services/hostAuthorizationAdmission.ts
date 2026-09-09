@@ -26,6 +26,11 @@ export type AuthenticatedHostCaller =
       readonly token: VerifiedHostToken;
     };
 
+/**
+ * Request-scoped verified caller consumed by shared authorization admission.
+ * Platforms create this context after credential proof; handlers consume it
+ * before actor discovery and never forward it across the dispatch boundary.
+ */
 export class AuthenticatedHostCallerContext extends Context.Service<
   AuthenticatedHostCallerContext,
   AuthenticatedHostCaller

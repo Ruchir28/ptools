@@ -13,6 +13,7 @@
  */
 import {
   ControlPlanePermissions,
+  HostAccessStoreError,
   HostPermissions,
   HostTokenCaller,
   HostTokenId,
@@ -23,11 +24,8 @@ import {
   PrincipalCaller,
   VerifiedHostToken,
 } from "@ptools/host-authorization/contracts";
-import {
-  Authorization,
-  HostPolicies,
-} from "@ptools/host-authorization/effect";
-import { Effect, HashSet } from "effect";
+import { Authorization, HostPolicies } from "@ptools/host-authorization/effect";
+import { Effect, HashSet, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AuthenticatedHostCallerContext,
@@ -37,6 +35,12 @@ import {
   withHostAuthorization,
   withPrincipalHostAuthorization,
 } from "../src/services/hostAuthorizationAdmission.js";
+import {
+  HostHttpIngress,
+  HostHttpOperationAdapter,
+  HostHttpOperationAdapterLive,
+  HostInstanceDiscovery,
+} from "../src/services/index.js";
 
 const principalId = PrincipalIds.fromFixedLocalIdentity("principal-1");
 const principalCaller = PrincipalCaller.make({ principalId });
@@ -59,17 +63,38 @@ const authorization = Authorization.of({
 });
 
 const run = <A, E>(
-  effect: Effect.Effect<
-    A,
-    E,
-    Authorization | AuthenticatedHostCallerContext
-  >,
+  effect: Effect.Effect<A, E, Authorization | AuthenticatedHostCallerContext>,
   caller: AuthenticatedHostCallerContext["Service"],
 ) =>
   Effect.runPromise(
     effect.pipe(
       Effect.provideService(Authorization, authorization),
       Effect.provideService(AuthenticatedHostCallerContext, caller),
+    ),
+  );
+
+const discoveryLayer = (onResolve: () => void) =>
+  Layer.succeed(HostInstanceDiscovery, {
+    resolve: () =>
+      Effect.sync(() => {
+        onResolve();
+        return {
+          dispatch: () =>
+            Effect.succeed({
+              operation: "mcp_auth_status" as const,
+              result: {
+                ok: true as const,
+                status: { authUrl: "https://ptools.example/auth", servers: [] },
+              },
+            }),
+        };
+      }),
+  });
+
+const authorizedStatusDispatch = (hostId = "host-1") =>
+  withHostAuthorization({ hostId, policy: HostPolicies.execute }, () =>
+    Effect.flatMap(HostHttpOperationAdapter, (adapter) =>
+      adapter.mcpAuthStatus({ params: { hostId } }),
     ),
   );
 
@@ -89,18 +114,123 @@ describe("Host authorization admission", () => {
     ).resolves.toBe("started");
   });
 
-  it("rejects cross-Host token use before the callback starts", async () => {
-    let started = false;
-    const failure = await run(
-      withHostAuthorization(
-        { hostId: "other-host", policy: HostPolicies.execute },
-        () => Effect.sync(() => (started = true)),
-      ).pipe(Effect.flip),
-      { _tag: "HostToken", token: verifiedToken },
+  it("rejects cross-Host token use before Host discovery", async () => {
+    let discoveryCount = 0;
+    const failure = await Effect.runPromise(
+      authorizedStatusDispatch("other-host").pipe(
+        Effect.provideService(Authorization, authorization),
+        Effect.provideService(AuthenticatedHostCallerContext, {
+          _tag: "HostToken",
+          token: verifiedToken,
+        }),
+        Effect.provideService(HostHttpIngress, {
+          publicOrigin: "https://ptools.example",
+        }),
+        Effect.provide(
+          HostHttpOperationAdapterLive.pipe(
+            Layer.provide(discoveryLayer(() => discoveryCount++)),
+          ),
+        ),
+        Effect.flip,
+      ),
     );
 
     expect(failure).toBeInstanceOf(HostTokenRouteMismatch);
-    expect(started).toBe(false);
+    expect(discoveryCount).toBe(0);
+  });
+
+  it("does not discover a Host when the Principal lacks the route permission", async () => {
+    let discoveryCount = 0;
+    const deniedAuthorization = Authorization.of({
+      ...authorization,
+      resolveHostPermissions: () => Effect.succeed(HashSet.empty()),
+    });
+
+    const failure = await Effect.runPromise(
+      authorizedStatusDispatch().pipe(
+        Effect.provideService(Authorization, deniedAuthorization),
+        Effect.provideService(AuthenticatedHostCallerContext, {
+          _tag: "Principal",
+          caller: principalCaller,
+        }),
+        Effect.provideService(HostHttpIngress, {
+          publicOrigin: "https://ptools.example",
+        }),
+        Effect.provide(
+          HostHttpOperationAdapterLive.pipe(
+            Layer.provide(discoveryLayer(() => discoveryCount++)),
+          ),
+        ),
+        Effect.flip,
+      ),
+    );
+
+    expect(failure).toMatchObject({ _tag: "HostAuthorizationDenied" });
+    expect(discoveryCount).toBe(0);
+  });
+
+  it("keeps authorization storage failure distinct and stops before discovery", async () => {
+    let discoveryCount = 0;
+    const failedAuthorization = Authorization.of({
+      ...authorization,
+      resolveHostPermissions: () =>
+        Effect.fail(
+          new HostAccessStoreError({
+            operation: "resolvePrincipalHostAccess",
+            message: "database unavailable",
+          }),
+        ),
+    });
+
+    const failure = await Effect.runPromise(
+      authorizedStatusDispatch().pipe(
+        Effect.provideService(Authorization, failedAuthorization),
+        Effect.provideService(AuthenticatedHostCallerContext, {
+          _tag: "Principal",
+          caller: principalCaller,
+        }),
+        Effect.provideService(HostHttpIngress, {
+          publicOrigin: "https://ptools.example",
+        }),
+        Effect.provide(
+          HostHttpOperationAdapterLive.pipe(
+            Layer.provide(discoveryLayer(() => discoveryCount++)),
+          ),
+        ),
+        Effect.flip,
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(HostAccessStoreError);
+    expect(discoveryCount).toBe(0);
+  });
+
+  it("discovers and dispatches exactly once after successful admission", async () => {
+    let discoveryCount = 0;
+
+    const response = await Effect.runPromise(
+      authorizedStatusDispatch().pipe(
+        Effect.provideService(Authorization, authorization),
+        Effect.provideService(AuthenticatedHostCallerContext, {
+          _tag: "Principal",
+          caller: principalCaller,
+        }),
+        Effect.provideService(HostHttpIngress, {
+          publicOrigin: "https://ptools.example",
+        }),
+        Effect.provide(
+          HostHttpOperationAdapterLive.pipe(
+            Layer.provide(discoveryLayer(() => discoveryCount++)),
+          ),
+        ),
+      ),
+    );
+
+    expect(response).toMatchObject({
+      operation: "mcp_auth_status",
+      result: { ok: true },
+    });
+    expect(discoveryCount).toBe(1);
   });
 
   it("admits current Principal Control Plane authority and rejects tokens", async () => {

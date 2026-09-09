@@ -79,10 +79,13 @@ type OAuthBrowserResponse = {
  * Shared receiver-side behavior for one selected host instance.
  *
  * Platforms install `.layer(options)` in the stable, host-scoped runtime and
- * connect their local/RPC handle to `handle`. The service owns operation
- * interpretation and response projection, but knows nothing about the carrier
- * used to reach it. Construction captures the stable services once; configured
- * Code Mode and auth services are entered later through the context runner.
+ * connect their local/RPC handle to `handle`. Its input is a trusted carrier:
+ * credentialed routes have already completed shared authorization, while OAuth
+ * callbacks prove their workflow authority from signed, single-use state here.
+ * No public caller, credential, token, or permission set crosses this boundary.
+ * The service owns operation interpretation and response projection, but knows
+ * nothing about the carrier used to reach it. Construction captures stable
+ * services once; configured services are entered through the context runner.
  */
 export class HostInstanceHandler extends Context.Service<HostInstanceHandler>()(
   "@ptools/host-runtime/HostInstanceHandler",

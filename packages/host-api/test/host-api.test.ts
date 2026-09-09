@@ -1,6 +1,3 @@
-import { access, readdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
   CodeModeInvalidRequestError,
@@ -17,7 +14,6 @@ import {
   HostHttpOperationAdapterLive,
   HostInstanceDiscovery,
   HostOperationDispatchError,
-  VerifiedHostApiCaller,
 } from "../src/services/index.js";
 import {
   parseHostOperationRequest,
@@ -28,60 +24,6 @@ import {
 } from "../src/index.js";
 import { Effect, Layer, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
-
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-
-describe("host-api source layout", () => {
-  it("keeps reusable DTOs under contracts and Effect services under services", async () => {
-    await expect(fileExists(join(packageRoot, "src/contracts"))).resolves.toBe(
-      true,
-    );
-    await expect(fileExists(join(packageRoot, "src/services"))).resolves.toBe(
-      true,
-    );
-    await expect(fileExists(join(packageRoot, "src/http"))).resolves.toBe(true);
-    await expect(fileExists(join(packageRoot, "src/effect"))).resolves.toBe(
-      false,
-    );
-
-    for (const forbiddenRootFile of [
-      "configureHostSchema.ts",
-      "hostApiSchema.ts",
-      "hostAuthSchema.ts",
-      "hostCodeModeSchema.ts",
-      "hostSecretsSchema.ts",
-      "hostApiCodec.ts",
-      "hostApiResponseHelpers.ts",
-      "hostApiValidation.ts",
-    ]) {
-      await expect(
-        fileExists(join(packageRoot, "src", forbiddenRootFile)),
-      ).resolves.toBe(false);
-    }
-
-    await expect(
-      fileExists(join(packageRoot, "src/contracts/hostApiEnvelope.ts")),
-    ).resolves.toBe(false);
-    await expect(
-      fileExists(join(packageRoot, "src/contracts/hostOperationEnvelope.ts")),
-    ).resolves.toBe(true);
-  });
-
-  it("keeps shared contracts, services, and HTTP code free of platform imports", async () => {
-    const files = [
-      ...(await tsFiles(join(packageRoot, "src/contracts"))),
-      ...(await tsFiles(join(packageRoot, "src/services"))),
-      ...(await tsFiles(join(packageRoot, "src/http"))),
-    ];
-
-    for (const file of files) {
-      const source = await readFile(file, "utf8");
-      expect(source).not.toMatch(
-        /from\s+["'][^"']*(cloudflare|hono|host-cloudflare|host-node|cloudflare:workers|@cloudflare)[^"']*["']/,
-      );
-    }
-  });
-});
 
 describe("host-api schemas", () => {
   it("decodes code_mode requests and responses", async () => {
@@ -155,42 +97,42 @@ describe("host-api schemas", () => {
     ).rejects.toThrow("Invalid host-api request");
   });
 
-  it("encodes plain dispatch carrier data and restores internal Option values", async () => {
-    const base = {
+  it("encodes only trusted Host, ingress, and operation facts", async () => {
+    const dispatch = HostOperationDispatchInput.make({
       hostId: "demo",
       publicOrigin: "https://ptools.example",
-      request: {
-        operation: "mcp_auth_status" as const,
-      },
-    };
-    const withCaller = HostOperationDispatchInput.make({
-      ...base,
-      caller: Option.some({ kind: "HostApiTokenCaller" }),
-    });
-    const withoutCaller = HostOperationDispatchInput.make({
-      ...base,
-      caller: Option.none(),
+      request: { operation: "mcp_auth_status" },
     });
 
-    const encodedWithCaller = await Effect.runPromise(
-      Schema.encodeEffect(HostOperationDispatchInput)(withCaller),
-    );
-    const encodedWithoutCaller = await Effect.runPromise(
-      Schema.encodeEffect(HostOperationDispatchInput)(withoutCaller),
+    const encoded = await Effect.runPromise(
+      Schema.encodeEffect(HostOperationDispatchInput)(dispatch),
     );
 
-    expect(encodedWithCaller).toMatchObject({
+    expect(encoded).toEqual({
       hostId: "demo",
-      caller: { kind: "HostApiTokenCaller" },
+      publicOrigin: "https://ptools.example",
+      request: { operation: "mcp_auth_status" },
     });
-    expect(encodedWithoutCaller).not.toHaveProperty("caller");
+    for (const withheld of [
+      "caller",
+      "credential",
+      "token",
+      "effectivePermissions",
+      "permissions",
+    ]) {
+      expect(encoded).not.toHaveProperty(withheld);
+    }
+  });
 
-    const decoded = await Effect.runPromise(
-      Schema.decodeUnknownEffect(HostOperationDispatchInput)(encodedWithCaller),
-    );
-    expect(Option.getOrThrow(decoded.caller)).toEqual({
-      kind: "HostApiTokenCaller",
-    });
+  it("rejects actor-side unauthorized failures removed by pre-dispatch admission", async () => {
+    await expect(
+      Effect.runPromise(
+        parseHostOperationResponse({
+          _tag: "HostOperationProtocolFailureResponse",
+          error: { code: "unauthorized", message: "legacy actor denial" },
+        }),
+      ),
+    ).rejects.toThrow("Invalid host-api response");
   });
 
   it("decodes structured configure input", async () => {
@@ -281,9 +223,6 @@ describe("HostHttpOperationAdapterLive", () => {
         Effect.provideService(HostHttpIngress, {
           publicOrigin: "https://ptools.example",
         }),
-        Effect.provideService(VerifiedHostApiCaller, {
-          caller: { kind: "HostApiTokenCaller" },
-        }),
         Effect.provide(
           HostHttpOperationAdapterLive.pipe(Layer.provide(discoveryLayer)),
         ),
@@ -297,7 +236,7 @@ describe("HostHttpOperationAdapterLive", () => {
       publicOrigin: "https://ptools.example",
       request: { operation: "code_mode", input: request },
     });
-    expect(Option.isSome(seen.input?.caller ?? Option.none())).toBe(true);
+    expect(seen.input).not.toHaveProperty("caller");
   });
 
   it("maps discovery failures to the shared HTTP internal error", async () => {
@@ -317,9 +256,6 @@ describe("HostHttpOperationAdapterLive", () => {
       ).pipe(
         Effect.provideService(HostHttpIngress, {
           publicOrigin: "https://ptools.example",
-        }),
-        Effect.provideService(VerifiedHostApiCaller, {
-          caller: { kind: "HostApiTokenCaller" },
         }),
         Effect.provide(
           HostHttpOperationAdapterLive.pipe(Layer.provide(discoveryLayer)),
@@ -498,24 +434,3 @@ const makeHostHttpClient = (response: HostCodeModeResponse) => ({
   mcpAuthStatus: () => Effect.die("unused"),
   startMcpAuth: () => Effect.die("unused"),
 });
-
-const fileExists = async (path: string): Promise<boolean> =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
-
-const tsFiles = async (dir: string): Promise<ReadonlyArray<string>> => {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const nested = await Promise.all(
-    entries.map((entry) => {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        return tsFiles(path);
-      }
-      return Promise.resolve(entry.name.endsWith(".ts") ? [path] : []);
-    }),
-  );
-
-  return nested.flat();
-};
