@@ -13,6 +13,24 @@ export class HostHttpUnauthorized extends Schema.TaggedErrorClass<HostHttpUnauth
   { httpApiStatus: 401 },
 ) {}
 
+export class HostHttpForbidden extends Schema.TaggedErrorClass<HostHttpForbidden>()(
+  "HostHttpForbidden",
+  { message: Schema.String },
+  { httpApiStatus: 403 },
+) {}
+
+export class HostHttpNotFound extends Schema.TaggedErrorClass<HostHttpNotFound>()(
+  "HostHttpNotFound",
+  { message: Schema.String },
+  { httpApiStatus: 404 },
+) {}
+
+export class HostHttpConflict extends Schema.TaggedErrorClass<HostHttpConflict>()(
+  "HostHttpConflict",
+  { message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
 export class HostHttpHostUnavailable extends Schema.TaggedErrorClass<HostHttpHostUnavailable>()(
   "HostHttpHostUnavailable",
   { message: Schema.String },

@@ -2,11 +2,12 @@
  * Shared cryptographic and persistence lifecycle for host machine tokens.
  *
  * Callers of issue/revoke have already been authenticated and authorized by a
- * later admission boundary. This service trusts the supplied UserSessionCaller,
- * performs no request admission, and never gives plaintext to persistence.
+ * later admission boundary. This service trusts the supplied
+ * `PrincipalCaller`, performs no request admission, and never gives
+ * plaintext to persistence.
  */
 import { Clock, Context, Crypto, Effect, Equal, Layer, Option, Schema } from "effect";
-import type { UserSessionCaller } from "../contracts/hostCallerPrincipal.js";
+import type { PrincipalCaller } from "../contracts/hostCaller.js";
 import {
   HostTokenId,
 } from "../contracts/hostTokenIdentity.js";
@@ -21,11 +22,17 @@ import {
   HostTokenExpirationInvalid,
   HostTokenInvariantViolation,
   HostTokenRejected,
+  type HostTokenOperation,
 } from "../contracts/hostTokenErrors.js";
 import type {
   IssueHostTokenError,
   IssueHostTokenInput,
 } from "../contracts/hostTokenOperations/issueHostToken.js";
+import type {
+  ListAllHostTokensInput,
+  ListHostTokensError,
+  ListHostTokensInput,
+} from "../contracts/hostTokenOperations/listHostTokens.js";
 import {
   RevokeHostTokenRecordInput,
   type RevokeHostTokenError,
@@ -40,7 +47,7 @@ import {
   makeV1HostTokenCredential,
   parseV1HostTokenCredential,
 } from "../hostTokenCredential.js";
-import { hashHostTokenCredential } from "../hostTokenHashing.js";
+import { hashHostTokenCredential, timingSafeDigestEquals } from "../hostTokenHashing.js";
 import {
   isHostTokenActiveAt,
   projectSafeHostToken,
@@ -48,10 +55,24 @@ import {
 } from "../hostTokenProjection.js";
 import { HostTokenRecordStore } from "./hostTokenRecordStore.js";
 
-const cryptoFailure = (operation: "issue" | "verify") => (error: Error) =>
-  new HostTokenCryptoError({ operation, message: error.message });
+/**
+ * Maps a platform crypto failure onto the wire-safe diagnostic error.
+ *
+ * The operation type is deliberately narrower than `HostTokenOperation`:
+ * only `issue` (random secret, token UUID) and `verify` (credential
+ * digesting, via `hashHostTokenCredential`) perform platform crypto work, so
+ * a crypto failure attributed to `revoke` or `list` would be a false
+ * diagnostic. `Extract` ties the literals to the contract so a rename there
+ * fails here too, while contract additions do not widen this set — widening
+ * is a semantic change to make together with the crypto call site that
+ * justifies it, not a cleanup.
+ */
+const cryptoFailure = (
+  operation: Extract<HostTokenOperation, "issue" | "verify">,
+) =>
+  (error: Error) => new HostTokenCryptoError({ operation, message: error.message });
 
-const invariant = (operation: "issue" | "verify" | "revoke", message: string) =>
+const invariant = (operation: HostTokenOperation, message: string) =>
   new HostTokenInvariantViolation({ operation, message });
 
 /**
@@ -59,9 +80,9 @@ const invariant = (operation: "issue" | "verify" | "revoke", message: string) =>
  * hash-only record store.
  *
  * `issue` creates and persists a credential after receiving a separately
- * admitted human caller; `verify` turns an untrusted bearer string into
- * request-scoped machine authority; `revoke` records the separately admitted
- * human revoker. This service intentionally does not authenticate sessions,
+ * admitted Principal-caller caller; `verify` turns an untrusted bearer string
+ * into request-scoped token authority; `revoke` records the separately admitted
+ * Principal caller. This service intentionally does not verify credentials,
  * resolve host membership, run authorization policies, parse HTTP, or compare
  * a verified token's host binding with a route host—later Host API admission
  * owns those steps and calls these methods only at the appropriate seam.
@@ -75,7 +96,7 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
 
       const issue = (
         input: IssueHostTokenInput,
-        issuer: UserSessionCaller,
+        issuer: PrincipalCaller,
       ): Effect.Effect<IssuedHostToken, IssueHostTokenError> =>
         Effect.gen(function* () {
           const createdAtEpochMs = yield* Clock.currentTimeMillis;
@@ -121,10 +142,10 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
             name: input.name,
             grantedPermissions: input.grantedPermissions,
             createdAtEpochMs,
-            issuedByUserId: issuer.userId,
+            issuedByPrincipalId: issuer.principalId,
             expiresAtEpochMs: input.expiresAtEpochMs,
             revokedAtEpochMs: Option.none(),
-            revokedByUserId: Option.none(),
+            revokedByPrincipalId: Option.none(),
           }).pipe(
             Effect.mapError(() =>
               invariant("issue", "issued token record violated its lifecycle contract"),
@@ -168,7 +189,10 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
               Effect.fail(new HostTokenRejected({ message: "host token was rejected" })),
             onSome: Effect.succeed,
           });
-          if (record.tokenHash !== tokenHash) {
+          // Store output was already keyed by this digest, so this check fires
+          // only on a broken store (hence the invariant, not a rejection). See
+          // timingSafeDigestEquals for why the comparison itself is constant-time.
+          if (!timingSafeDigestEquals(record.tokenHash, tokenHash)) {
             return yield* invariant(
               "verify",
               "hash lookup returned a record for a different digest",
@@ -183,7 +207,7 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
 
       const revoke = (
         input: RevokeHostTokenInput,
-        revoker: UserSessionCaller,
+        revoker: PrincipalCaller,
       ): Effect.Effect<HostToken, RevokeHostTokenError> =>
         Effect.gen(function* () {
           const revokedAtEpochMs = yield* Clock.currentTimeMillis;
@@ -192,14 +216,14 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
               hostId: input.hostId,
               tokenId: input.tokenId,
               revokedAtEpochMs,
-              revokedByUserId: revoker.userId,
+              revokedByPrincipalId: revoker.principalId,
             }),
           );
           if (
             record.hostId !== input.hostId ||
             record.tokenId !== input.tokenId ||
             Option.isNone(record.revokedAtEpochMs) ||
-            Option.isNone(record.revokedByUserId) ||
+            Option.isNone(record.revokedByPrincipalId) ||
             record.revokedAtEpochMs.value > revokedAtEpochMs
           ) {
             return yield* invariant(
@@ -210,7 +234,52 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
           return projectSafeHostToken(record);
         });
 
-      return { issue, verify, revoke } as const;
+      const projectTokenInventory = (
+        records: ReadonlyArray<HostTokenRecord>,
+        expectedHostId?: string,
+      ): Effect.Effect<ReadonlyArray<HostToken>, HostTokenInvariantViolation> => {
+        const hasDuplicate =
+          new Set(records.map((record) => record.tokenId)).size !== records.length;
+        const isOrdered = records.every((record, index) => {
+          const previous = records[index - 1];
+          return (
+            previous === undefined ||
+            previous.createdAtEpochMs < record.createdAtEpochMs ||
+            (previous.createdAtEpochMs === record.createdAtEpochMs &&
+              previous.tokenId < record.tokenId)
+          );
+        });
+        const hasWrongHost =
+          expectedHostId !== undefined &&
+          records.some((record) => record.hostId !== expectedHostId);
+
+        return hasDuplicate || !isOrdered || hasWrongHost
+          ? Effect.fail(
+              invariant(
+                "list",
+                "token inventory violated Host scope, uniqueness, or ordering",
+              ),
+            )
+          : Effect.succeed(records.map(projectSafeHostToken));
+      };
+
+      const listByHost = (
+        input: ListHostTokensInput,
+      ): Effect.Effect<ReadonlyArray<HostToken>, ListHostTokensError> =>
+        recordStore.listByHost(input.hostId).pipe(
+          Effect.flatMap((records) =>
+            projectTokenInventory(records, input.hostId),
+          ),
+        );
+
+      const listAll = (
+        _input: ListAllHostTokensInput,
+      ): Effect.Effect<ReadonlyArray<HostToken>, ListHostTokensError> =>
+        recordStore.listAll().pipe(
+          Effect.flatMap((records) => projectTokenInventory(records)),
+        );
+
+      return { issue, verify, revoke, listByHost, listAll } as const;
     }),
   },
 ) {

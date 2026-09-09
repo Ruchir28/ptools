@@ -4,7 +4,7 @@ import {
   HostTokenRecord,
   VerifiedHostToken,
 } from "./contracts/hostToken.js";
-import { HostTokenCaller } from "./contracts/hostCallerPrincipal.js";
+import { HostTokenCaller } from "./contracts/hostCaller.js";
 
 /**
  * Crosses from the trusted persistence representation to the management-safe
@@ -20,10 +20,10 @@ export const projectSafeHostToken = (record: HostTokenRecord): HostToken =>
     name: record.name,
     grantedPermissions: record.grantedPermissions,
     createdAtEpochMs: record.createdAtEpochMs,
-    issuedByUserId: record.issuedByUserId,
+    issuedByPrincipalId: record.issuedByPrincipalId,
     expiresAtEpochMs: record.expiresAtEpochMs,
     revokedAtEpochMs: record.revokedAtEpochMs,
-    revokedByUserId: record.revokedByUserId,
+    revokedByPrincipalId: record.revokedByPrincipalId,
   });
 
 /**

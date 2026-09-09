@@ -7,6 +7,7 @@
  * validation helpers, Promise handles, or Effect service tags.
  */
 export * from "./configureHost.js";
+export * from "./controlPlaneHttp.js";
 export * from "./hostOperationEnvelope.js";
 export * from "./hostOperationDispatch.js";
 export * from "./hostCodeMode.js";

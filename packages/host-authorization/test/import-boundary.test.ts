@@ -19,7 +19,18 @@ import { describe, expect, it } from "vitest";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
+/**
+ * Source-layout law: contracts/services/internal keep their semantic roles,
+ * every store operation is packaged from its own module, and obsolete broad
+ * files plus generic catch-all names must stay absent.
+ */
 describe("host-authorization import boundary", () => {
+  /**
+   * Proves the source-layout law: semantic folders exist, every store and
+   * token operation has its own module with no result-wrapper constructors,
+   * obsolete broad operation files are gone, and no generic catch-all names
+   * exist at the package root.
+   */
   it("keeps contracts, services, and internal derivation in semantic folders", async () => {
     await expect(fileExists(join(packageRoot, "src/contracts"))).resolves.toBe(
       true,
@@ -36,16 +47,20 @@ describe("host-authorization import boundary", () => {
     await expect(
       fileExists(join(packageRoot, "src/contracts/hostTokenOperations")),
     ).resolves.toBe(true);
+    await expect(
+      fileExists(join(packageRoot, "src/contracts/controlPlaneAccessOperations")),
+    ).resolves.toBe(true);
 
     const operationFiles = [
       "createMembership.ts",
       "createOwnedHost.ts",
       "listHostRoles.ts",
-      "listUserHosts.ts",
+      "listPrincipalHosts.ts",
+      "listRegisteredHosts.ts",
       "replaceMembershipRoles.ts",
       "getHostRole.ts",
       "getRegisteredHost.ts",
-      "resolveUserHostAccess.ts",
+      "resolvePrincipalHostAccess.ts",
     ] as const;
 
     for (const operationFile of operationFiles) {
@@ -62,6 +77,7 @@ describe("host-authorization import boundary", () => {
 
     for (const tokenOperationFile of [
       "issueHostToken.ts",
+      "listHostTokens.ts",
       "verifyHostToken.ts",
       "revokeHostToken.ts",
     ]) {
@@ -119,6 +135,10 @@ describe("host-authorization import boundary", () => {
     }
   });
 
+  /**
+   * Proves the published artifact includes compiled output, so the nested
+   * operation modules survive packaging and stay importable by consumers.
+   */
   it("publishes nested operation modules with the contracts artifact", async () => {
     const manifest = JSON.parse(
       await readFile(join(packageRoot, "package.json"), "utf8"),
@@ -129,6 +149,12 @@ describe("host-authorization import boundary", () => {
     );
   });
 
+  /**
+   * Proves the authorization kernel imports no identity, API, persistence,
+   * runtime, or platform package and touches no ambient Node, Cloudflare,
+   * Alchemy, or global crypto surface — shared code consumes
+   * Effect-managed capabilities only.
+   */
   it("imports no identity, API, persistence, runtime, or platform package", async () => {
     const sources = await Promise.all(
       (await sourceFiles(join(packageRoot, "src"))).map((path) =>
@@ -159,15 +185,18 @@ describe("host-authorization import boundary", () => {
   });
 });
 
+/** Existence probe that treats ENOENT as `false` rather than a test error. */
 const fileExists = async (path: string): Promise<boolean> =>
   access(path).then(
     () => true,
     () => false,
   );
 
+/** Matches any import specifier rooted at `packageName`, including subpaths. */
 const packageImport = (packageName: string): RegExp =>
   new RegExp(`from ["']${packageName}(?:/[^"']*)?["']`);
 
+/** Recursively collects `.ts` source paths under `directory` for text scans. */
 const sourceFiles = async (
   directory: string,
 ): Promise<ReadonlyArray<string>> => {

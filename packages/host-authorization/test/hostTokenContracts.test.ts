@@ -22,6 +22,8 @@ import {
   HostTokenPermissionSelection,
   HostTokenRecord,
   IssueHostTokenInput,
+  PrincipalId,
+  PrincipalIds,
 } from "../src/contracts/index.js";
 
 // This fully valid record fixture is varied one invariant at a time below. Its
@@ -42,13 +44,24 @@ const recordFields = {
   name: HostTokenName.make("OpenCode laptop"),
   grantedPermissions: permissions,
   createdAtEpochMs: 100,
-  issuedByUserId: "user-1",
+  issuedByPrincipalId: PrincipalIds.fromFixedLocalIdentity("principal-1"),
   expiresAtEpochMs: Option.some(200),
   revokedAtEpochMs: Option.none<number>(),
-  revokedByUserId: Option.none<string>(),
+  revokedByPrincipalId: Option.none<PrincipalId>(),
 };
 
+/**
+ * Public and persistence token representations: display names never own
+ * identity, grant selections stay canonical, lifecycle audit fields are
+ * paired, and safe management values have no slot through which a digest or
+ * issuer identity could be claimed by public JSON.
+ */
 describe("host token contracts", () => {
+  /**
+   * Proves display names allow Unicode but not padding, emptiness, or
+   * over-length values, and that renaming never derives or replaces token
+   * identity.
+   */
   it("accepts bounded trimmed Unicode names without using them as identity", () => {
     expect(HostTokenName.make("開発 laptop")).toBe("開発 laptop");
     expect(() => HostTokenName.make(" padded ")).toThrow();
@@ -62,6 +75,10 @@ describe("host token contracts", () => {
     expect(first.tokenId).toBe(second.tokenId);
   });
 
+  /**
+   * Proves delegated grant selections decode only from canonical catalog
+   * values: empty, duplicated, unknown, or misordered grants fail.
+   */
   it("rejects empty, duplicate, unknown, and non-canonical permission grants", () => {
     // Decode unknown values as an external request would, proving callers cannot
     // bypass canonical grant construction with a structurally typed array.
@@ -72,6 +89,11 @@ describe("host token contracts", () => {
     expect(() => decode([HostPermissions.host.execute, HostPermissions.host.read])).toThrow();
   });
 
+  /**
+   * Proves cross-field lifecycle laws: expiry must be strictly after
+   * creation, and revocation time and revoker identity must always appear
+   * together or not at all.
+   */
   it("enforces expiry and paired revocation audit facts", () => {
     // These cases exercise relationships between fields: no individual timestamp
     // schema could detect expiry-at-creation or a revocation missing its actor.
@@ -79,15 +101,21 @@ describe("host token contracts", () => {
     expect(() => HostTokenRecord.make({
       ...recordFields,
       revokedAtEpochMs: Option.some(110),
-      revokedByUserId: Option.none(),
+      revokedByPrincipalId: Option.none(),
     })).toThrow();
     expect(() => HostTokenRecord.make({
       ...recordFields,
       revokedAtEpochMs: Option.some(99),
-      revokedByUserId: Option.some("user-2"),
+      revokedByPrincipalId: Option.some(PrincipalIds.fromFixedLocalIdentity("principal-2")),
     })).toThrow();
   });
 
+  /**
+   * Proves persisted records must encode `credentialVersion: 1` explicitly
+   * (constructor defaults do not apply to encoded data, so old or unknown
+   * formats fail closed) and private row fields are rejected at the
+   * persistence boundary.
+   */
   it("requires encoded version 1 and rejects excess persistence fields", () => {
     // Persistence is an unknown-data boundary. Strict excess-property handling
     // prevents a private row shape from silently becoming part of the shared record.
@@ -100,7 +128,7 @@ describe("host token contracts", () => {
       name: "OpenCode laptop",
       grantedPermissions: permissions,
       createdAtEpochMs: 100,
-      issuedByUserId: "user-1",
+      issuedByPrincipalId: PrincipalIds.fromFixedLocalIdentity("principal-1"),
       expiresAtEpochMs: 200,
     };
     expect(decode(encoded)).toBeInstanceOf(HostTokenRecord);
@@ -112,6 +140,11 @@ describe("host token contracts", () => {
     expect(() => decode({ ...encoded, databaseId: 42 })).toThrow();
   });
 
+  /**
+   * Proves verified token callers carry the same branded token identity as
+   * records, and that the public issuance input has no issuer field — audit
+   * identity only crosses the trusted service argument.
+   */
   it("uses HostTokenId in HostTokenCaller and keeps issue input audit-free", () => {
     expect(HostTokenCaller.make({ tokenId, hostId: "personal" }).tokenId).toBe(tokenId);
     expectTypeOf<HostTokenCaller["tokenId"]>().toEqualTypeOf<typeof tokenId>();
@@ -123,10 +156,14 @@ describe("host token contracts", () => {
       grantedPermissions: permissions,
       expiresAtEpochMs: Option.none(),
     });
-    expect(input).not.toHaveProperty("issuedByUserId");
+    expect(input).not.toHaveProperty("issuedByPrincipalId");
     expect(input).not.toHaveProperty("issuer");
   });
 
+  /**
+   * Proves the safe management projection's schema has no slot for the
+   * credential digest, so inventory listings cannot leak it.
+   */
   it("keeps hashes out of safe management values", () => {
     // Construct the safe representation from the shared metadata fields and
     // prove its schema has no slot through which a digest could be disclosed.

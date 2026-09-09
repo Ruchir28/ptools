@@ -62,6 +62,7 @@
     "@ptools/auth": "workspace:*",
     "@ptools/code-mode-api": "workspace:*",
     "@ptools/config": "workspace:*",
+    "@ptools/host-authorization": "workspace:*",
     "effect": "4.0.0-beta.102"
   }
 }

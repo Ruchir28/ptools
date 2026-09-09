@@ -2,12 +2,23 @@
  * Contract for `HostAccessStore.createOwnedHost`.
  *
  * Input: a requested host ID plus the authenticated creator identity supplied
- * by trusted middleware. Success: one aggregate proving that the registered host
+ * by trusted middleware. Success: one aggregate proving that the registered Host
  * and creator Owner access became visible together.
  *
- * Law: `host.hostId` equals `input.requestedHostId` and
- * `ownerAccess.userId` equals `input.ownerUserId`. The aggregate schema itself
- * enforces that `host` and `ownerAccess` share one host ID.
+ * The implementation resolves the package-owned
+ * `BuiltInHostRoles.owner.roleId`, proves that exact UUID still identifies an
+ * installed role, and creates the Host, membership, and assignment in one
+ * atomic operation. It must not scan roles or identify Owner by display name or
+ * permissions, and it must not accept the default role ID from a caller.
+ *
+ * Because the built-in UUID is already stable application identity, platforms
+ * need neither a seed binding nor a stored generated-ID reference. They remain
+ * free to map the UUID to a private database primary key internally.
+ *
+ * Law: `host.hostId` equals `input.requestedHostId`,
+ * `ownerAccess.principalId` equals `input.ownerPrincipalId`, and the returned
+ * permissions are resolved from the assigned default Owner role. The aggregate
+ * schema itself enforces that `host` and `ownerAccess` share one Host ID.
  */
 import { Brand, Schema } from "effect";
 import {
@@ -16,15 +27,16 @@ import {
   RegisteredHostAlreadyExists,
 } from "../hostAccessErrors.js";
 import { HostMemberAccess } from "../hostMemberAccess.js";
+import { PrincipalId } from "../principal.js";
 import { RegisteredHost } from "../registeredHost.js";
 
-/** Trusted creation input; `ownerUserId` is never accepted directly from HTTP. */
+/** Trusted creation input; `ownerPrincipalId` is never accepted directly from HTTP. */
 export class CreateOwnedHostInput extends Schema.Class<
   CreateOwnedHostInput,
   Brand.Brand<"CreateOwnedHostInput">
 >("CreateOwnedHostInput")({
   requestedHostId: Schema.NonEmptyString,
-  ownerUserId: Schema.NonEmptyString,
+  ownerPrincipalId: PrincipalId,
 }) {}
 
 const matchingHostAndOwnerAccess = Schema.makeFilter(

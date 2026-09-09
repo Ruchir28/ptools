@@ -6,14 +6,16 @@
  * never treats a DB outage as authorization denial.
  */
 import { Schema } from "effect";
-import { HostRoleKey, HostRoleKeySelection } from "./hostRole.js";
+import { HostRoleId, HostRoleIdSelection } from "./hostRole.js";
+import { PrincipalId } from "./principal.js";
 
 /** Exact operation discriminators used by shared store diagnostics. */
 export const HostAccessStoreOperation = Schema.Literals([
   "getRegisteredHost",
   "createOwnedHost",
-  "listUserHosts",
-  "resolveUserHostAccess",
+  "listPrincipalHosts",
+  "listRegisteredHosts",
+  "resolvePrincipalHostAccess",
   "createMembership",
   "replaceMembershipRoles",
   "getHostRole",
@@ -35,30 +37,24 @@ export class RegisteredHostAlreadyExists extends Schema.TaggedErrorClass<Registe
   { hostId: Schema.NonEmptyString, message: Schema.NonEmptyString },
 ) {}
 
-/** No current role exists for the requested stable application key. */
+/** No current Host role exists for the requested logical role UUID. */
 export class HostRoleNotFound extends Schema.TaggedErrorClass<HostRoleNotFound>()(
   "HostRoleNotFound",
-  {
-    roleKey: HostRoleKey,
-    message: Schema.NonEmptyString,
-  },
+  { roleId: HostRoleId, message: Schema.NonEmptyString },
 ) {}
 
-/** One or more requested membership role keys do not currently exist. */
+/** One or more requested membership role IDs do not currently exist. */
 export class HostRolesNotFound extends Schema.TaggedErrorClass<HostRolesNotFound>()(
   "HostRolesNotFound",
-  {
-    roleKeys: HostRoleKeySelection,
-    message: Schema.NonEmptyString,
-  },
+  { roleIds: HostRoleIdSelection, message: Schema.NonEmptyString },
 ) {}
 
-/** The user has no current membership on the existing registered host. */
+/** The Principal has no current membership on the existing registered host. */
 export class HostMembershipNotFound extends Schema.TaggedErrorClass<HostMembershipNotFound>()(
   "HostMembershipNotFound",
   {
     hostId: Schema.NonEmptyString,
-    userId: Schema.NonEmptyString,
+    principalId: PrincipalId,
     message: Schema.NonEmptyString,
   },
 ) {}
@@ -68,7 +64,7 @@ export class HostMembershipAlreadyExists extends Schema.TaggedErrorClass<HostMem
   "HostMembershipAlreadyExists",
   {
     hostId: Schema.NonEmptyString,
-    userId: Schema.NonEmptyString,
+    principalId: PrincipalId,
     message: Schema.NonEmptyString,
   },
 ) {}
@@ -76,17 +72,11 @@ export class HostMembershipAlreadyExists extends Schema.TaggedErrorClass<HostMem
 /** Decoded state or a platform result violated the shared operation contract. */
 export class HostAccessInvariantViolation extends Schema.TaggedErrorClass<HostAccessInvariantViolation>()(
   "HostAccessInvariantViolation",
-  {
-    operation: HostAccessStoreOperation,
-    message: Schema.NonEmptyString,
-  },
+  { operation: HostAccessStoreOperation, message: Schema.NonEmptyString },
 ) {}
 
 /** Safe projection of a persistence or remote-service infrastructure failure. */
 export class HostAccessStoreError extends Schema.TaggedErrorClass<HostAccessStoreError>()(
   "HostAccessStoreError",
-  {
-    operation: HostAccessStoreOperation,
-    message: Schema.NonEmptyString,
-  },
+  { operation: HostAccessStoreOperation, message: Schema.NonEmptyString },
 ) {}

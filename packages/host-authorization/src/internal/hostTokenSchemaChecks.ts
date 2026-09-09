@@ -56,10 +56,10 @@ export const validHostTokenLifecycle = Schema.makeFilter(
     readonly createdAtEpochMs: number;
     readonly expiresAtEpochMs: Option.Option<number>;
     readonly revokedAtEpochMs: Option.Option<number>;
-    readonly revokedByUserId: Option.Option<string>;
+    readonly revokedByPrincipalId: Option.Option<string>;
   }) => {
     const hasRevokedAt = Option.isSome(value.revokedAtEpochMs);
-    const hasRevoker = Option.isSome(value.revokedByUserId);
+    const hasRevoker = Option.isSome(value.revokedByPrincipalId);
     return (
       (Option.isNone(value.expiresAtEpochMs) ||
         value.expiresAtEpochMs.value > value.createdAtEpochMs) &&

@@ -2,7 +2,12 @@ import { Schema } from "effect";
 import { HostTokenId } from "./hostTokenIdentity.js";
 
 /** Shared lifecycle operation attached to service-level diagnostics. */
-export const HostTokenOperation = Schema.Literals(["issue", "verify", "revoke"]);
+export const HostTokenOperation = Schema.Literals([
+  "issue",
+  "verify",
+  "revoke",
+  "list",
+]);
 export type HostTokenOperation = Schema.Schema.Type<typeof HostTokenOperation>;
 
 /** Exact persistence-port method attached to infrastructure diagnostics. */
@@ -10,6 +15,8 @@ export const HostTokenRecordStoreOperation = Schema.Literals([
   "create",
   "findByHash",
   "revoke",
+  "listByHost",
+  "listAll",
 ]);
 export type HostTokenRecordStoreOperation = Schema.Schema.Type<
   typeof HostTokenRecordStoreOperation

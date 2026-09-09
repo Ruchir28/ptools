@@ -1,6 +1,7 @@
 import { Brand, Schema } from "effect";
 import { hasUniqueCanonicalPermissions } from "../internal/hostAccessSchemaChecks.js";
 import { HostPermission } from "./hostPermission.js";
+import { PrincipalId } from "./principal.js";
 
 /**
  * Runs when `HostMemberAccess` is constructed/decoded. Platforms union role
@@ -20,7 +21,7 @@ const canonicalEffectivePermissions = Schema.makeFilter(
 );
 
 /**
- * Current effective human permissions for one user on one registered host.
+ * Current effective role-derived permissions for one Principal on one Host.
  *
  * This is the shared authorization aggregate: policies see permissions only,
  * not role names, assignment rows, or join tables. Branding forces construction
@@ -33,7 +34,7 @@ export class HostMemberAccess extends Schema.Class<
 >("HostMemberAccess")(
   Schema.Struct({
     hostId: Schema.NonEmptyString,
-    userId: Schema.NonEmptyString,
+    principalId: PrincipalId,
     effectivePermissions: Schema.NonEmptyArray(HostPermission),
   }).pipe(Schema.check(canonicalEffectivePermissions)),
 ) {}

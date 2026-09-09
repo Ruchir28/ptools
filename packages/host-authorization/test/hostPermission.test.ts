@@ -3,7 +3,7 @@
  *
  * What this proves:
  * 1. One authored permission declaration produces both the runtime schema and
- *    the typed catalog consumed by policies.
+ *    the typed catalog consumed by policies, with or without a namespace.
  * 2. Unknown permission and caller variants fail at the contract boundary.
  * 3. Strict boundary decoding rejects credential fields outside the neutral
  *    principal contract.
@@ -14,12 +14,16 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  HostCallerPrincipal,
+  ControlPlanePermission,
+  ControlPlanePermissions,
+  HostCaller,
   HostPermission,
   HostPermissions,
+  PrincipalIds,
 } from "../src/contracts/index.js";
 import { definePermissions } from "../src/internal/definePermissions.js";
 
+/** Authored catalogs pinned as literals so derived values cannot drift silently. */
 const expectedPermissions = [
   "host:read",
   "host:execute",
@@ -32,7 +36,24 @@ const expectedPermissions = [
   "members:manage",
 ] as const;
 
+const expectedControlPlanePermissions = [
+  "control-plane:hosts:create",
+  "control-plane:hosts:list",
+  "control-plane:hosts:administer",
+  "control-plane:access:manage",
+] as const;
+
+/**
+ * One authored permission declaration must yield both the runtime schema and
+ * the typed catalog; failures cover malformed parts, unknown values, and
+ * catalog/schema drift.
+ */
 describe("host permission contract", () => {
+  /**
+   * Proves `definePermissions` produces a flat runtime value list and a
+   * nested typed catalog from one authored declaration, in declaration
+   * order.
+   */
   it("derives one matching value list and nested catalog", () => {
     const definition = definePermissions({
       document: ["read", "manage"],
@@ -53,7 +74,12 @@ describe("host permission contract", () => {
     });
   });
 
-  it("keeps the exported catalog and runtime schema in lockstep", () => {
+  /**
+   * Proves every `HostPermissions` catalog entry decodes as a
+   * `HostPermission` and unknown permission strings fail — the exported
+   * catalog and the runtime schema cannot drift apart.
+   */
+  it("keeps the exported Host catalog and runtime schema in lockstep", () => {
     const catalogValues = Object.values(HostPermissions).flatMap((domain) =>
       Object.values(domain),
     );
@@ -69,6 +95,33 @@ describe("host permission contract", () => {
     ).toThrow();
   });
 
+  /**
+   * Proves the namespaced Control Plane catalog and its schema stay in
+   * lockstep and reject unknown or malformed permission strings.
+   */
+  it("derives the namespaced Control Plane catalog and schema together", () => {
+    const catalogValues = Object.values(ControlPlanePermissions).flatMap(
+      (domain) => Object.values(domain),
+    );
+
+    expect(catalogValues).toEqual(expectedControlPlanePermissions);
+    for (const permission of catalogValues) {
+      expect(Schema.decodeUnknownSync(ControlPlanePermission)(permission)).toBe(
+        permission,
+      );
+    }
+    expect(() =>
+      Schema.decodeUnknownSync(ControlPlanePermission)(
+        "control-plane:hosts:delete",
+      ),
+    ).toThrow();
+  });
+
+  /**
+   * Proves authoring errors — duplicate actions, `:` inside domains, actions,
+   * or namespaces — throw at definition time instead of producing ambiguous
+   * runtime permission values.
+   */
   it("fails fast for malformed or duplicate authored permission parts", () => {
     expect(() =>
       definePermissions({ invalid: ["read", "read"] } as const),
@@ -79,25 +132,38 @@ describe("host permission contract", () => {
     expect(() =>
       definePermissions({ valid: ["invalid:action"] } as const),
     ).toThrow(/must not contain/);
+    expect(() =>
+      definePermissions({ valid: ["read"] } as const, {
+        namespace: "invalid:namespace",
+      }),
+    ).toThrow(/must not contain/);
   });
 });
 
+/**
+ * `HostCaller` accepts only the two authenticated caller variants and rejects
+ * raw credential fields — it is the neutral boundary between authentication
+ * adapters and later admission.
+ */
 describe("host caller principal contract", () => {
-  const decodeStrict = Schema.decodeUnknownSync(HostCallerPrincipal, {
+  const decodeStrict = Schema.decodeUnknownSync(HostCaller, {
     onExcessProperty: "error",
   });
 
-  it("accepts only human-session and host-token principals", () => {
+  /**
+   * Proves the authenticated-caller union accepts exactly the two supported
+   * variants and rejects unknown tags, keeping admission inputs closed.
+   */
+  it("accepts only Principal-caller and Host-token callers", () => {
+    const principalId = PrincipalIds.fromExternalSubject("issuer", "user-1");
     expect(
       decodeStrict({
-        _tag: "UserSessionCaller",
-        userId: "user-1",
-        sessionId: "session-1",
+        _tag: "PrincipalCaller",
+        principalId,
       }),
     ).toEqual({
-      _tag: "UserSessionCaller",
-      userId: "user-1",
-      sessionId: "session-1",
+      _tag: "PrincipalCaller",
+      principalId,
     });
 
     expect(
@@ -112,15 +178,20 @@ describe("host caller principal contract", () => {
       hostId: "host-1",
     });
 
-    expect(() => decodeStrict({ _tag: "LegacyDeploymentTokenCaller" })).toThrow();
+    expect(() =>
+      decodeStrict({ _tag: "LegacyDeploymentTokenCaller" }),
+    ).toThrow();
   });
 
+  /**
+   * Proves raw cookie/token credential fields cannot ride along into the
+   * neutral caller identity at strict trusted-wire decoding boundaries.
+   */
   it("rejects raw credentials at a strict trusted-wire boundary", () => {
     expect(() =>
       decodeStrict({
-        _tag: "UserSessionCaller",
-        userId: "user-1",
-        sessionId: "session-1",
+        _tag: "PrincipalCaller",
+        principalId: PrincipalIds.fromExternalSubject("issuer", "user-1"),
         rawCookie: "private-cookie",
       }),
     ).toThrow();

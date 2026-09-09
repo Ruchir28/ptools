@@ -24,6 +24,7 @@ import {
   HttpApiSecurity,
 } from "effect/unstable/httpapi";
 import type { HostApiCaller } from "../contracts/hostOperationDispatch.js";
+import { AuthenticatedHostCallerContext } from "./hostAuthorizationAdmission.js";
 import { Context, Schema } from "effect";
 
 /**
@@ -60,6 +61,34 @@ export class HostApiUnauthorized extends Schema.TaggedErrorClass<HostApiUnauthor
  * from, so this package must not implement a generic token verifier or read any
  * platform-specific env/config values.
  */
+/**
+ * Platform authentication contract for the new Principal/Host-token boundary.
+ * A successful Principal caller must first call
+ * `ControlPlaneAccessStore.ensurePrincipal`; a successful Host token retains
+ * its verified frozen grants. Implementations then provide only the normalized
+ * request-local caller context.
+ *
+ * Future default implementation: the Host-token path (parse v1 credential ->
+ * `HostTokenService.verify` -> frozen grants) is fully shared logic over ports
+ * platforms already supply, so a shared `Live` layer is viable — but only if
+ * Principal credential proof stays platform-owned behind a narrow injected
+ * port (e.g. `VerifyPrincipalCredential`: request credential ->
+ * `Option<PrincipalCaller>`). Shared code must never accept or construct a
+ * credential it did not verify (the `TrustedLocal` spoofing risk), and the
+ * Principal credential scheme (session cookie, JWT, machine credential) is
+ * deliberately not finalized, so nothing here may bake one in. This contract
+ * also does not yet declare its `security` transport (unlike
+ * `RequireHostApiAccess`'s bearer); pin that before extracting the shared
+ * layer. Extract when a second platform implements this middleware, not
+ * speculatively.
+ */
+export class RequireAuthenticatedHostCaller extends HttpApiMiddleware.Service<
+  RequireAuthenticatedHostCaller,
+  { provides: AuthenticatedHostCallerContext }
+>()("@ptools/RequireAuthenticatedHostCaller", {
+  error: HostApiUnauthorized,
+}) {}
+
 export class RequireHostApiAccess extends HttpApiMiddleware.Service<
   RequireHostApiAccess,
   { provides: VerifiedHostApiCaller }

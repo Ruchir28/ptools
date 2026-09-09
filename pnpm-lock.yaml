@@ -288,6 +288,9 @@ importers:
       '@ptools/config':
         specifier: workspace:*
         version: link:../config
+      '@ptools/host-authorization':
+        specifier: workspace:*
+        version: link:../host-authorization
       effect:
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
@@ -297,6 +300,9 @@ importers:
       effect:
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
+      uuid:
+        specifier: 14.0.1
+        version: 14.0.1
 
   packages/host-cloudflare:
     dependencies:

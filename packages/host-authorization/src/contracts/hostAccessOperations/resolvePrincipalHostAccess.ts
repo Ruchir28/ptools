@@ -1,7 +1,7 @@
 /**
- * Contract for `HostAccessStore.resolveUserHostAccess`.
+ * Contract for `HostAccessStore.resolvePrincipalHostAccess`.
  *
- * Input: one user/registered-host pair. Success: the matching `HostMemberAccess`
+ * Input: one Principal/registered-Host pair. Success: matching access
  * domain value directly. The platform resolves assigned roles, decodes and
  * unions their permissions, and returns canonical effective access.
  *
@@ -15,18 +15,19 @@ import {
   HostMembershipNotFound,
   RegisteredHostNotFound,
 } from "../hostAccessErrors.js";
+import { PrincipalId } from "../principal.js";
 
-/** User and registered host whose current effective access must be resolved. */
-export class ResolveUserHostAccessInput extends Schema.Class<
-  ResolveUserHostAccessInput,
-  Brand.Brand<"ResolveUserHostAccessInput">
->("ResolveUserHostAccessInput")({
+/** Principal and registered Host whose current access must be resolved. */
+export class ResolvePrincipalHostAccessInput extends Schema.Class<
+  ResolvePrincipalHostAccessInput,
+  Brand.Brand<"ResolvePrincipalHostAccessInput">
+>("ResolvePrincipalHostAccessInput")({
   hostId: Schema.NonEmptyString,
-  userId: Schema.NonEmptyString,
+  principalId: PrincipalId,
 }) {}
 
-/** Failures published by `HostAccessStore.resolveUserHostAccess`. */
-export type ResolveUserHostAccessError =
+/** Failures published by `HostAccessStore.resolvePrincipalHostAccess`. */
+export type ResolvePrincipalHostAccessError =
   | RegisteredHostNotFound
   | HostMembershipNotFound
   | HostAccessInvariantViolation

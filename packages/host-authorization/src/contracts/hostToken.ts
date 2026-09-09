@@ -5,9 +5,10 @@ import {
   sha256Base64UrlFormat,
   validHostTokenLifecycle,
 } from "../internal/hostTokenSchemaChecks.js";
-import { HostTokenCaller } from "./hostCallerPrincipal.js";
+import { HostTokenCaller } from "./hostCaller.js";
 import { HostPermission } from "./hostPermission.js";
 import { HostTokenId } from "./hostTokenIdentity.js";
+import { PrincipalId } from "./principal.js";
 
 /**
  * Shared representation for persisted token lifecycle times. Values are
@@ -78,10 +79,10 @@ const safeTokenFields = {
   name: HostTokenName,
   grantedPermissions: HostTokenPermissionSelection,
   createdAtEpochMs: EpochMillis,
-  issuedByUserId: Schema.NonEmptyString,
+  issuedByPrincipalId: PrincipalId,
   expiresAtEpochMs: Schema.OptionFromOptionalKey(EpochMillis),
   revokedAtEpochMs: Schema.OptionFromOptionalKey(EpochMillis),
-  revokedByUserId: Schema.OptionFromOptionalKey(Schema.NonEmptyString),
+  revokedByPrincipalId: Schema.OptionFromOptionalKey(PrincipalId),
 } as const;
 
 /**

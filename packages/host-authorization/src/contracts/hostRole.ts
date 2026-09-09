@@ -6,15 +6,24 @@ import {
 import { HostPermission } from "./hostPermission.js";
 
 /**
- * Stable application identity for a role; never a database primary key.
+ * Stable application identity for one Host role.
  *
- * Platforms may keep surrogate IDs privately. Anything crossing
- * `HostAccessStore` uses this application key (`member`, `admin`, …).
+ * The runtime value is a canonical UUID string. Package-owned roles use
+ * deterministic UUIDv5 values while future custom roles use generated UUIDv4 values;
+ * both cross stores, APIs, and assignments through this one identity. The
+ * brand prevents an ordinary string or Control Plane role ID from being used
+ * accidentally where a Host role ID is required.
+ *
+ * A platform must preserve a unique one-to-one mapping for this value but may
+ * store it as text, native UUID data, or 16 RFC-ordered bytes. It may also keep
+ * an unrelated surrogate row primary key privately.
  */
-export const HostRoleKey = Schema.NonEmptyString.pipe(
-  Schema.brand("HostRoleKey"),
+export const HostRoleId = Schema.String.pipe(
+  Schema.check(Schema.isUUID()),
+  Schema.check(Schema.isLowercased()),
+  Schema.brand("HostRoleId"),
 );
-export type HostRoleKey = Schema.Schema.Type<typeof HostRoleKey>;
+export type HostRoleId = Schema.Schema.Type<typeof HostRoleId>;
 
 /**
  * Runs only when a `HostRole` is constructed or decoded — not when rows are
@@ -28,36 +37,33 @@ const canonicalRolePermissions = Schema.makeFilter(
 );
 
 /**
- * Platform-neutral role definition returned by stores and role APIs.
+ * Platform-neutral Host role returned by stores and role APIs.
  *
- * Branding rejects same-shaped plain objects. Schema checks run at `.make` /
- * `.makeEffect` / decode time so callers cannot bypass validation by assembling
- * a structural object from DB fields.
+ * `roleId` is the immutable application UUID used by assignments and catalog
+ * migrations; it does not prescribe the database primary key. `name` is only a
+ * renameable display label, and authorization evaluates `permissions` rather
+ * than either identity or label. Branding rejects same-shaped plain objects,
+ * while schema checks prevent adapters from publishing malformed state.
  */
 export class HostRole extends Schema.Class<HostRole, Brand.Brand<"HostRole">>(
   "HostRole",
 )(
   Schema.Struct({
-    roleKey: HostRoleKey,
+    roleId: HostRoleId,
     name: Schema.NonEmptyString,
     permissions: Schema.NonEmptyArray(HostPermission),
   }).pipe(Schema.check(canonicalRolePermissions)),
 ) {}
 
-const uniqueHostRoleKeys = Schema.makeFilter(
-  (values: ReadonlyArray<HostRoleKey>) => hasUniqueValues(values),
-  { expected: "unique host role keys" },
+const uniqueHostRoleIds = Schema.makeFilter(
+  (values: ReadonlyArray<HostRoleId>) => hasUniqueValues(values),
+  { expected: "unique host role IDs" },
 );
 
-/**
- * Complete non-empty unique role selection for a membership write.
- *
- * Rejects duplicate keys at input construction; does not silently dedupe.
- * Selection order has no authorization meaning.
- */
-export const HostRoleKeySelection = Schema.NonEmptyArray(HostRoleKey).pipe(
-  Schema.check(uniqueHostRoleKeys),
+/** Complete non-empty unique Host-role selection for a membership write. */
+export const HostRoleIdSelection = Schema.NonEmptyArray(HostRoleId).pipe(
+  Schema.check(uniqueHostRoleIds),
 );
-export type HostRoleKeySelection = Schema.Schema.Type<
-  typeof HostRoleKeySelection
+export type HostRoleIdSelection = Schema.Schema.Type<
+  typeof HostRoleIdSelection
 >;

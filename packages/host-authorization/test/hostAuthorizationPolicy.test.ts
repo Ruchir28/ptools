@@ -9,8 +9,8 @@
  *
  * Effect execution model:
  * A `HostPolicy` is an Effect value, not a plain function that runs when
- * called. `permission(...)` / `policy(...)` / `all(...)` / `any(...)` only
- * *build* that Effect value; nothing checks permissions yet. The Effect runs
+ * called. `permission(...)` and `all(...)` only *build* that Effect value;
+ * nothing checks permissions yet. The Effect runs
  * only when `Effect.runPromise(...)` executes it. In between, the test helper
  * below injects a `HostAuthorizationContext` into the Effect so that when it
  * runs, the policy can read the context's effective permission set.
@@ -18,10 +18,9 @@
  * What this proves:
  * 1. A permission policy reads the resolved permission set from the Effect
  *    context and reports the correct denial when a permission is absent.
- * 2. `all` evaluates policies in order and stops at the first denial.
- * 3. `any` evaluates policies in order and stops at the first success.
- * 4. A denied policy prevents the protected operation from starting.
- * 5. Named policies remain bound to the authored permission catalog.
+ * 2. `all` reports the first unmet requirement in declaration order.
+ * 3. A denied policy prevents the protected operation from starting.
+ * 4. Named policies remain bound to the authored permission catalog.
  *
  * The Effect context and policy implementation are real. Access resolution is
  * represented by an already-resolved `HashSet`; there is no database, HTTP
@@ -30,7 +29,7 @@
 import {
   HostPermissions,
   HostTokenPermissionSelection,
-  UserSessionCaller,
+  PrincipalIds,
   type HostPermission,
 } from "../src/contracts/index.js";
 import {
@@ -38,9 +37,7 @@ import {
   HostPolicies,
   HostTokenPolicies,
   all,
-  any,
   permission,
-  policy,
   withPolicy,
   type HostPolicy,
 } from "../src/services/index.js";
@@ -64,10 +61,10 @@ const provideTestAuthorizationContext = <A, E, R>(
     HostAuthorizationContext,
     HostAuthorizationContext.of({
       hostId: "host-1",
-      principal: UserSessionCaller.make({
-        userId: "user-1",
-        sessionId: "session-1",
-      }),
+      caller: {
+        _tag: "PrincipalCaller",
+        principalId: PrincipalIds.fromFixedLocalIdentity("principal-1"),
+      },
       effectivePermissions: HashSet.fromIterable(permissions),
     }),
   ) as Effect.Effect<A, E, Exclude<R, HostAuthorizationContext>>;
@@ -81,6 +78,11 @@ const runPolicyExpectingDenial = (requiredPolicy: HostPolicy) =>
     provideTestAuthorizationContext(requiredPolicy).pipe(Effect.flip),
   );
 
+/**
+ * Policy composition over an already-resolved permission set: single
+ * permission checks, `all` denial ordering, denial-before-work sequencing,
+ * and the named-policy-to-catalog binding.
+ */
 describe("host authorization policies", () => {
   /** A matching permission allows the policy to complete with its `void` result. */
   it("allows a requested permission when it is in the resolved permission set", async () => {
@@ -151,55 +153,17 @@ describe("host authorization policies", () => {
     });
   });
 
-  /** `all` is an AND composition: a denial makes later policies unnecessary. */
-  it("evaluates all policies in order and stops at the first denial", async () => {
-    const evaluated: Array<string> = [];
-    const denyFirst = policy(() => {
-      evaluated.push("first");
-      return false;
-    });
-    const allowSecond = policy(() => {
-      evaluated.push("second");
-      return true;
-    });
-
-    await runPolicyExpectingDenial(all(denyFirst, allowSecond));
-
-    // The second branch must not run after the first branch denies.
-    expect(evaluated).toEqual(["first"]);
-  });
-
-  /** `any` is an OR composition: a success makes later policies unnecessary. */
-  it("evaluates any policies in order and stops at the first success", async () => {
-    const evaluated: Array<string> = [];
-    const denyFirst = policy(() => {
-      evaluated.push("first");
-      return false;
-    });
-    const allowSecond = policy(() => {
-      evaluated.push("second");
-      return true;
-    });
-    const unusedThird = policy(() => {
-      evaluated.push("third");
-      return false;
-    });
-
-    await Effect.runPromise(
-      provideTestAuthorizationContext(any(denyFirst, allowSecond, unusedThird)),
-    );
-
-    // The third branch must not run after the second branch succeeds.
-    expect(evaluated).toEqual(["first", "second"]);
-  });
-
-  /** With no successful OR branch, `any` propagates the final authorization denial. */
-  it("returns the final denial when every any branch fails", async () => {
+  /** `all` is an AND composition whose first missing grant owns the denial. */
+  it("reports the first unmet policy in declaration order", async () => {
     await expect(
-      runPolicyExpectingDenial(any(policy(() => false), policy(() => false))),
+      runPolicyExpectingDenial(
+        all(
+          permission(HostPermissions.host.execute),
+          permission(HostPermissions.host.read),
+        ),
+      ),
     ).resolves.toMatchObject({
-      _tag: "HostAuthorizationDenied",
-      hostId: "host-1",
+      requiredPermission: HostPermissions.host.execute,
     });
   });
 
@@ -225,9 +189,7 @@ describe("host authorization policies", () => {
 
   /** Each public named policy must check exactly the permission assigned in the catalog. */
   it("binds every named policy to its authored catalog permission", async () => {
-    const cases: ReadonlyArray<
-      readonly [HostPolicy, HostPermission]
-    > = [
+    const cases: ReadonlyArray<readonly [HostPolicy, HostPermission]> = [
       [HostPolicies.readHost, HostPermissions.host.read],
       [HostPolicies.execute, HostPermissions.host.execute],
       [HostPolicies.configure, HostPermissions.host.configure],

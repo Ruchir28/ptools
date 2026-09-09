@@ -6,12 +6,13 @@ import type {
   HostTokenStoreError,
 } from "../hostTokenErrors.js";
 import { HostTokenId } from "../hostTokenIdentity.js";
+import { PrincipalId } from "../principal.js";
 
 /**
  * Public management selection identifying which token to revoke under which
  * host. Requiring both values prevents token-ID-only cross-host mutation. The
  * authenticated revoker is not caller-authored; admission passes an exact
- * `UserSessionCaller` separately to `HostTokenService.revoke` for audit.
+ * `PrincipalCaller` separately to `HostTokenService.revoke` for audit.
  */
 export class RevokeHostTokenInput extends Schema.Class<
   RevokeHostTokenInput,
@@ -24,7 +25,7 @@ export class RevokeHostTokenInput extends Schema.Class<
 /**
  * Trusted mutation command created inside `HostTokenService` after admission.
  * It combines the public host/token selection with the service clock timestamp
- * and admitted revoker user ID. `HostTokenRecordStore.revoke` owns the atomic,
+ * and admitted revoker Principal ID. `HostTokenRecordStore.revoke` owns the atomic,
  * idempotent compare/set: first use writes these facts; repeats return the
  * original record without replacing its first revocation audit values.
  */
@@ -35,7 +36,7 @@ export class RevokeHostTokenRecordInput extends Schema.Class<
   hostId: Schema.NonEmptyString,
   tokenId: HostTokenId,
   revokedAtEpochMs: EpochMillis,
-  revokedByUserId: Schema.NonEmptyString,
+  revokedByPrincipalId: PrincipalId,
 }) {}
 
 export type RevokeHostTokenError =

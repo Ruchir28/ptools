@@ -1,17 +1,24 @@
+import { deriveBuiltInRoleId } from "../internal/builtInRoleId.js";
 import { HostPermissions, type HostPermission } from "./hostPermission.js";
-import { HostRole, HostRoleKey } from "./hostRole.js";
+import { HostRole, HostRoleId } from "./hostRole.js";
 
-/** Version consumed by platform-owned migrations of the built-in role catalog. */
+/**
+ * Current version of the package-authored Host-role catalog.
+ *
+ * This number versions catalog contents, not the UUID syntax or UUIDv5
+ * namespace. Platforms persist the applied version in migration metadata and
+ * advance it atomically with every future catalog transition.
+ */
 export const BuiltInHostRoleDefinitionVersion = 1;
 
 const makeBuiltInHostRole = (
-  roleKey: string,
+  canonicalName: `host/${string}`,
   name: string,
   permissions: readonly [HostPermission, ...ReadonlyArray<HostPermission>],
 ): HostRole =>
   Object.freeze(
     HostRole.make({
-      roleKey: HostRoleKey.make(roleKey),
+      roleId: HostRoleId.make(deriveBuiltInRoleId(canonicalName)),
       name,
       permissions: Object.freeze([...permissions]) as readonly [
         HostPermission,
@@ -21,20 +28,27 @@ const makeBuiltInHostRole = (
   );
 
 /**
- * Package-authored roles installed by each platform's migration protocol.
+ * Package-owned Host roles installed by platform initialization.
  *
- * These are normal branded `HostRole` values (already schema-validated at
- * module load). Object keys only provide typed lookup. Platforms persist them
- * in any private representation; later `listHostRoles` / `getHostRole` must
- * return current decoded definitions, not necessarily these object identities.
+ * Each role is a complete shared `HostRole`. Its UUIDv5 `roleId` is derived
+ * from the permanent ptools role namespace and the immutable canonical names
+ * `host/member`, `host/admin`, and `host/owner`. Those canonical names are
+ * identity material and must never be renamed or reused; the displayed `name`
+ * may change independently.
+ *
+ * Platforms insert these exact logical IDs and may map them to any private row
+ * representation. Memberships, default-Owner assignment, and future catalog
+ * migrations use the role UUID directly, so no seed key, binding table, or
+ * generated database-ID reference is required. The object keys below are only
+ * typed source-code lookup conveniences and are not additional identities.
  */
 export const BuiltInHostRoles = Object.freeze({
-  member: makeBuiltInHostRole("member", "Member", [
+  member: makeBuiltInHostRole("host/member", "Member", [
     HostPermissions.host.read,
     HostPermissions.host.execute,
     HostPermissions.auth.read,
   ]),
-  admin: makeBuiltInHostRole("admin", "Admin", [
+  admin: makeBuiltInHostRole("host/admin", "Admin", [
     HostPermissions.host.read,
     HostPermissions.host.execute,
     HostPermissions.host.configure,
@@ -43,7 +57,7 @@ export const BuiltInHostRoles = Object.freeze({
     HostPermissions.auth.manage,
     HostPermissions.tokens.manage,
   ]),
-  owner: makeBuiltInHostRole("owner", "Owner", [
+  owner: makeBuiltInHostRole("host/owner", "Owner", [
     HostPermissions.host.read,
     HostPermissions.host.execute,
     HostPermissions.host.configure,

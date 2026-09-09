@@ -7,7 +7,7 @@
  * 2. Verification uses one digest lookup and preserves the stored host/grants
  *    while collapsing malformed, absent, expired, and revoked credentials.
  * 3. Revocation is host-scoped, immediately visible, and idempotently preserves
- *    the first timestamp and admitted user-session revoker.
+ *    the first timestamp and admitted Principal revoker.
  * 4. Crypto and store failures stay distinct from ordinary rejection.
  *
  * HostTokenService, Effect composition, hashing, schemas, and lifecycle logic
@@ -27,6 +27,8 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   HostPermissions,
+  HostTokenHash,
+  HostTokenId,
   HostTokenName,
   HostTokenNotFound,
   HostTokenPermissionSelection,
@@ -34,8 +36,11 @@ import {
   HostTokenRejected,
   HostTokenStoreError,
   IssueHostTokenInput,
+  ListAllHostTokensInput,
+  ListHostTokensInput,
   RevokeHostTokenInput,
-  UserSessionCaller,
+  PrincipalIds,
+  PrincipalCaller,
   VerifyHostTokenInput,
 } from "../src/contracts/index.js";
 import {
@@ -46,8 +51,12 @@ import {
 // These callers are already-authenticated application values. Supplying them
 // separately from request DTOs proves the service records trusted admission
 // identity rather than accepting caller-authored audit fields.
-const issuer = UserSessionCaller.make({ userId: "issuer-1", sessionId: "session-1" });
-const revoker = UserSessionCaller.make({ userId: "revoker-1", sessionId: "session-2" });
+const issuer = PrincipalCaller.make({
+  principalId: PrincipalIds.fromFixedLocalIdentity("issuer-1"),
+});
+const revoker = PrincipalCaller.make({
+  principalId: PrincipalIds.fromFixedLocalIdentity("revoker-1"),
+});
 const grants = HostTokenPermissionSelection.make([
   HostPermissions.host.read,
   HostPermissions.host.execute,
@@ -70,6 +79,44 @@ class Harness {
   failCreate = false;
   failFind = false;
   failDigest = false;
+  // Distinguishes successive random draws so two issued tokens never collide
+  // on secret, digest, or token ID in the records map.
+  randomCall = 0;
+  // Store-misbehavior switches for the inventory-law tests. Each test enables
+  // exactly one corruption so a failing list assertion attributes to a single
+  // violated invariant rather than a combination.
+  duplicateInventory = false;
+  unorderedInventory = false;
+  foreignHostInventory = false;
+
+  /**
+   * Applies at most one inventory corruption to a store result. Corruption
+   * happens after host filtering and lookup, emulating a broken platform
+   * adapter rather than a caller reaching records it should not see.
+   */
+  private corruptInventory(records: Array<HostTokenRecord>): Array<HostTokenRecord> {
+    if (this.duplicateInventory && records.length > 0) {
+      return [...records, records[0]!];
+    }
+    if (this.unorderedInventory && records.length > 1) {
+      return [...records].reverse();
+    }
+    if (this.foreignHostInventory && records.length > 0) {
+      const record = records[0]!;
+      return [
+        ...records,
+        HostTokenRecord.make({
+          ...record,
+          tokenId: HostTokenId.make("0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b0b"),
+          tokenHash: HostTokenHash.make(
+            createHash("sha256").update("foreign").digest("base64url"),
+          ),
+          hostId: "other-host",
+        }),
+      ];
+    }
+    return records;
+  }
 
   // Effect's real Crypto constructor still owns UUID formatting. The fake only
   // supplies deterministic primitive bytes and SHA-256 so assertions can prove
@@ -77,7 +124,11 @@ class Harness {
   readonly crypto = Crypto.make({
     randomBytes: (size) => {
       this.randomByteRequests.push(size);
-      return Uint8Array.from({ length: size }, (_, index) => index);
+      const seed = this.randomCall++;
+      return Uint8Array.from(
+        { length: size },
+        (_, index) => (index + seed * 37) % 256,
+      );
     },
     digest: (_algorithm, data) => {
       this.digestedInputs.push(new TextDecoder().decode(data));
@@ -152,15 +203,27 @@ class Harness {
           name: record.name,
           grantedPermissions: record.grantedPermissions,
           createdAtEpochMs: record.createdAtEpochMs,
-          issuedByUserId: record.issuedByUserId,
+          issuedByPrincipalId: record.issuedByPrincipalId,
           expiresAtEpochMs: record.expiresAtEpochMs,
           revokedAtEpochMs: Option.some(input.revokedAtEpochMs),
-          revokedByUserId: Option.some(input.revokedByUserId),
+          revokedByPrincipalId: Option.some(input.revokedByPrincipalId),
         });
         harness.recordsByHash.set(revoked.tokenHash, revoked);
         return revoked;
       });
     },
+    listByHost: (hostId) =>
+      Effect.sync(() =>
+        this.corruptInventory(
+          [...this.recordsByHash.values()].filter(
+            (record) => record.hostId === hostId,
+          ),
+        ),
+      ),
+    listAll: () =>
+      Effect.sync(() =>
+        this.corruptInventory([...this.recordsByHash.values()]),
+      ),
   });
 
   // All mutation timestamps come from this supplied Effect Clock. Tests advance
@@ -220,14 +283,22 @@ class Harness {
   }
 }
 
+/**
+ * Lifecycle laws over the real service Layer with faked platform ports only:
+ * hash-only persistence, single fixed-length digest lookup, deliberately
+ * indistinguishable credential rejection, first-write-wins revocation audit,
+ * and infrastructure failures kept distinct from ordinary rejection.
+ */
 describe("HostTokenService", () => {
-  it("publishes only lifecycle operations over the hash-only store port", async () => {
+  it("publishes lifecycle and safe inventory operations over the hash-only store port", async () => {
     const harness = new Harness();
-    // The store surface itself proves plaintext recovery/listing cannot be
-    // implemented by shared code because no such persistence capability exists.
+    // Inventory reads return records for safe projection but the store still
+    // exposes no plaintext recovery capability.
     expect(Object.keys(harness.store).sort()).toEqual([
       "create",
       "findByHash",
+      "listAll",
+      "listByHost",
       "revoke",
     ]);
     const methods = await harness.run(
@@ -236,7 +307,33 @@ describe("HostTokenService", () => {
         return Object.keys(service).sort();
       }),
     );
-    expect(methods).toEqual(["issue", "revoke", "verify"]);
+    expect(methods).toEqual([
+      "issue",
+      "listAll",
+      "listByHost",
+      "revoke",
+      "verify",
+    ]);
+  });
+
+  it("lists safe metadata for one Host or across all Hosts", async () => {
+    const harness = new Harness();
+    const issued = await harness.issue();
+    const inventories = await harness.run(
+      Effect.gen(function* () {
+        const service = yield* HostTokenService;
+        const host = yield* service.listByHost(
+          ListHostTokensInput.make({ hostId: "personal" }),
+        );
+        const all = yield* service.listAll(ListAllHostTokensInput.make({}));
+        return { host, all };
+      }),
+    );
+
+    expect(inventories.host).toEqual([issued.token]);
+    expect(inventories.all).toEqual([issued.token]);
+    expect(inventories.all[0]).not.toHaveProperty("tokenHash");
+    expect(inventories.all[0]).not.toHaveProperty("plaintext");
   });
 
   it("issues from 32 random bytes and persists only complete-credential hash metadata", async () => {
@@ -256,7 +353,7 @@ describe("HostTokenService", () => {
     // sensitive fields: persistence gets the hash; the one-time result gets plaintext.
     expect(stored).not.toHaveProperty("plaintext");
     expect(issued.token).not.toHaveProperty("tokenHash");
-    expect(stored.issuedByUserId).toBe(issuer.userId);
+    expect(stored.issuedByPrincipalId).toBe(issuer.principalId);
     expect(stored.grantedPermissions).toEqual(grants);
     expect(issued.token).toMatchObject({
       tokenId: stored.tokenId,
@@ -311,6 +408,10 @@ describe("HostTokenService", () => {
     expect(harness.findCalls).toBe(1);
   });
 
+  /**
+   * Proves strict format routing happens before hashing/storage, so
+   * malformed or unsupported versions cannot probe the persistence index.
+   */
   it.each(["malformed", `ptools_host_v2_${"A".repeat(43)}`])(
     "rejects malformed credential %s before lookup",
     async (plaintext) => {
@@ -394,12 +495,61 @@ describe("HostTokenService", () => {
     // A later revoker and later clock value must not rewrite first-revocation audit.
     const second = await revoke(
       "personal",
-      UserSessionCaller.make({ userId: "other-revoker", sessionId: "session-3" }),
+      PrincipalCaller.make({
+        principalId: PrincipalIds.fromFixedLocalIdentity("other-revoker"),
+      }),
     );
     expect(Option.getOrThrow(first.revokedAtEpochMs)).toBe(1_100);
-    expect(Option.getOrThrow(first.revokedByUserId)).toBe(revoker.userId);
+    expect(Option.getOrThrow(first.revokedByPrincipalId)).toBe(revoker.principalId);
     expect(second.revokedAtEpochMs).toEqual(first.revokedAtEpochMs);
-    expect(second.revokedByUserId).toEqual(first.revokedByUserId);
+    expect(second.revokedByPrincipalId).toEqual(first.revokedByPrincipalId);
+  });
+
+  it("fails the inventory when the store returns misbehaved records", async () => {
+    // The service validates store output on every list: duplicate management
+    // keys, broken creation ordering, and cross-host leakage are platform
+    // adapter bugs surfaced as invariant violations, never passed through.
+    const duplicate = new Harness();
+    await duplicate.issue();
+    duplicate.duplicateInventory = true;
+    await expect(
+      duplicate.run(
+        Effect.gen(function* () {
+          const service = yield* HostTokenService;
+          return yield* service.listAll(ListAllHostTokensInput.make({}));
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "HostTokenInvariantViolation" });
+
+    const unordered = new Harness();
+    await unordered.issue();
+    unordered.now = 1_100;
+    await unordered.issue();
+    unordered.unorderedInventory = true;
+    await expect(
+      unordered.run(
+        Effect.gen(function* () {
+          const service = yield* HostTokenService;
+          return yield* service.listAll(ListAllHostTokensInput.make({}));
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "HostTokenInvariantViolation" });
+
+    // Host scoping applies to the host-scoped listing only, so the foreign
+    // record is injected into that path's result.
+    const foreign = new Harness();
+    await foreign.issue();
+    foreign.foreignHostInventory = true;
+    await expect(
+      foreign.run(
+        Effect.gen(function* () {
+          const service = yield* HostTokenService;
+          return yield* service.listByHost(
+            ListHostTokensInput.make({ hostId: "personal" }),
+          );
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "HostTokenInvariantViolation" });
   });
 
   it("rejects issuance expiry that is not strictly in the future before persistence", async () => {

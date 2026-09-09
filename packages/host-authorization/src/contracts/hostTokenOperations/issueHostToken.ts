@@ -18,7 +18,7 @@ import type {
  * Validated data a client is allowed to choose when requesting a token: target
  * host, display label, exact delegated grants, and optional expiry. Issuer
  * identity is deliberately absent because later trusted admission supplies the
- * authenticated `UserSessionCaller` separately to `HostTokenService.issue`.
+ * authenticated `PrincipalCaller` separately to `HostTokenService.issue`.
  * This DTO therefore cannot forge creation audit fields or authorization context.
  */
 export class IssueHostTokenInput extends Schema.Class<

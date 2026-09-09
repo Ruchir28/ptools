@@ -1,13 +1,10 @@
 /**
  * Contract for `HostAccessStore.listHostRoles`.
  *
- * Input: an explicit no-argument operation value. Success:
- * `ReadonlyArray<HostRole>` containing the complete current role catalog in
- * deterministic `roleKey` order. Platforms return persisted definitions rather
- * than comparing them with the original built-in constants.
- *
- * Completeness, uniqueness, and ordering are store laws verified against every
- * platform implementation.
+ * Input: an explicit no-argument operation value. Success contains the complete
+ * current persisted role catalog. Every platform returns unique logical role
+ * UUIDs; IDs carry no presentation-order meaning, so callers must not infer
+ * hierarchy or built-in status from array order.
  */
 import { Brand, Schema } from "effect";
 import {

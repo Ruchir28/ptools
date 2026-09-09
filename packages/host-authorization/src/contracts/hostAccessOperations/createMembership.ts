@@ -1,10 +1,9 @@
 /**
  * Contract for `HostAccessStore.createMembership`.
  *
- * Input: the user/host pair and complete initial application role-key
- * selection. Success: the newly visible matching `HostMemberAccess` directly.
- * The platform resolves role keys and publishes membership plus assignments
- * atomically before returning effective access.
+ * Input: the Principal/Host pair and complete initial role-UUID selection.
+ * The platform resolves those logical IDs against its private representation
+ * and atomically publishes membership plus assignments.
  */
 import { Brand, Schema } from "effect";
 import {
@@ -14,16 +13,17 @@ import {
   HostRolesNotFound,
   RegisteredHostNotFound,
 } from "../hostAccessErrors.js";
-import { HostRoleKeySelection } from "../hostRole.js";
+import { HostRoleIdSelection } from "../hostRole.js";
+import { PrincipalId } from "../principal.js";
 
-/** Complete role selection for a new user membership on one registered host. */
+/** Complete role selection for a new Principal membership on one Host. */
 export class CreateHostMembershipInput extends Schema.Class<
   CreateHostMembershipInput,
   Brand.Brand<"CreateHostMembershipInput">
 >("CreateHostMembershipInput")({
   hostId: Schema.NonEmptyString,
-  userId: Schema.NonEmptyString,
-  roleKeys: HostRoleKeySelection,
+  principalId: PrincipalId,
+  roleIds: HostRoleIdSelection,
 }) {}
 
 /** Failures published by `HostAccessStore.createMembership`. */

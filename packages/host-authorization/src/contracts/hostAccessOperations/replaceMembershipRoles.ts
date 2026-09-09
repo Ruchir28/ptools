@@ -1,10 +1,9 @@
 /**
  * Contract for `HostAccessStore.replaceMembershipRoles`.
  *
- * Input: one existing membership and its complete replacement role-key set.
- * Success: the matching replacement `HostMemberAccess` directly. This is not a
- * patch: either the previous or complete replacement assignments are visible,
- * never an empty or partial intermediate state.
+ * Input: one existing membership and its complete replacement persisted-role
+ * ID set. This is not a patch: either the previous or complete replacement
+ * assignments are visible, never an empty or partial intermediate state.
  */
 import { Brand, Schema } from "effect";
 import {
@@ -14,7 +13,8 @@ import {
   HostRolesNotFound,
   RegisteredHostNotFound,
 } from "../hostAccessErrors.js";
-import { HostRoleKeySelection } from "../hostRole.js";
+import { HostRoleIdSelection } from "../hostRole.js";
+import { PrincipalId } from "../principal.js";
 
 /** Complete replacement role selection for one existing membership. */
 export class ReplaceMembershipRolesInput extends Schema.Class<
@@ -22,8 +22,8 @@ export class ReplaceMembershipRolesInput extends Schema.Class<
   Brand.Brand<"ReplaceMembershipRolesInput">
 >("ReplaceMembershipRolesInput")({
   hostId: Schema.NonEmptyString,
-  userId: Schema.NonEmptyString,
-  roleKeys: HostRoleKeySelection,
+  principalId: PrincipalId,
+  roleIds: HostRoleIdSelection,
 }) {}
 
 /** Failures published by `HostAccessStore.replaceMembershipRoles`. */

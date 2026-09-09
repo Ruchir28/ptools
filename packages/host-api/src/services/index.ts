@@ -8,6 +8,7 @@ export { HostHttpClientConfigError } from "../http/hostHttpClientConfig.js";
 export { makeHostHttpClientHandle } from "../http/hostHttpClientHandle.js";
 export * from "./hostOperationDispatchError.js";
 export * from "./hostInstanceDiscovery.js";
+export * from "./hostAuthorizationAdmission.js";
 export * from "./hostHttpClient.js";
 export * from "./hostHttpMiddleware.js";
 export * from "./hostHttpOperationAdapter.js";

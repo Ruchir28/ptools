@@ -1,20 +1,19 @@
-import type {
-  HostCallerPrincipal,
-  HostPermission,
-} from "../contracts/index.js";
+import type { HostCaller, HostPermission } from "../contracts/index.js";
 import { Context, type HashSet } from "effect";
 
 /**
- * Authority resolved once for the current host request.
+ * Authority resolved once for the current Host request.
  *
- * Ingress middleware constructs this value after authentication and persistence
- * lookup. Policies consume it without repeating database or RPC operations.
+ * Admission constructs this value from either current Principal roles or a
+ * verified Host token's frozen grants. `caller` retains safe identity facts for
+ * trusted logging/audit, while ordinary policies make decisions only from the
+ * effective-permission set.
  */
 export class HostAuthorizationContext extends Context.Service<
   HostAuthorizationContext,
   {
     readonly hostId: string;
-    readonly principal: HostCallerPrincipal;
+    readonly caller: HostCaller;
     readonly effectivePermissions: HashSet.HashSet<HostPermission>;
   }
 >()("@ptools/host-authorization/HostAuthorizationContext") {}

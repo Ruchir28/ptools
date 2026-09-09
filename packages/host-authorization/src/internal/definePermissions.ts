@@ -20,9 +20,14 @@
  * }
  * ```
  *
- * `values` feeds the runtime `HostPermission` schema. `catalog` lets policies
- * refer to permissions without repeating strings. Keeping both views derived
- * here prevents the runtime decoder and TypeScript policy values from drifting.
+ * A namespace option adds one fixed leading component without changing the
+ * code-facing catalog shape. For example, `{ namespace: "control-plane" }`
+ * produces `"control-plane:hosts:create"` while retaining
+ * `catalog.hosts.create`.
+ *
+ * `values` feeds the exhaustive runtime permission schema. `catalog` lets
+ * policies refer to permissions without repeating strings. Deriving both views
+ * here prevents runtime decoding and TypeScript policy values from drifting.
  */
 
 /**
@@ -33,53 +38,95 @@ type PermissionDefinition = Readonly<
   Record<string, readonly [string, ...ReadonlyArray<string>]>
 >;
 
-/**
- * Converts every domain/action pair into its `"domain:action"` literal union.
- *
- * For `{ host: ["read", "execute"] }`, this becomes
- * `"host:read" | "host:execute"`.
- */
-type PermissionValue<Definition extends PermissionDefinition> = {
-  readonly [Domain in keyof Definition & string]: `${Domain}:${Definition[Domain][number] & string}`;
+/** Joins validated permission components into their serialized identifier. */
+type PermissionValueFor<
+  Namespace extends string | undefined,
+  Domain extends string,
+  Action extends string,
+> = Namespace extends string
+  ? `${Namespace}:${Domain}:${Action}`
+  : `${Domain}:${Action}`;
+
+/** Converts every domain/action pair into its serialized literal union. */
+type PermissionValue<
+  Definition extends PermissionDefinition,
+  Namespace extends string | undefined,
+> = {
+  readonly [Domain in keyof Definition & string]: PermissionValueFor<
+    Namespace,
+    Domain,
+    Definition[Domain][number] & string
+  >;
 }[keyof Definition & string];
 
 /**
  * Preserves the nested authoring shape while replacing each action with its
- * complete permission value. This is the type behind `HostPermissions.host.read`.
+ * complete permission value. This is the type behind values such as
+ * `HostPermissions.host.read` and `ControlPlanePermissions.hosts.create`.
  */
-type PermissionCatalog<Definition extends PermissionDefinition> = {
+type PermissionCatalog<
+  Definition extends PermissionDefinition,
+  Namespace extends string | undefined,
+> = {
   readonly [Domain in keyof Definition]: {
-    readonly [Action in Definition[Domain][number] & string]: `${Domain & string}:${Action}`;
+    readonly [Action in Definition[Domain][number] &
+      string]: PermissionValueFor<Namespace, Domain & string, Action>;
   };
 };
 
 /** Both runtime views derived from the same literal permission declaration. */
-export interface DefinedPermissions<Definition extends PermissionDefinition> {
+export interface DefinedPermissions<
+  Definition extends PermissionDefinition,
+  Namespace extends string | undefined = undefined,
+> {
   /** Flat values used to construct the exhaustive runtime permission schema. */
-  readonly values: ReadonlyArray<PermissionValue<Definition>>;
+  readonly values: ReadonlyArray<PermissionValue<Definition, Namespace>>;
   /** Nested typed lookup used by role definitions and authorization policies. */
-  readonly catalog: PermissionCatalog<Definition>;
+  readonly catalog: PermissionCatalog<Definition, Namespace>;
+}
+
+/** Optional fixed prefix for a namespaced permission vocabulary. */
+interface PermissionNamespace<Namespace extends string> {
+  readonly namespace: Namespace;
 }
 
 /**
- * Builds the flat schema values and nested policy catalog from one declaration.
- *
- * The `const` generic preserves the caller's literal domains and actions.
- * `Object.entries` necessarily erases those literal keys at runtime, so this
- * function uses broad mutable accumulators internally and performs the only
- * narrowing casts after every entry has been validated and assembled.
+ * Builds flat schema values and a nested policy catalog from one declaration.
+ * Without a namespace, identifiers have the form `domain:action`.
  */
-export const definePermissions = <const Definition extends PermissionDefinition>(
+export function definePermissions<
+  const Definition extends PermissionDefinition,
+>(definition: Definition): DefinedPermissions<Definition>;
+
+/**
+ * Builds a namespaced vocabulary with identifiers in the form
+ * `namespace:domain:action` while preserving `catalog.domain.action` access.
+ */
+export function definePermissions<
+  const Definition extends PermissionDefinition,
+  const Namespace extends string,
+>(
   definition: Definition,
-): DefinedPermissions<Definition> => {
+  options: PermissionNamespace<Namespace>,
+): DefinedPermissions<Definition, Namespace>;
+
+export function definePermissions(
+  definition: PermissionDefinition,
+  options?: PermissionNamespace<string>,
+): DefinedPermissions<PermissionDefinition, string | undefined> {
   // `Object.entries` widens literal keys to strings. Keep that loss of type
   // precision local; callers still receive the exact mapped types above.
   const values: Array<string> = [];
   const catalog: Record<string, Readonly<Record<string, string>>> = {};
+  const namespace = options?.namespace;
+
+  if (namespace !== undefined) {
+    assertPermissionPart("namespace", namespace);
+  }
 
   for (const [domain, actions] of Object.entries(definition)) {
-    // Colons are reserved as the domain/action separator. Rejecting them in
-    // either component guarantees one unambiguous serialized permission value.
+    // Colons are reserved as component separators. Rejecting them guarantees
+    // one unambiguous serialized permission value.
     assertPermissionPart("domain", domain);
 
     const domainCatalog: Record<string, string> = {};
@@ -94,7 +141,10 @@ export const definePermissions = <const Definition extends PermissionDefinition>
       }
 
       // This is the only place the canonical wire/storage identifier is formed.
-      const permission = `${domain}:${action}`;
+      const permission =
+        namespace === undefined
+          ? `${domain}:${action}`
+          : `${namespace}:${domain}:${action}`;
       domainCatalog[action] = permission;
       values.push(permission);
     }
@@ -105,16 +155,16 @@ export const definePermissions = <const Definition extends PermissionDefinition>
   }
 
   return Object.freeze({
-    // These casts restore the literal relationship proven by the validated loop;
+    // Overloads restore the literal relationships proven by the validated loop;
     // no cast is exposed to permission consumers.
-    values: Object.freeze(values) as ReadonlyArray<PermissionValue<Definition>>,
-    catalog: Object.freeze(catalog) as PermissionCatalog<Definition>,
-  });
-};
+    values: Object.freeze(values),
+    catalog: Object.freeze(catalog),
+  }) as DefinedPermissions<PermissionDefinition, string | undefined>;
+}
 
-/** Enforces the delimiter invariant shared by domains and actions. */
+/** Enforces the delimiter invariant shared by every identifier component. */
 const assertPermissionPart = (
-  kind: "action" | "domain",
+  kind: "action" | "domain" | "namespace",
   value: string,
 ): void => {
   if (value.length === 0 || value.includes(":")) {
