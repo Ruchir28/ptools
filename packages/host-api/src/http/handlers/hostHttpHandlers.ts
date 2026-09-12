@@ -127,6 +127,7 @@ const toHostAuthorizationHttpError = (error: {
       return error as HostHttpError;
     case "HostAuthorizationDenied":
     case "HostTokenRouteMismatch":
+    case "RegisteredHostNotFound":
       return new HostHttpForbidden({ message: "operation was not permitted" });
     default:
       return new HostHttpInternalError({

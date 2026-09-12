@@ -3,8 +3,8 @@
  *
  * What this proves:
  * 1. Every credentialed route is wrapped by authenticated-caller middleware.
- * 2. Each route admits exactly the named Host permission before discovery.
- * 3. Denial and authorization-store failure are encoded as stable HTTP errors.
+ * 2. Each route admits a registered Host with its named permission before discovery.
+ * 3. Missing registration, denial, and store failure have safe HTTP projections.
  * 4. OAuth callback routing is outside ordinary Host authentication.
  *
  * Effect's in-memory HttpApi client supplies real request encoding, routing,
@@ -18,8 +18,13 @@ import {
   type HostPermission,
   PrincipalCaller,
   PrincipalIds,
+  RegisteredHost,
+  RegisteredHostNotFound,
 } from "@ptools/host-authorization/contracts";
-import { Authorization } from "@ptools/host-authorization/effect";
+import {
+  Authorization,
+  HostAccessStore,
+} from "@ptools/host-authorization/effect";
 import { UserPtoolsConfig } from "@ptools/config/contracts";
 import { Effect, HashSet, Layer, Option } from "effect";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
@@ -50,6 +55,32 @@ import {
 const principalCaller = PrincipalCaller.make({
   principalId: PrincipalIds.fromFixedLocalIdentity("http-test-principal"),
 });
+const registeredHost = RegisteredHost.make({
+  hostId: "host-1",
+  createdAtEpochMs: 1,
+});
+const unexpectedHostAccessOperation = () =>
+  Effect.die("unexpected HostAccessStore operation");
+const makeHostAccessStore = (registration: "present" | "missing") =>
+  HostAccessStore.of({
+    getRegisteredHost: ({ hostId }) =>
+      registration === "present" && hostId === registeredHost.hostId
+        ? Effect.succeed(registeredHost)
+        : Effect.fail(
+            new RegisteredHostNotFound({
+              hostId,
+              message: "registered Host was not found",
+            }),
+          ),
+    createOwnedHost: unexpectedHostAccessOperation,
+    listPrincipalHosts: unexpectedHostAccessOperation,
+    listRegisteredHosts: unexpectedHostAccessOperation,
+    resolvePrincipalHostAccess: unexpectedHostAccessOperation,
+    createMembership: unexpectedHostAccessOperation,
+    replaceMembershipRoles: unexpectedHostAccessOperation,
+    getHostRole: unexpectedHostAccessOperation,
+    listHostRoles: unexpectedHostAccessOperation,
+  });
 
 type HostApiTestClient = HttpApiClient.ForApi<typeof HostHttpApi>;
 
@@ -190,6 +221,31 @@ describe("credentialed Host HTTP authorization", () => {
     expect(discoveryCount).toBe(1);
   });
 
+  it("projects an unregistered Host as safe denial before discovery", async () => {
+    let discoveryCount = 0;
+    const client = await Effect.runPromise(
+      makeCredentialedClient({
+        registration: "missing",
+        resolvePermissions: Effect.succeed(
+          HashSet.make(HostPermissions.host.execute),
+        ),
+        onDiscovery: () => discoveryCount++,
+      }),
+    );
+
+    const failure = await Effect.runPromise(
+      client["host.api"]
+        .codeMode({
+          params: { hostId: "host-1" },
+          payload: { operation: "search_providers" },
+        })
+        .pipe(Effect.flip),
+    );
+
+    expect(failure).toBeInstanceOf(HostHttpForbidden);
+    expect(discoveryCount).toBe(0);
+  });
+
   it("projects authorization persistence failure to 500 before discovery", async () => {
     let discoveryCount = 0;
     const client = await Effect.runPromise(
@@ -273,6 +329,7 @@ const makeOAuthClient = (options: {
 
 const makeCredentialedClient = (options: {
   readonly authentication?: "allow" | "deny";
+  readonly registration?: "present" | "missing";
   readonly resolvePermissions: Effect.Effect<
     HashSet.HashSet<HostPermission>,
     HostAccessStoreError
@@ -284,10 +341,19 @@ const makeCredentialedClient = (options: {
     Authorization,
     Authorization.of({
       resolveControlPlanePermissions: () => Effect.succeed(HashSet.empty()),
-      resolveHostPermissions: (_principal, hostId) =>
-        hostId === "host-1"
-          ? options.resolvePermissions
-          : Effect.die("handler authorized the wrong route Host"),
+      resolveHostPermissions: (_principal, hostId) => {
+        if (hostId !== "host-1") {
+          return Effect.die("handler authorized the wrong route Host");
+        }
+        return options.registration === "missing"
+          ? Effect.fail(
+              new RegisteredHostNotFound({
+                hostId,
+                message: "registered Host was not found",
+              }),
+            )
+          : options.resolvePermissions;
+      },
     }),
   );
   const discovery = Layer.succeed(HostInstanceDiscovery, {
@@ -327,7 +393,11 @@ const makeCredentialedClient = (options: {
       publicOrigin: "https://ptools.example",
     }),
   );
-  const requestServices = Layer.mergeAll(adapter, authorization);
+  const hostAccess = Layer.succeed(
+    HostAccessStore,
+    makeHostAccessStore(options.registration ?? "present"),
+  );
+  const requestServices = Layer.mergeAll(adapter, authorization, hostAccess);
   const handlers = CredentialedHostApiHandlers.pipe(
     Layer.provide(requestServices),
     HttpRouter.provideRequest(requestServices),

@@ -6,6 +6,8 @@
  *    caller-authored JSON.
  * 2. Administrators list every registered Host while ordinary Principals list
  *    only their assigned Hosts.
+ * 3. Administrator Host authority still requires a registered Host, without
+ *    adding a duplicate existence read to ordinary membership resolution.
  *
  * The package-owned administration Layer is real. Both persistence ports are
  * semantic in-memory fakes; no HTTP, SQLite, D1, Node, or Worker code is used.
@@ -24,6 +26,7 @@ import {
   PrincipalIds,
   PrincipalCaller,
   RegisteredHost,
+  RegisteredHostNotFound,
   ReplaceControlPlaneRolesInput,
   ReplacePrincipalControlPlaneRolesInput,
 } from "../src/contracts/index.js";
@@ -56,9 +59,7 @@ const memberHost = RegisteredHost.make({
 // Records the trusted command the administration service built, so tests can
 // prove the audit assigner came from the admitted caller argument and not from
 // caller-authored payload fields.
-let replacedRolesCommand:
-  | ReplacePrincipalControlPlaneRolesInput
-  | undefined;
+let replacedRolesCommand: ReplacePrincipalControlPlaneRolesInput | undefined;
 
 const controlPlaneStore = ControlPlaneAccessStore.of({
   initialize: () => Effect.succeed(false),
@@ -107,8 +108,23 @@ const role = HostRole.make({
  * owner it was handed so assertions can prove the administration service —
  * not caller-authored JSON — decided the created-by identity.
  */
+let registeredHostReadCount = 0;
+let membershipResolutionCount = 0;
 const hostStore = HostAccessStore.of({
-  getRegisteredHost: () => Effect.succeed(allHost),
+  getRegisteredHost: ({ hostId }) => {
+    registeredHostReadCount++;
+    const host = [allHost, memberHost].find(
+      (candidate) => candidate.hostId === hostId,
+    );
+    return host === undefined
+      ? Effect.fail(
+          new RegisteredHostNotFound({
+            hostId,
+            message: "registered Host was not found",
+          }),
+        )
+      : Effect.succeed(host);
+  },
   createOwnedHost: (input) => {
     createdOwner = input.ownerPrincipalId;
     const host = RegisteredHost.make({
@@ -124,7 +140,10 @@ const hostStore = HostAccessStore.of({
   },
   listPrincipalHosts: () => Effect.succeed([memberHost]),
   listRegisteredHosts: () => Effect.succeed([allHost, memberHost]),
-  resolvePrincipalHostAccess: () => Effect.succeed(ownerAccess("all-host")),
+  resolvePrincipalHostAccess: () => {
+    membershipResolutionCount++;
+    return Effect.succeed(ownerAccess("all-host"));
+  },
   createMembership: () => Effect.succeed(ownerAccess("all-host")),
   replaceMembershipRoles: () => Effect.succeed(ownerAccess("all-host")),
   getHostRole: () => Effect.succeed(role),
@@ -212,11 +231,15 @@ describe("ControlPlaneAdministration", () => {
 
   /**
    * Proves `Authorization.resolveHostPermissions` grants the complete Host
-   * permission catalog to a Control Plane Administrator and otherwise returns
-   * exactly the resolved membership grants — no partial blending of the two
-   * paths.
+   * permission catalog to a Control Plane Administrator only after proving the
+   * Host exists. Ordinary Principals continue through membership resolution,
+   * which already owns that proof, so the shared service does not add a second
+   * registration lookup to their path.
    */
-  it("resolves Administrator override or exact Principal Host access", async () => {
+  it("resolves registered Administrator override or exact Principal Host access", async () => {
+    registeredHostReadCount = 0;
+    membershipResolutionCount = 0;
+
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const authorization = yield* Authorization;
@@ -239,5 +262,21 @@ describe("ControlPlaneAdministration", () => {
       expect(HashSet.has(result.administrator, permission)).toBe(true);
     }
     expect([...result.member]).toEqual([HostPermissions.host.read]);
+    expect(registeredHostReadCount).toBe(1);
+    expect(membershipResolutionCount).toBe(1);
+  });
+
+  it("rejects an Administrator Host override for an unregistered Host", async () => {
+    const failure = await Effect.runPromise(
+      Effect.gen(function* () {
+        const authorization = yield* Authorization;
+        return yield* authorization.resolveHostPermissions(
+          Principal.make({ principalId: administratorId }),
+          "unregistered-host",
+        );
+      }).pipe(Effect.provide(authorizationLive), Effect.flip),
+    );
+
+    expect(failure).toBeInstanceOf(RegisteredHostNotFound);
   });
 });

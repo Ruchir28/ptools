@@ -2,14 +2,15 @@
  * Shared decoded Host-admission coverage.
  *
  * What this proves:
- * 1. Principal callers resolve current authority before policy evaluation.
- * 2. Verified Host tokens use frozen grants only for their exact route Host.
+ * 1. Principal callers resolve current registered-Host authority before policy.
+ * 2. Verified Host tokens require a registered exact route Host before policy.
  * 3. Equal grants produce equal policy decisions for both caller kinds.
- * 4. Principal-caller-only work rejects tokens before its callback starts.
+ * 4. Registration, denial, and Principal-only rejection stop protected work.
  *
  * The real admission combinators, request context, and policies are used. Only
- * Principal role resolution is faked; no HTTP server, database, token plaintext,
- * Node process, or Cloudflare Worker participates.
+ * Principal role resolution and Host registration persistence are faked; no
+ * HTTP server, database, token plaintext, Node process, or Cloudflare Worker
+ * participates.
  */
 import {
   ControlPlanePermissions,
@@ -22,9 +23,15 @@ import {
   PrincipalId,
   PrincipalIds,
   PrincipalCaller,
+  RegisteredHost,
+  RegisteredHostNotFound,
   VerifiedHostToken,
 } from "@ptools/host-authorization/contracts";
-import { Authorization, HostPolicies } from "@ptools/host-authorization/effect";
+import {
+  Authorization,
+  HostAccessStore,
+  HostPolicies,
+} from "@ptools/host-authorization/effect";
 import { Effect, HashSet, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -45,11 +52,39 @@ import {
 const principalId = PrincipalIds.fromFixedLocalIdentity("principal-1");
 const principalCaller = PrincipalCaller.make({ principalId });
 const tokenId = HostTokenId.make("00010203-0405-4607-8809-0a0b0c0d0e0f");
-const verifiedToken = VerifiedHostToken.make({
-  principal: HostTokenCaller.make({ tokenId, hostId: "host-1" }),
-  effectivePermissions: HostTokenPermissionSelection.make([
-    HostPermissions.host.execute,
-  ]),
+const verifiedTokenFor = (hostId: string) =>
+  VerifiedHostToken.make({
+    principal: HostTokenCaller.make({ tokenId, hostId }),
+    effectivePermissions: HostTokenPermissionSelection.make([
+      HostPermissions.host.execute,
+    ]),
+  });
+const verifiedToken = verifiedTokenFor("host-1");
+
+const registeredHost = RegisteredHost.make({
+  hostId: "host-1",
+  createdAtEpochMs: 1,
+});
+const unexpectedHostAccessOperation = () =>
+  Effect.die("unexpected HostAccessStore operation");
+const registeredHostAccessStore = HostAccessStore.of({
+  getRegisteredHost: ({ hostId }) =>
+    hostId === registeredHost.hostId
+      ? Effect.succeed(registeredHost)
+      : Effect.fail(
+          new RegisteredHostNotFound({
+            hostId,
+            message: "registered Host was not found",
+          }),
+        ),
+  createOwnedHost: unexpectedHostAccessOperation,
+  listPrincipalHosts: unexpectedHostAccessOperation,
+  listRegisteredHosts: unexpectedHostAccessOperation,
+  resolvePrincipalHostAccess: unexpectedHostAccessOperation,
+  createMembership: unexpectedHostAccessOperation,
+  replaceMembershipRoles: unexpectedHostAccessOperation,
+  getHostRole: unexpectedHostAccessOperation,
+  listHostRoles: unexpectedHostAccessOperation,
 });
 
 const authorization = Authorization.of({
@@ -63,12 +98,17 @@ const authorization = Authorization.of({
 });
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Authorization | AuthenticatedHostCallerContext>,
+  effect: Effect.Effect<
+    A,
+    E,
+    Authorization | AuthenticatedHostCallerContext | HostAccessStore
+  >,
   caller: AuthenticatedHostCallerContext["Service"],
 ) =>
   Effect.runPromise(
     effect.pipe(
       Effect.provideService(Authorization, authorization),
+      Effect.provideService(HostAccessStore, registeredHostAccessStore),
       Effect.provideService(AuthenticatedHostCallerContext, caller),
     ),
   );
@@ -119,6 +159,7 @@ describe("Host authorization admission", () => {
     const failure = await Effect.runPromise(
       authorizedStatusDispatch("other-host").pipe(
         Effect.provideService(Authorization, authorization),
+        Effect.provideService(HostAccessStore, registeredHostAccessStore),
         Effect.provideService(AuthenticatedHostCallerContext, {
           _tag: "HostToken",
           token: verifiedToken,
@@ -139,6 +180,34 @@ describe("Host authorization admission", () => {
     expect(discoveryCount).toBe(0);
   });
 
+  it("rejects a matching Host token when its route Host is not registered", async () => {
+    let discoveryCount = 0;
+    const hostId = "unregistered-host";
+
+    const failure = await Effect.runPromise(
+      authorizedStatusDispatch(hostId).pipe(
+        Effect.provideService(Authorization, authorization),
+        Effect.provideService(HostAccessStore, registeredHostAccessStore),
+        Effect.provideService(AuthenticatedHostCallerContext, {
+          _tag: "HostToken",
+          token: verifiedTokenFor(hostId),
+        }),
+        Effect.provideService(HostHttpIngress, {
+          publicOrigin: "https://ptools.example",
+        }),
+        Effect.provide(
+          HostHttpOperationAdapterLive.pipe(
+            Layer.provide(discoveryLayer(() => discoveryCount++)),
+          ),
+        ),
+        Effect.flip,
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(RegisteredHostNotFound);
+    expect(discoveryCount).toBe(0);
+  });
+
   it("does not discover a Host when the Principal lacks the route permission", async () => {
     let discoveryCount = 0;
     const deniedAuthorization = Authorization.of({
@@ -149,6 +218,7 @@ describe("Host authorization admission", () => {
     const failure = await Effect.runPromise(
       authorizedStatusDispatch().pipe(
         Effect.provideService(Authorization, deniedAuthorization),
+        Effect.provideService(HostAccessStore, registeredHostAccessStore),
         Effect.provideService(AuthenticatedHostCallerContext, {
           _tag: "Principal",
           caller: principalCaller,
@@ -185,6 +255,7 @@ describe("Host authorization admission", () => {
     const failure = await Effect.runPromise(
       authorizedStatusDispatch().pipe(
         Effect.provideService(Authorization, failedAuthorization),
+        Effect.provideService(HostAccessStore, registeredHostAccessStore),
         Effect.provideService(AuthenticatedHostCallerContext, {
           _tag: "Principal",
           caller: principalCaller,
@@ -211,6 +282,7 @@ describe("Host authorization admission", () => {
     const response = await Effect.runPromise(
       authorizedStatusDispatch().pipe(
         Effect.provideService(Authorization, authorization),
+        Effect.provideService(HostAccessStore, registeredHostAccessStore),
         Effect.provideService(AuthenticatedHostCallerContext, {
           _tag: "Principal",
           caller: principalCaller,
