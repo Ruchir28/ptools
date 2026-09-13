@@ -15,8 +15,10 @@ import { Effect, Layer } from "effect";
 /**
  * Shared Host API auth URL and message policy for one configured Context.
  *
- * Provides: `AuthCoordinatorPolicy` (callback, setup, authorize, and
- * reauthorize URLs plus user-facing auth messages).
+ * Provides: `AuthCoordinatorPolicy` (OAuth callback URLs, human-facing Auth
+ * Center navigation URLs, and user-facing auth messages). Status
+ * `authorizeUrl`/`reauthorizeUrl`/`setupUrl` values all remain safe GET links;
+ * the browser page they open requires a separate POST before provider work.
  *
  * Requires:
  * - stable host binding: `HostIdentity` (host ID is fixed for the runtime)
@@ -38,17 +40,21 @@ export const HostAuthCoordinatorPolicyLayer: Layer.Layer<
     const encodedHostId = encodeURIComponent(identity.hostId);
     const authUrl = `${publicOrigin.origin}/hosts/${encodedHostId}/auth`;
 
+    const authCenterSelectionUrl = (
+      serverName: string,
+      intent: "authorize" | "reauthorize" | "setup",
+    ) => `${authUrl}?server=${encodeURIComponent(serverName)}&intent=${intent}`;
+
     return AuthCoordinatorPolicy.of({
       origin: publicOrigin.origin,
       authUrl,
       callbackUrl: (serverName) =>
         `${publicOrigin.origin}/hosts/${encodedHostId}/oauth/callback/${encodeURIComponent(serverName)}`,
-      setupUrl: (serverName) =>
-        `${authUrl}/${encodeURIComponent(serverName)}/setup`,
+      setupUrl: (serverName) => authCenterSelectionUrl(serverName, "setup"),
       authorizeUrl: (serverName) =>
-        `${authUrl}/${encodeURIComponent(serverName)}`,
+        authCenterSelectionUrl(serverName, "authorize"),
       reauthorizeUrl: (serverName) =>
-        `${authUrl}/${encodeURIComponent(serverName)}?force=1`,
+        authCenterSelectionUrl(serverName, "reauthorize"),
       authRequiredMessage: (serverName) =>
         `Authorize ${serverName} from the ptools host auth route.`,
       dynamicClientRegistrationUnsupportedMessage: (serverName) =>

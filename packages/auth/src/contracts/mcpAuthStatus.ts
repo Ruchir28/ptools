@@ -20,7 +20,15 @@ export const McpAuthStatusValue = Schema.Literals([
 ]);
 export type McpAuthStatusValue = Schema.Schema.Type<typeof McpAuthStatusValue>;
 
-/** Per-server MCP authentication status exposed at host and Code Mode boundaries. */
+/**
+ * Per-server MCP authentication status exposed at Host and Code Mode boundaries.
+ *
+ * The optional `authorizeUrl`, `reauthorizeUrl`, and `setupUrl` fields are
+ * ptools-owned GET pages that a machine client can present to a human. They are
+ * deliberately not upstream OAuth authorization URLs and opening one performs
+ * no mutation. The upstream URL is returned separately by the explicit
+ * start-MCP-auth operation after a human submits a protected browser action.
+ */
 export const McpAuthServerStatus = Schema.Struct({
   serverName: Schema.String,
   jsServerName: Schema.String,

@@ -40,6 +40,10 @@ import {
   ProvideHostHttpIngress,
   RequireAuthenticatedHostCaller,
 } from "../../services/hostHttpMiddleware.js";
+import {
+  BrowserHostAuthMutationGroup,
+  BrowserHostAuthReadGroup,
+} from "./hostBrowserHttpGroups.js";
 
 const CredentialedHostHttpRouteErrors = [
   HostHttpBadRequest,
@@ -143,7 +147,15 @@ export class OAuthBrowserGroup extends HttpApiGroup.make("host.oauth")
   )
   .middleware(ProvideHostHttpIngress) {}
 
-/** Complete shared Host HTTP API declaration. */
+/**
+ * Complete shared Host HTTP API for machine clients, the Control Center, and
+ * OAuth provider callbacks.
+ *
+ * Distinct groups preserve their different authentication lifecycles while one
+ * API gives every platform a single route contract to implement and mount.
+ */
 export class HostHttpApi extends HttpApi.make("ptools-host")
   .add(CredentialedHostApiGroup)
+  .add(BrowserHostAuthReadGroup)
+  .add(BrowserHostAuthMutationGroup)
   .add(OAuthBrowserGroup) {}

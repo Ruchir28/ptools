@@ -4,15 +4,11 @@ import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { HostPolicies } from "@ptools/host-authorization/effect";
 import { Effect, Option } from "effect";
 import { HostHttpApi } from "../api/hostHttpApi.js";
-import {
-  HostHttpBadRequest,
-  HostHttpForbidden,
-  HostHttpInternalError,
-  type HostHttpError,
-} from "../../contracts/hostHttpErrors.js";
+import { HostHttpBadRequest } from "../../contracts/hostHttpErrors.js";
 import type { CompleteHostMcpOAuthCallbackResponse } from "../../contracts/hostMcpAuth.js";
 import { withHostAuthorization } from "../../services/hostAuthorizationAdmission.js";
 import { HostHttpOperationAdapter } from "../../services/hostHttpOperationAdapter.js";
+import { toHostAuthorizationHttpError } from "../hostAuthorizationHttpError.js";
 
 /** Handlers for authenticated and Host-authorized JSON routes. */
 export const CredentialedHostApiHandlers = HttpApiBuilder.group(
@@ -111,30 +107,6 @@ export const OAuthBrowserHandlers = HttpApiBuilder.group(
         }),
       ),
 );
-
-/**
- * Preserve operation-adapter HTTP failures while projecting authorization
- * failures without exposing persistence or invariant details.
- */
-const toHostAuthorizationHttpError = (error: {
-  readonly _tag?: string;
-}): HostHttpError | HostHttpForbidden => {
-  switch (error._tag) {
-    case "HostHttpBadRequest":
-    case "HostHttpUnauthorized":
-    case "HostHttpHostUnavailable":
-    case "HostHttpInternalError":
-      return error as HostHttpError;
-    case "HostAuthorizationDenied":
-    case "HostTokenRouteMismatch":
-    case "RegisteredHostNotFound":
-      return new HostHttpForbidden({ message: "operation was not permitted" });
-    default:
-      return new HostHttpInternalError({
-        message: "Host authorization failed",
-      });
-  }
-};
 
 const browserResponseToHttpServerResponse = (
   result: CompleteHostMcpOAuthCallbackResponse["result"],

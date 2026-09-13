@@ -45,6 +45,7 @@ import {
   HostHttpOperationAdapterLive,
   HostInstanceDiscovery,
   ProvideHostHttpIngress,
+  RequireAuthenticatedBrowserPrincipal,
   RequireAuthenticatedHostCaller,
 } from "../src/services/index.js";
 import {
@@ -274,6 +275,15 @@ describe("credentialed Host HTTP authorization", () => {
   });
 });
 
+const unusedBrowserAuthentication = Layer.succeed(
+  RequireAuthenticatedBrowserPrincipal,
+  (effect) =>
+    Effect.provideService(effect, AuthenticatedHostCallerContext, {
+      _tag: "Principal",
+      caller: principalCaller,
+    }),
+);
+
 const makeOAuthClient = (options: {
   readonly onAuthentication: () => void;
   readonly onDiscovery: () => void;
@@ -322,7 +332,13 @@ const makeOAuthClient = (options: {
   );
 
   return HttpApiTest.groups(HostHttpApi, ["host.oauth"]).pipe(
-    Effect.provide(Layer.mergeAll(handlers, HttpServer.layerServices)),
+    Effect.provide(
+      Layer.mergeAll(
+        handlers,
+        HttpServer.layerServices,
+        unusedBrowserAuthentication,
+      ),
+    ),
     Effect.scoped,
   );
 };
@@ -405,7 +421,13 @@ const makeCredentialedClient = (options: {
   );
 
   return HttpApiTest.groups(HostHttpApi, ["host.api"]).pipe(
-    Effect.provide(Layer.mergeAll(handlers, HttpServer.layerServices)),
+    Effect.provide(
+      Layer.mergeAll(
+        handlers,
+        HttpServer.layerServices,
+        unusedBrowserAuthentication,
+      ),
+    ),
     Effect.scoped,
   );
 };
