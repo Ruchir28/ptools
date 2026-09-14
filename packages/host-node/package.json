@@ -21,6 +21,7 @@
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",
+    "drizzle/node-control-plane/**",
     "README.md",
     "LICENSE"
   ],
@@ -53,10 +54,12 @@
   },
   "devDependencies": {
     "@types/node": "25.9.1",
+    "drizzle-kit": "1.0.0-rc.4",
     "esbuild": "^0.27.0"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.102",
+    "@effect/sql-sqlite-node": "4.0.0-beta.102",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@napi-rs/keyring": "^1.3.0",
     "@ptools/auth": "workspace:*",
@@ -64,9 +67,11 @@
     "@ptools/config": "workspace:*",
     "@ptools/executor": "workspace:*",
     "@ptools/host-api": "workspace:*",
+    "@ptools/host-authorization": "workspace:*",
     "@ptools/host-context": "workspace:*",
     "@ptools/host-runtime": "workspace:*",
     "@ptools/mcp-registry": "workspace:*",
+    "drizzle-orm": "1.0.0-rc.4",
     "effect": "4.0.0-beta.102",
     "fs-native-extensions": "1.5.0"
   }

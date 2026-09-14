@@ -8,6 +8,7 @@
     { "path": "../config" },
     { "path": "../executor" },
     { "path": "../host-api" },
+    { "path": "../host-authorization" },
     { "path": "../host-context" },
     { "path": "../host-runtime" },
     { "path": "../mcp-registry" }
