@@ -1,0 +1,1126 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "c592c96c-de52-42bd-85f2-cc817c005ff1",
+  "prevIds": [
+    "7c022d03-d5a2-4f22-80e9-9a2ca6b4a65d"
+  ],
+  "ddl": [
+    {
+      "name": "authorization_catalog_state",
+      "entityType": "tables"
+    },
+    {
+      "name": "control_plane_claim",
+      "entityType": "tables"
+    },
+    {
+      "name": "control_plane_role_permission",
+      "entityType": "tables"
+    },
+    {
+      "name": "control_plane_role",
+      "entityType": "tables"
+    },
+    {
+      "name": "host_role_permission",
+      "entityType": "tables"
+    },
+    {
+      "name": "host_role",
+      "entityType": "tables"
+    },
+    {
+      "name": "host_token",
+      "entityType": "tables"
+    },
+    {
+      "name": "local_identity",
+      "entityType": "tables"
+    },
+    {
+      "name": "local_principal_credential",
+      "entityType": "tables"
+    },
+    {
+      "name": "principal_control_plane_role",
+      "entityType": "tables"
+    },
+    {
+      "name": "principal_host_membership",
+      "entityType": "tables"
+    },
+    {
+      "name": "principal_host_role",
+      "entityType": "tables"
+    },
+    {
+      "name": "principal",
+      "entityType": "tables"
+    },
+    {
+      "name": "registered_host",
+      "entityType": "tables"
+    },
+    {
+      "name": "schema_migration",
+      "entityType": "tables"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "catalog_state_id",
+      "entityType": "columns",
+      "table": "authorization_catalog_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "control_plane_role_version",
+      "entityType": "columns",
+      "table": "authorization_catalog_state"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "host_role_version",
+      "entityType": "columns",
+      "table": "authorization_catalog_state"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "claim_id",
+      "entityType": "columns",
+      "table": "control_plane_claim"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "setup_capability_hash",
+      "entityType": "columns",
+      "table": "control_plane_claim"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "initial_administrator_id",
+      "entityType": "columns",
+      "table": "control_plane_claim"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "claimed_at_epoch_ms",
+      "entityType": "columns",
+      "table": "control_plane_claim"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "role_id",
+      "entityType": "columns",
+      "table": "control_plane_role_permission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "permission",
+      "entityType": "columns",
+      "table": "control_plane_role_permission"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "role_id",
+      "entityType": "columns",
+      "table": "control_plane_role"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "control_plane_role"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "role_id",
+      "entityType": "columns",
+      "table": "host_role_permission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "permission",
+      "entityType": "columns",
+      "table": "host_role_permission"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "role_id",
+      "entityType": "columns",
+      "table": "host_role"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "host_role"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_id",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token_hash",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "credential_version",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "host_id",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "granted_permissions_json",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at_epoch_ms",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "issued_by_principal_id",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "expires_at_epoch_ms",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revoked_at_epoch_ms",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revoked_by_principal_id",
+      "entityType": "columns",
+      "table": "host_token"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "identity_id",
+      "entityType": "columns",
+      "table": "local_identity"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "local_identity"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "username",
+      "entityType": "columns",
+      "table": "local_identity"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "password_hash",
+      "entityType": "columns",
+      "table": "local_identity"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at_epoch_ms",
+      "entityType": "columns",
+      "table": "local_identity"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "credential_id",
+      "entityType": "columns",
+      "table": "local_principal_credential"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "local_principal_credential"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "credential_version",
+      "entityType": "columns",
+      "table": "local_principal_credential"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "credential_hash",
+      "entityType": "columns",
+      "table": "local_principal_credential"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at_epoch_ms",
+      "entityType": "columns",
+      "table": "local_principal_credential"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "principal_control_plane_role"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "role_id",
+      "entityType": "columns",
+      "table": "principal_control_plane_role"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "host_id",
+      "entityType": "columns",
+      "table": "principal_host_membership"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "principal_host_membership"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at_epoch_ms",
+      "entityType": "columns",
+      "table": "principal_host_membership"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "host_id",
+      "entityType": "columns",
+      "table": "principal_host_role"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "principal_host_role"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "role_id",
+      "entityType": "columns",
+      "table": "principal_host_role"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "principal_id",
+      "entityType": "columns",
+      "table": "principal"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at_epoch_ms",
+      "entityType": "columns",
+      "table": "principal"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "host_id",
+      "entityType": "columns",
+      "table": "registered_host"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at_epoch_ms",
+      "entityType": "columns",
+      "table": "registered_host"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "schema_migration"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "hash",
+      "entityType": "columns",
+      "table": "schema_migration"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "schema_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "name",
+      "entityType": "columns",
+      "table": "schema_migration"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "applied_at",
+      "entityType": "columns",
+      "table": "schema_migration"
+    },
+    {
+      "columns": [
+        "initial_administrator_id"
+      ],
+      "tableTo": "principal",
+      "columnsTo": [
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_control_plane_claim_initial_administrator_id_principal_principal_id_fk",
+      "entityType": "fks",
+      "table": "control_plane_claim"
+    },
+    {
+      "columns": [
+        "role_id"
+      ],
+      "tableTo": "control_plane_role",
+      "columnsTo": [
+        "role_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_control_plane_role_permission_role_id_control_plane_role_role_id_fk",
+      "entityType": "fks",
+      "table": "control_plane_role_permission"
+    },
+    {
+      "columns": [
+        "role_id"
+      ],
+      "tableTo": "host_role",
+      "columnsTo": [
+        "role_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_host_role_permission_role_id_host_role_role_id_fk",
+      "entityType": "fks",
+      "table": "host_role_permission"
+    },
+    {
+      "columns": [
+        "host_id"
+      ],
+      "tableTo": "registered_host",
+      "columnsTo": [
+        "host_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_host_token_host_id_registered_host_host_id_fk",
+      "entityType": "fks",
+      "table": "host_token"
+    },
+    {
+      "columns": [
+        "issued_by_principal_id"
+      ],
+      "tableTo": "principal",
+      "columnsTo": [
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_host_token_issued_by_principal_id_principal_principal_id_fk",
+      "entityType": "fks",
+      "table": "host_token"
+    },
+    {
+      "columns": [
+        "revoked_by_principal_id"
+      ],
+      "tableTo": "principal",
+      "columnsTo": [
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_host_token_revoked_by_principal_id_principal_principal_id_fk",
+      "entityType": "fks",
+      "table": "host_token"
+    },
+    {
+      "columns": [
+        "principal_id"
+      ],
+      "tableTo": "principal",
+      "columnsTo": [
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_local_identity_principal_id_principal_principal_id_fk",
+      "entityType": "fks",
+      "table": "local_identity"
+    },
+    {
+      "columns": [
+        "principal_id"
+      ],
+      "tableTo": "principal",
+      "columnsTo": [
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_local_principal_credential_principal_id_principal_principal_id_fk",
+      "entityType": "fks",
+      "table": "local_principal_credential"
+    },
+    {
+      "columns": [
+        "principal_id"
+      ],
+      "tableTo": "principal",
+      "columnsTo": [
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_principal_control_plane_role_principal_id_principal_principal_id_fk",
+      "entityType": "fks",
+      "table": "principal_control_plane_role"
+    },
+    {
+      "columns": [
+        "role_id"
+      ],
+      "tableTo": "control_plane_role",
+      "columnsTo": [
+        "role_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_principal_control_plane_role_role_id_control_plane_role_role_id_fk",
+      "entityType": "fks",
+      "table": "principal_control_plane_role"
+    },
+    {
+      "columns": [
+        "host_id"
+      ],
+      "tableTo": "registered_host",
+      "columnsTo": [
+        "host_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_principal_host_membership_host_id_registered_host_host_id_fk",
+      "entityType": "fks",
+      "table": "principal_host_membership"
+    },
+    {
+      "columns": [
+        "principal_id"
+      ],
+      "tableTo": "principal",
+      "columnsTo": [
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_principal_host_membership_principal_id_principal_principal_id_fk",
+      "entityType": "fks",
+      "table": "principal_host_membership"
+    },
+    {
+      "columns": [
+        "role_id"
+      ],
+      "tableTo": "host_role",
+      "columnsTo": [
+        "role_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_principal_host_role_role_id_host_role_role_id_fk",
+      "entityType": "fks",
+      "table": "principal_host_role"
+    },
+    {
+      "columns": [
+        "host_id",
+        "principal_id"
+      ],
+      "tableTo": "principal_host_membership",
+      "columnsTo": [
+        "host_id",
+        "principal_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_principal_host_role_host_id_principal_id_principal_host_membership_host_id_principal_id_fk",
+      "entityType": "fks",
+      "table": "principal_host_role"
+    },
+    {
+      "columns": [
+        "role_id",
+        "permission"
+      ],
+      "nameExplicit": false,
+      "name": "control_plane_role_permission_pk",
+      "entityType": "pks",
+      "table": "control_plane_role_permission"
+    },
+    {
+      "columns": [
+        "role_id",
+        "permission"
+      ],
+      "nameExplicit": false,
+      "name": "host_role_permission_pk",
+      "entityType": "pks",
+      "table": "host_role_permission"
+    },
+    {
+      "columns": [
+        "principal_id",
+        "role_id"
+      ],
+      "nameExplicit": false,
+      "name": "principal_control_plane_role_pk",
+      "entityType": "pks",
+      "table": "principal_control_plane_role"
+    },
+    {
+      "columns": [
+        "host_id",
+        "principal_id"
+      ],
+      "nameExplicit": false,
+      "name": "principal_host_membership_pk",
+      "entityType": "pks",
+      "table": "principal_host_membership"
+    },
+    {
+      "columns": [
+        "host_id",
+        "principal_id",
+        "role_id"
+      ],
+      "nameExplicit": false,
+      "name": "principal_host_role_pk",
+      "entityType": "pks",
+      "table": "principal_host_role"
+    },
+    {
+      "columns": [
+        "catalog_state_id"
+      ],
+      "nameExplicit": false,
+      "name": "authorization_catalog_state_pk",
+      "table": "authorization_catalog_state",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "claim_id"
+      ],
+      "nameExplicit": false,
+      "name": "control_plane_claim_pk",
+      "table": "control_plane_claim",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "role_id"
+      ],
+      "nameExplicit": false,
+      "name": "control_plane_role_pk",
+      "table": "control_plane_role",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "role_id"
+      ],
+      "nameExplicit": false,
+      "name": "host_role_pk",
+      "table": "host_role",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "token_id"
+      ],
+      "nameExplicit": false,
+      "name": "host_token_pk",
+      "table": "host_token",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "identity_id"
+      ],
+      "nameExplicit": false,
+      "name": "local_identity_pk",
+      "table": "local_identity",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "credential_id"
+      ],
+      "nameExplicit": false,
+      "name": "local_principal_credential_pk",
+      "table": "local_principal_credential",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "principal_id"
+      ],
+      "nameExplicit": false,
+      "name": "principal_pk",
+      "table": "principal",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "host_id"
+      ],
+      "nameExplicit": false,
+      "name": "registered_host_pk",
+      "table": "registered_host",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "schema_migration_pk",
+      "table": "schema_migration",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "token_hash",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "host_token_hash_unique",
+      "entityType": "indexes",
+      "table": "host_token"
+    },
+    {
+      "columns": [
+        {
+          "value": "created_at_epoch_ms",
+          "isExpression": false
+        },
+        {
+          "value": "token_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "host_token_page_idx",
+      "entityType": "indexes",
+      "table": "host_token"
+    },
+    {
+      "columns": [
+        {
+          "value": "host_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at_epoch_ms",
+          "isExpression": false
+        },
+        {
+          "value": "token_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "host_token_host_page_idx",
+      "entityType": "indexes",
+      "table": "host_token"
+    },
+    {
+      "columns": [
+        {
+          "value": "principal_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "local_identity_principal_unique",
+      "entityType": "indexes",
+      "table": "local_identity"
+    },
+    {
+      "columns": [
+        {
+          "value": "username",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "local_identity_username_unique",
+      "entityType": "indexes",
+      "table": "local_identity"
+    },
+    {
+      "columns": [
+        {
+          "value": "principal_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "local_principal_credential_principal_unique",
+      "entityType": "indexes",
+      "table": "local_principal_credential"
+    },
+    {
+      "columns": [
+        {
+          "value": "credential_hash",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "local_principal_credential_hash_unique",
+      "entityType": "indexes",
+      "table": "local_principal_credential"
+    },
+    {
+      "columns": [
+        {
+          "value": "role_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "principal_control_plane_role_role_idx",
+      "entityType": "indexes",
+      "table": "principal_control_plane_role"
+    },
+    {
+      "columns": [
+        {
+          "value": "principal_id",
+          "isExpression": false
+        },
+        {
+          "value": "host_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "principal_host_membership_principal_page_idx",
+      "entityType": "indexes",
+      "table": "principal_host_membership"
+    },
+    {
+      "value": "\"catalog_state_id\" = 1",
+      "name": "authorization_catalog_state_singleton",
+      "entityType": "checks",
+      "table": "authorization_catalog_state"
+    },
+    {
+      "value": "\"claim_id\" = 1",
+      "name": "control_plane_claim_singleton",
+      "entityType": "checks",
+      "table": "control_plane_claim"
+    },
+    {
+      "value": "\"credential_version\" = 1",
+      "name": "host_token_credential_version_v1",
+      "entityType": "checks",
+      "table": "host_token"
+    },
+    {
+      "value": "(\"revoked_at_epoch_ms\" IS NULL AND \"revoked_by_principal_id\" IS NULL) OR (\"revoked_at_epoch_ms\" IS NOT NULL AND \"revoked_by_principal_id\" IS NOT NULL)",
+      "name": "host_token_revocation_pair",
+      "entityType": "checks",
+      "table": "host_token"
+    },
+    {
+      "value": "\"credential_version\" = 1",
+      "name": "local_principal_credential_version_v1",
+      "entityType": "checks",
+      "table": "local_principal_credential"
+    }
+  ],
+  "renames": []
+}

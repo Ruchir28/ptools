@@ -1,22 +1,27 @@
 /**
  * Contract for `HostAccessStore.listHostRoles`.
  *
- * Input: an explicit no-argument operation value. Success contains the complete
- * current persisted role catalog. Every platform returns unique logical role
- * UUIDs; IDs carry no presentation-order meaning, so callers must not infer
- * hierarchy or built-in status from array order.
+ * Input selects one bounded keyset page. Success contains complete role values
+ * for that page, including every permission of each returned role. Every
+ * platform orders by unique logical role UUID and continues strictly after the
+ * cursor; IDs provide traversal order only, not hierarchy or built-in status.
  */
 import { Brand, Schema } from "effect";
 import {
   HostAccessInvariantViolation,
   HostAccessStoreError,
 } from "../hostAccessErrors.js";
+import { HostRolePagination } from "../hostRolePagination.js";
+import { Pagination } from "../pagination.js";
 
-/** Explicit no-argument input for listing the current role catalog. */
+/** Bounded keyset request for the current Host-role catalog. */
 export class ListHostRolesInput extends Schema.Class<
   ListHostRolesInput,
   Brand.Brand<"ListHostRolesInput">
->("ListHostRolesInput")({}) {}
+>("ListHostRolesInput")({
+  limit: Pagination.PageSize,
+  cursor: Schema.OptionFromOptionalKey(HostRolePagination.Cursor),
+}) {}
 
 /** Failures published by `HostAccessStore.listHostRoles`. */
 export type ListHostRolesError =

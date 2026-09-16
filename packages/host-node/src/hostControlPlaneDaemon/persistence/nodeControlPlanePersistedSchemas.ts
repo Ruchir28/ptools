@@ -5,8 +5,13 @@
  * domain values.
  */
 import {
+  BuiltInControlPlaneRoleDefinitionVersion,
+  BuiltInHostRoleDefinitionVersion,
+  ControlPlanePermission,
   ControlPlaneRoleId,
+  ControlPlaneSetupCapabilityHash,
   EpochMillis,
+  HostPermission,
   HostRoleId,
   HostTokenHash,
   HostTokenId,
@@ -20,11 +25,18 @@ import {
 } from "drizzle-orm/effect-schema";
 import { Schema } from "effect";
 import {
+  authorizationCatalogStateTable,
+  controlPlaneClaimTable,
+  controlPlaneRolePermissionTable,
   controlPlaneRoleTable,
+  hostRolePermissionTable,
   hostRoleTable,
   hostTokenTable,
   localIdentityTable,
   localPrincipalCredentialTable,
+  principalControlPlaneRoleTable,
+  principalHostMembershipTable,
+  principalHostRoleTable,
   principalTable,
   registeredHostTable,
 } from "./nodeControlPlaneSqliteSchema.js";
@@ -105,6 +117,17 @@ export const RegisteredHostRowInsertSchema = createInsertSchema(
   },
 );
 
+/** Strict lifecycle fields read from the singleton Control Plane claim row. */
+export const ControlPlaneClaimRowSelectSchema = createSelectSchema(
+  controlPlaneClaimTable,
+  {
+    claimId: Schema.Literal(1),
+    setupCapabilityHash: Schema.NullOr(ControlPlaneSetupCapabilityHash),
+    initialAdministratorId: Schema.NullOr(PrincipalId),
+    claimedAtEpochMs: Schema.NullOr(EpochMillis),
+  },
+);
+
 /** Strict selected-row decoder for stable Control Plane role IDs. */
 export const ControlPlaneRoleRowSelectSchema = createSelectSchema(
   controlPlaneRoleTable,
@@ -113,11 +136,70 @@ export const ControlPlaneRoleRowSelectSchema = createSelectSchema(
     name: Schema.NonEmptyString,
   },
 );
+/** Strict Control Plane role-permission relation decoder. */
+export const ControlPlaneRolePermissionRowSelectSchema = createSelectSchema(
+  controlPlaneRolePermissionTable,
+  {
+    roleId: ControlPlaneRoleId,
+    permission: ControlPlanePermission,
+  },
+);
+
+/** Strict Principal-to-Control-Plane-role assignment decoder. */
+export const PrincipalControlPlaneRoleRowSelectSchema = createSelectSchema(
+  principalControlPlaneRoleTable,
+  {
+    principalId: PrincipalId,
+    roleId: ControlPlaneRoleId,
+  },
+);
+
 /** Strict selected-row decoder for stable Host role IDs. */
 export const HostRoleRowSelectSchema = createSelectSchema(hostRoleTable, {
   roleId: HostRoleId,
   name: Schema.NonEmptyString,
 });
+
+/** Strict Host role-permission relation decoder. */
+export const HostRolePermissionRowSelectSchema = createSelectSchema(
+  hostRolePermissionTable,
+  {
+    roleId: HostRoleId,
+    permission: HostPermission,
+  },
+);
+
+/** Strict registered-Host membership decoder. */
+export const PrincipalHostMembershipRowSelectSchema = createSelectSchema(
+  principalHostMembershipTable,
+  {
+    hostId: Schema.NonEmptyString,
+    principalId: PrincipalId,
+    createdAtEpochMs: EpochMillis,
+  },
+);
+
+/** Strict membership-to-Host-role assignment decoder. */
+export const PrincipalHostRoleRowSelectSchema = createSelectSchema(
+  principalHostRoleTable,
+  {
+    hostId: Schema.NonEmptyString,
+    principalId: PrincipalId,
+    roleId: HostRoleId,
+  },
+);
+
+/** Exact role-catalog versions understood by this Node binary. */
+export const AuthorizationCatalogStateRowSelectSchema = createSelectSchema(
+  authorizationCatalogStateTable,
+  {
+    catalogStateId: Schema.Literal(1),
+    controlPlaneRoleVersion: Schema.Literal(
+      BuiltInControlPlaneRoleDefinitionVersion,
+    ),
+    hostRoleVersion: Schema.Literal(BuiltInHostRoleDefinitionVersion),
+  },
+);
 
 /** Strict selected-row decoder for hash-only Host-token persistence facts. */
 export const HostTokenRowSelectSchema = createSelectSchema(hostTokenTable, {

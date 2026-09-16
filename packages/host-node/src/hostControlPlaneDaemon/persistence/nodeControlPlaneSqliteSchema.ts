@@ -11,6 +11,7 @@ import { sql } from "drizzle-orm";
 import {
   check,
   foreignKey,
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -143,14 +144,28 @@ export const principalControlPlaneRoleTable = sqliteTable(
       .notNull()
       .references(() => controlPlaneRoleTable.roleId, { onDelete: "restrict" }),
   },
-  (table) => [primaryKey({ columns: [table.principalId, table.roleId] })],
+  (table) => [
+    primaryKey({ columns: [table.principalId, table.roleId] }),
+    // Last-Administrator checks address assignments by role rather than by the
+    // composite primary key's leading Principal column.
+    index("principal_control_plane_role_role_idx").on(table.roleId),
+  ],
 );
 
-/** Host identities registered for authorization before actor discovery. */
-export const registeredHostTable = sqliteTable("registered_host", {
-  hostId: text("host_id").primaryKey(),
-  createdAtEpochMs: integer("created_at_epoch_ms").notNull(),
-});
+/**
+ * Host identities registered for authorization before actor discovery.
+ *
+ * Global pages traverse in unique ascending `hostId` order and seek with
+ * `WHERE hostId > :hostId`, which the `host_id` primary-key index serves
+ * directly; no separate page index is needed. `createdAtEpochMs` is response
+ * metadata on each published Host, never an ordering or cursor key. */
+export const registeredHostTable = sqliteTable(
+  "registered_host",
+  {
+    hostId: text("host_id").primaryKey(),
+    createdAtEpochMs: integer("created_at_epoch_ms").notNull(),
+  },
+);
 
 /**
  * Shared Host role catalog persisted with stable package-owned UUIDs.
@@ -183,7 +198,16 @@ export const hostRolePermissionTable = sqliteTable(
   (table) => [primaryKey({ columns: [table.roleId, table.permission] })],
 );
 
-/** Host membership existence, separate from its complete role selection. */
+/**
+ * Host membership existence, separate from its complete role selection.
+ *
+ * Principal-scoped Host pages drive from this table: they filter
+ * `principalId` first, seek with `WHERE membership.hostId > :hostId`, and
+ * join `registered_host` by its `hostId` primary key. The composite index
+ * serves that ordered membership scan without touching the global Host
+ * ordering; the `(hostId, principalId)` primary key alone cannot, because
+ * its leading column is the wrong filter.
+ */
 export const principalHostMembershipTable = sqliteTable(
   "principal_host_membership",
   {
@@ -195,7 +219,13 @@ export const principalHostMembershipTable = sqliteTable(
       .references(() => principalTable.principalId, { onDelete: "cascade" }),
     createdAtEpochMs: integer("created_at_epoch_ms").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.hostId, table.principalId] })],
+  (table) => [
+    primaryKey({ columns: [table.hostId, table.principalId] }),
+    index("principal_host_membership_principal_page_idx").on(
+      table.principalId,
+      table.hostId,
+    ),
+  ],
 );
 
 /** Complete role selection for one existing Principal Host membership. */
@@ -245,6 +275,13 @@ export const hostTokenTable = sqliteTable(
   },
   (table) => [
     uniqueIndex("host_token_hash_unique").on(table.tokenHash),
+    // Global and Host-scoped token pages both use indexed keyset traversal.
+    index("host_token_page_idx").on(table.createdAtEpochMs, table.tokenId),
+    index("host_token_host_page_idx").on(
+      table.hostId,
+      table.createdAtEpochMs,
+      table.tokenId,
+    ),
     check(
       "host_token_credential_version_v1",
       sql`${table.credentialVersion} = 1`,

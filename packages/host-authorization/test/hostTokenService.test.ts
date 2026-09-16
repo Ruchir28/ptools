@@ -9,6 +9,8 @@
  * 3. Revocation is host-scoped, immediately visible, and idempotently preserves
  *    the first timestamp and admitted Principal revoker.
  * 4. Crypto and store failures stay distinct from ordinary rejection.
+ * 5. Inventory projection rejects duplicate, unordered, cross-Host, and
+ *    oversized pages published by a misbehaving platform store.
  *
  * HostTokenService, Effect composition, hashing, schemas, and lifecycle logic
  * are real. Only the platform Crypto and persistence ports are deterministic
@@ -23,21 +25,25 @@ import {
   Layer,
   Option,
   PlatformError,
+  Result,
 } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   HostPermissions,
   HostTokenHash,
   HostTokenId,
+  HostTokenInvariantViolation,
   HostTokenName,
   HostTokenNotFound,
   HostTokenPermissionSelection,
   HostTokenRecord,
+  HostTokenPagination,
   HostTokenRejected,
   HostTokenStoreError,
   IssueHostTokenInput,
   ListAllHostTokensInput,
   ListHostTokensInput,
+  Pagination,
   RevokeHostTokenInput,
   PrincipalIds,
   PrincipalCaller,
@@ -88,13 +94,20 @@ class Harness {
   duplicateInventory = false;
   unorderedInventory = false;
   foreignHostInventory = false;
+  oversizedInventory = false;
+  // When set, both listing methods publish this cursor as the store's claimed
+  // continuation. It lets the relay test drive a valid but deliberately
+  // unrelated-to-items cursor through the service boundary.
+  storeNextCursor: Option.Option<HostTokenPagination.Cursor> = Option.none();
 
   /**
    * Applies at most one inventory corruption to a store result. Corruption
    * happens after host filtering and lookup, emulating a broken platform
    * adapter rather than a caller reaching records it should not see.
    */
-  private corruptInventory(records: Array<HostTokenRecord>): Array<HostTokenRecord> {
+  private corruptInventory(
+    records: Array<HostTokenRecord>,
+  ): Array<HostTokenRecord> {
     if (this.duplicateInventory && records.length > 0) {
       return [...records, records[0]!];
     }
@@ -116,6 +129,20 @@ class Harness {
       ];
     }
     return records;
+  }
+
+  /**
+   * Applies the requested database bound unless the test intentionally models
+   * a broken adapter returning one lookahead row as a published item. Real
+   * stores may fetch `limit + 1` to discover continuation, but that extra row
+   * must never cross the `HostTokenRecordStore` boundary.
+   */
+  private pageInventory(
+    records: Array<HostTokenRecord>,
+    limit: number,
+  ): Array<HostTokenRecord> {
+    const publishedLimit = this.oversizedInventory ? limit + 1 : limit;
+    return this.corruptInventory(records).slice(0, publishedLimit);
   }
 
   // Effect's real Crypto constructor still owns UUID formatting. The fake only
@@ -183,7 +210,8 @@ class Harness {
       return Effect.gen(function* () {
         const record = Array.from(harness.recordsByHash.values()).find(
           (candidate) =>
-            candidate.hostId === input.hostId && candidate.tokenId === input.tokenId,
+            candidate.hostId === input.hostId &&
+            candidate.tokenId === input.tokenId,
         );
         if (record === undefined) {
           return yield* new HostTokenNotFound({
@@ -212,17 +240,27 @@ class Harness {
         return revoked;
       });
     },
-    listByHost: (hostId) =>
+    listByHost: (input) =>
       Effect.sync(() =>
-        this.corruptInventory(
-          [...this.recordsByHash.values()].filter(
-            (record) => record.hostId === hostId,
+        HostTokenPagination.RecordPage.make({
+          items: this.pageInventory(
+            [...this.recordsByHash.values()].filter(
+              (record) => record.hostId === input.hostId,
+            ),
+            input.limit,
           ),
-        ),
+          nextCursor: this.storeNextCursor,
+        }),
       ),
-    listAll: () =>
+    listAll: (input) =>
       Effect.sync(() =>
-        this.corruptInventory([...this.recordsByHash.values()]),
+        HostTokenPagination.RecordPage.make({
+          items: this.pageInventory(
+            [...this.recordsByHash.values()],
+            input.limit,
+          ),
+          nextCursor: this.storeNextCursor,
+        }),
       ),
   });
 
@@ -244,7 +282,9 @@ class Harness {
     );
     return Effect.runPromise(
       effect.pipe(
-        Effect.provide(HostTokenService.layer.pipe(Layer.provide(dependencies))),
+        Effect.provide(
+          HostTokenService.layer.pipe(Layer.provide(dependencies)),
+        ),
         Effect.provideService(Clock.Clock, this.clock),
       ),
     );
@@ -258,7 +298,9 @@ class Harness {
     );
     return Effect.runPromiseExit(
       effect.pipe(
-        Effect.provide(HostTokenService.layer.pipe(Layer.provide(dependencies))),
+        Effect.provide(
+          HostTokenService.layer.pipe(Layer.provide(dependencies)),
+        ),
         Effect.provideService(Clock.Clock, this.clock),
       ),
     );
@@ -323,17 +365,78 @@ describe("HostTokenService", () => {
       Effect.gen(function* () {
         const service = yield* HostTokenService;
         const host = yield* service.listByHost(
-          ListHostTokensInput.make({ hostId: "personal" }),
+          ListHostTokensInput.make({
+            hostId: "personal",
+            limit: Pagination.PageSize.make(10),
+            cursor: Option.none(),
+          }),
         );
-        const all = yield* service.listAll(ListAllHostTokensInput.make({}));
+        const all = yield* service.listAll(
+          ListAllHostTokensInput.make({
+            limit: Pagination.PageSize.make(10),
+            cursor: Option.none(),
+          }),
+        );
         return { host, all };
       }),
     );
 
-    expect(inventories.host).toEqual([issued.token]);
-    expect(inventories.all).toEqual([issued.token]);
-    expect(inventories.all[0]).not.toHaveProperty("tokenHash");
-    expect(inventories.all[0]).not.toHaveProperty("plaintext");
+    expect(inventories.host.items).toEqual([issued.token]);
+    expect(inventories.all.items).toEqual([issued.token]);
+    expect(inventories.all.items[0]).not.toHaveProperty("tokenHash");
+    expect(inventories.all.items[0]).not.toHaveProperty("plaintext");
+  });
+
+  /**
+   * Proves the inventory projection relays the store's continuation cursor
+   * verbatim. Per-page ordering is the only inventory law the service enforces
+   * here — items must be ordered by `createdAtEpochMs` with `tokenId` breaking
+   * ties within this page — but the service deliberately does NOT validate that
+   * the cursor matches the page's last item or any other continuation
+   * convention: cursor semantics are owned entirely by the platform store,
+   * which may fetch `limit + 1` rows or encode keys however it chooses. The
+   * fake supplies a syntactically valid cursor unrelated to the page's records
+   * to prove that no hidden cursor/last-item coupling exists.
+   *
+   * What this proves:
+   * 1. A store-published `nextCursor: Option.some(cursor)` survives the
+   *    service's projection unchanged for both `listByHost` and `listAll`.
+   * 2. A well-ordered page with that cursor passes validation, so cursor
+   *    relay and item-order validation are independent laws.
+   */
+  it("relays a valid store-supplied nextCursor through both inventory operations", async () => {
+    const harness = new Harness();
+    await harness.issue();
+    // A well-formed cursor the fake invented that has no relationship to the
+    // single issued record — proving the service relays, not recomputes.
+    const storeCursor = HostTokenPagination.makeCursor({
+      tokenId: HostTokenId.make("123e4567-e89b-42d3-a456-426614174999"),
+      createdAtEpochMs: 42,
+    });
+    harness.storeNextCursor = Option.some(storeCursor);
+
+    const pages = await harness.run(
+      Effect.gen(function* () {
+        const service = yield* HostTokenService;
+        const host = yield* service.listByHost(
+          ListHostTokensInput.make({
+            hostId: "personal",
+            limit: Pagination.PageSize.make(10),
+            cursor: Option.none(),
+          }),
+        );
+        const all = yield* service.listAll(
+          ListAllHostTokensInput.make({
+            limit: Pagination.PageSize.make(10),
+            cursor: Option.none(),
+          }),
+        );
+        return { host, all };
+      }),
+    );
+
+    expect(pages.host.nextCursor).toStrictEqual(Option.some(storeCursor));
+    expect(pages.all.nextCursor).toStrictEqual(Option.some(storeCursor));
   });
 
   it("issues from 32 random bytes and persists only complete-credential hash metadata", async () => {
@@ -382,7 +485,8 @@ describe("HostTokenService", () => {
       }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) expect(String(exit.cause)).toContain("HostTokenStoreError");
+    if (Exit.isFailure(exit))
+      expect(String(exit.cause)).toContain("HostTokenStoreError");
     expect(harness.recordsByHash.size).toBe(0);
   });
 
@@ -419,7 +523,9 @@ describe("HostTokenService", () => {
       const exit = await harness.runExit(
         Effect.gen(function* () {
           const service = yield* HostTokenService;
-          return yield* service.verify(VerifyHostTokenInput.make({ plaintext }));
+          return yield* service.verify(
+            VerifyHostTokenInput.make({ plaintext }),
+          );
         }),
       );
       expect(Exit.isFailure(exit)).toBe(true);
@@ -438,7 +544,9 @@ describe("HostTokenService", () => {
     const missingExit = await missing.runExit(
       Effect.gen(function* () {
         const service = yield* HostTokenService;
-        return yield* service.verify(VerifyHostTokenInput.make({ plaintext: canonicalMissing }));
+        return yield* service.verify(
+          VerifyHostTokenInput.make({ plaintext: canonicalMissing }),
+        );
       }),
     );
     expect(String(missingExit)).toContain("HostTokenRejected");
@@ -449,7 +557,9 @@ describe("HostTokenService", () => {
     const expiredExit = await harness.runExit(
       Effect.gen(function* () {
         const service = yield* HostTokenService;
-        return yield* service.verify(VerifyHostTokenInput.make({ plaintext: issued.plaintext }));
+        return yield* service.verify(
+          VerifyHostTokenInput.make({ plaintext: issued.plaintext }),
+        );
       }),
     );
     expect(String(expiredExit)).toContain("HostTokenRejected");
@@ -459,7 +569,10 @@ describe("HostTokenService", () => {
       Effect.gen(function* () {
         const service = yield* HostTokenService;
         return yield* service.revoke(
-          RevokeHostTokenInput.make({ hostId: "personal", tokenId: issued.token.tokenId }),
+          RevokeHostTokenInput.make({
+            hostId: "personal",
+            tokenId: issued.token.tokenId,
+          }),
           revoker,
         );
       }),
@@ -467,7 +580,9 @@ describe("HostTokenService", () => {
     const revokedExit = await harness.runExit(
       Effect.gen(function* () {
         const service = yield* HostTokenService;
-        return yield* service.verify(VerifyHostTokenInput.make({ plaintext: issued.plaintext }));
+        return yield* service.verify(
+          VerifyHostTokenInput.make({ plaintext: issued.plaintext }),
+        );
       }),
     );
     expect(String(revokedExit)).toContain("HostTokenRejected");
@@ -482,14 +597,19 @@ describe("HostTokenService", () => {
         Effect.gen(function* () {
           const service = yield* HostTokenService;
           return yield* service.revoke(
-            RevokeHostTokenInput.make({ hostId, tokenId: issued.token.tokenId }),
+            RevokeHostTokenInput.make({
+              hostId,
+              tokenId: issued.token.tokenId,
+            }),
             caller,
           );
         }),
       );
 
     // Knowing a token UUID is insufficient to revoke it through another host.
-    await expect(revoke("other-host")).rejects.toMatchObject({ _tag: "HostTokenNotFound" });
+    await expect(revoke("other-host")).rejects.toMatchObject({
+      _tag: "HostTokenNotFound",
+    });
     const first = await revoke("personal");
     harness.now = 1_200;
     // A later revoker and later clock value must not rewrite first-revocation audit.
@@ -500,7 +620,9 @@ describe("HostTokenService", () => {
       }),
     );
     expect(Option.getOrThrow(first.revokedAtEpochMs)).toBe(1_100);
-    expect(Option.getOrThrow(first.revokedByPrincipalId)).toBe(revoker.principalId);
+    expect(Option.getOrThrow(first.revokedByPrincipalId)).toBe(
+      revoker.principalId,
+    );
     expect(second.revokedAtEpochMs).toEqual(first.revokedAtEpochMs);
     expect(second.revokedByPrincipalId).toEqual(first.revokedByPrincipalId);
   });
@@ -516,7 +638,12 @@ describe("HostTokenService", () => {
       duplicate.run(
         Effect.gen(function* () {
           const service = yield* HostTokenService;
-          return yield* service.listAll(ListAllHostTokensInput.make({}));
+          return yield* service.listAll(
+            ListAllHostTokensInput.make({
+              limit: Pagination.PageSize.make(10),
+              cursor: Option.none(),
+            }),
+          );
         }),
       ),
     ).rejects.toMatchObject({ _tag: "HostTokenInvariantViolation" });
@@ -530,7 +657,12 @@ describe("HostTokenService", () => {
       unordered.run(
         Effect.gen(function* () {
           const service = yield* HostTokenService;
-          return yield* service.listAll(ListAllHostTokensInput.make({}));
+          return yield* service.listAll(
+            ListAllHostTokensInput.make({
+              limit: Pagination.PageSize.make(10),
+              cursor: Option.none(),
+            }),
+          );
         }),
       ),
     ).rejects.toMatchObject({ _tag: "HostTokenInvariantViolation" });
@@ -545,18 +677,66 @@ describe("HostTokenService", () => {
         Effect.gen(function* () {
           const service = yield* HostTokenService;
           return yield* service.listByHost(
-            ListHostTokensInput.make({ hostId: "personal" }),
+            ListHostTokensInput.make({
+              hostId: "personal",
+              limit: Pagination.PageSize.make(10),
+              cursor: Option.none(),
+            }),
           );
         }),
       ),
     ).rejects.toMatchObject({ _tag: "HostTokenInvariantViolation" });
   });
 
+  it("rejects oversized pages from both token inventory operations", async () => {
+    const harness = new Harness();
+    await harness.issue();
+    await harness.issue();
+    harness.oversizedInventory = true;
+
+    // The fake publishes two records for a one-record request. This models a
+    // store accidentally exposing its lookahead row instead of retaining it
+    // only long enough to calculate nextCursor.
+    const failures = await harness.run(
+      Effect.gen(function* () {
+        const service = yield* HostTokenService;
+        return yield* Effect.all([
+          Effect.result(
+            service.listAll(
+              ListAllHostTokensInput.make({
+                limit: Pagination.PageSize.make(1),
+                cursor: Option.none(),
+              }),
+            ),
+          ),
+          Effect.result(
+            service.listByHost(
+              ListHostTokensInput.make({
+                hostId: "personal",
+                limit: Pagination.PageSize.make(1),
+                cursor: Option.none(),
+              }),
+            ),
+          ),
+        ]);
+      }),
+    );
+
+    for (const failure of failures) {
+      expect(Result.isFailure(failure)).toBe(true);
+      if (Result.isFailure(failure)) {
+        expect(failure.failure).toBeInstanceOf(HostTokenInvariantViolation);
+      }
+    }
+  });
+
   it("rejects issuance expiry that is not strictly in the future before persistence", async () => {
     const harness = new Harness();
-    await expect(harness.issue(Option.some(harness.now))).rejects.toMatchObject({
-      _tag: "HostTokenExpirationInvalid",
-    });
+    await expect(harness.issue(Option.some(harness.now))).rejects.toMatchObject(
+      {
+        _tag: "HostTokenExpirationInvalid",
+      },
+    );
     expect(harness.recordsByHash.size).toBe(0);
     // Expiry validation precedes both secret generation and persistence, so an
     // already-invalid request cannot create an undisclosed credential or record.
@@ -589,7 +769,9 @@ describe("HostTokenService", () => {
       harness.run(
         Effect.gen(function* () {
           const service = yield* HostTokenService;
-          return yield* service.verify(VerifyHostTokenInput.make({ plaintext: issued.plaintext }));
+          return yield* service.verify(
+            VerifyHostTokenInput.make({ plaintext: issued.plaintext }),
+          );
         }),
       ),
     ).rejects.toMatchObject({ _tag: "HostTokenStoreError" });

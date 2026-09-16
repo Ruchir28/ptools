@@ -21,12 +21,18 @@ import {
   HostPermissions,
   HostRole,
   HostRoleId,
+  HostRolePagination,
+  ListHostsInput,
+  ListPrincipalHostsInput,
+  ListRegisteredHostsInput,
+  Pagination,
   Principal,
   PrincipalControlPlaneAccess,
   PrincipalIds,
   PrincipalCaller,
   RegisteredHost,
   RegisteredHostNotFound,
+  RegisteredHostPagination,
   ReplaceControlPlaneRolesInput,
   ReplacePrincipalControlPlaneRolesInput,
 } from "../src/contracts/index.js";
@@ -36,7 +42,7 @@ import {
   ControlPlaneAdministration,
   HostAccessStore,
 } from "../src/services/index.js";
-import { Effect, HashSet, Layer } from "effect";
+import { Effect, HashSet, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 const administratorId = PrincipalIds.fromFixedLocalIdentity("administrator");
@@ -110,6 +116,11 @@ const role = HostRole.make({
  */
 let registeredHostReadCount = 0;
 let membershipResolutionCount = 0;
+// Captured listing inputs so the forwarding test can prove the administration
+// service relays the caller's limit and cursor to the store verbatim in both
+// authority branches.
+let registeredHostsListInputs: Array<ListRegisteredHostsInput> = [];
+let principalHostsListInputs: Array<ListPrincipalHostsInput> = [];
 const hostStore = HostAccessStore.of({
   getRegisteredHost: ({ hostId }) => {
     registeredHostReadCount++;
@@ -138,8 +149,24 @@ const hostStore = HostAccessStore.of({
       }),
     );
   },
-  listPrincipalHosts: () => Effect.succeed([memberHost]),
-  listRegisteredHosts: () => Effect.succeed([allHost, memberHost]),
+  listPrincipalHosts: (input) => {
+    principalHostsListInputs.push(input);
+    return Effect.succeed(
+      RegisteredHostPagination.Page.make({
+        items: [memberHost],
+        nextCursor: Option.none(),
+      }),
+    );
+  },
+  listRegisteredHosts: (input) => {
+    registeredHostsListInputs.push(input);
+    return Effect.succeed(
+      RegisteredHostPagination.Page.make({
+        items: [allHost, memberHost],
+        nextCursor: Option.none(),
+      }),
+    );
+  },
   resolvePrincipalHostAccess: () => {
     membershipResolutionCount++;
     return Effect.succeed(ownerAccess("all-host"));
@@ -147,7 +174,13 @@ const hostStore = HostAccessStore.of({
   createMembership: () => Effect.succeed(ownerAccess("all-host")),
   replaceMembershipRoles: () => Effect.succeed(ownerAccess("all-host")),
   getHostRole: () => Effect.succeed(role),
-  listHostRoles: () => Effect.succeed([role]),
+  listHostRoles: () =>
+    Effect.succeed(
+      HostRolePagination.Page.make({
+        items: [role],
+        nextCursor: Option.none(),
+      }),
+    ),
 });
 
 const dependencies = Layer.merge(
@@ -186,15 +219,71 @@ describe("ControlPlaneAdministration", () => {
           CreateRegisteredHostInput.make({ requestedHostId: "new-host" }),
           member,
         );
-        const assigned = yield* administration.listHosts(member);
-        const all = yield* administration.listHosts(administrator);
+        const page = ListHostsInput.make({
+          limit: Pagination.PageSize.make(10),
+          cursor: Option.none(),
+        });
+        const assigned = yield* administration.listHosts(page, member);
+        const all = yield* administration.listHosts(page, administrator);
         return { assigned, all };
       }),
     );
 
     expect(createdOwner).toBe(memberId);
-    expect(result.assigned).toEqual([memberHost]);
-    expect(result.all).toEqual([allHost, memberHost]);
+    expect(result.assigned.items).toEqual([memberHost]);
+    expect(result.all.items).toEqual([allHost, memberHost]);
+  });
+
+  /**
+   * Proves `listHosts` forwards the caller's page request — limit and cursor —
+   * verbatim to the store in BOTH authority branches. The administrator branch
+   * (`listRegisteredHosts`) and the ordinary-Principal branch
+   * (`listPrincipalHosts`) construct distinct store inputs, so a dropped,
+   * defaulted, or transformed limit/cursor in either branch would otherwise be
+   * invisible. The service's only job here is scope selection; pagination
+   * parameters must pass through untouched, and the cursor is relayed as the
+   * opaque value the client supplied without re-validation.
+   */
+  it("forwards the exact limit and cursor to both administrator and principal listing branches", async () => {
+    registeredHostsListInputs = [];
+    principalHostsListInputs = [];
+    const member = PrincipalCaller.make({ principalId: memberId });
+    const administrator = PrincipalCaller.make({
+      principalId: administratorId,
+    });
+    const cursor = RegisteredHostPagination.makeCursor("host-a");
+
+    await run(
+      Effect.gen(function* () {
+        const administration = yield* ControlPlaneAdministration;
+        yield* administration.listHosts(
+          ListHostsInput.make({
+            limit: Pagination.PageSize.make(7),
+            cursor: Option.some(cursor),
+          }),
+          member,
+        );
+        yield* administration.listHosts(
+          ListHostsInput.make({
+            limit: Pagination.PageSize.make(7),
+            cursor: Option.some(cursor),
+          }),
+          administrator,
+        );
+      }),
+    );
+
+    expect(principalHostsListInputs).toHaveLength(1);
+    expect(principalHostsListInputs[0]).toMatchObject({
+      principalId: memberId,
+      limit: 7,
+      cursor: Option.some(cursor),
+    });
+    expect(registeredHostsListInputs).toHaveLength(1);
+    expect(registeredHostsListInputs[0]).toMatchObject({
+      limit: 7,
+      cursor: Option.some(cursor),
+    });
   });
 
   /**

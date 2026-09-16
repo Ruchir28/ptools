@@ -67,21 +67,26 @@ export const ControlPlaneAdministrationHandlers = HttpApiBuilder.group(
             }),
         ).pipe(Effect.mapError(toControlPlaneHttpError)),
       )
-      .handle("listHosts", () =>
+      .handle("listHosts", (ctx) =>
         withPrincipalCaller((caller) =>
           Effect.gen(function* () {
             const administration = yield* ControlPlaneAdministration;
-            return yield* administration.listHosts(caller);
+            return yield* administration.listHosts(ctx.query, caller);
           }),
         ).pipe(Effect.mapError(toControlPlaneHttpError)),
       )
-      .handle("listAllHostTokens", () =>
+      .handle("listAllHostTokens", (ctx) =>
         withControlPlaneAuthorization(
           ControlPlanePermissions.hosts.administer,
           () =>
             Effect.gen(function* () {
               const tokens = yield* HostTokenService;
-              return yield* tokens.listAll(ListAllHostTokensInput.make({}));
+              return yield* tokens.listAll(
+                ListAllHostTokensInput.make({
+                  limit: ctx.query.limit,
+                  cursor: ctx.query.cursor,
+                }),
+              );
             }),
         ).pipe(Effect.mapError(toControlPlaneHttpError)),
       )
@@ -139,7 +144,11 @@ export const HostCredentialAdministrationHandlers = HttpApiBuilder.group(
             Effect.gen(function* () {
               const tokens = yield* HostTokenService;
               return yield* tokens.listByHost(
-                ListHostTokensInput.make({ hostId: ctx.params.hostId }),
+                ListHostTokensInput.make({
+                  hostId: ctx.params.hostId,
+                  limit: ctx.query.limit,
+                  cursor: ctx.query.cursor,
+                }),
               );
             }),
         ).pipe(Effect.mapError(toControlPlaneHttpError)),

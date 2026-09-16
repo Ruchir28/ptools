@@ -9,15 +9,16 @@ import {
   type CreateOwnedHostError,
   type CreatedOwnedHost,
   type CreateRegisteredHostInput,
+  type ListHostsInput,
   type ListPrincipalHostsError,
   type ListRegisteredHostsError,
   type PrincipalControlPlaneAccess,
   type PrincipalCaller,
-  type RegisteredHost,
   type ResolvePrincipalControlPlaneAccessError,
   type ReplaceControlPlaneRolesInput,
   type ReplacePrincipalControlPlaneRolesError,
 } from "../contracts/index.js";
+import type { RegisteredHostPagination } from "../contracts/registeredHostPagination.js";
 import { ControlPlaneAccessStore } from "./controlPlaneAccessStore.js";
 import { HostAccessStore } from "./hostAccessStore.js";
 
@@ -74,9 +75,10 @@ export class ControlPlaneAdministration extends Context.Service<ControlPlaneAdmi
        * existence of other Principals' hosts undisclosed.
        */
       const listHosts = (
+        input: ListHostsInput,
         caller: PrincipalCaller,
       ): Effect.Effect<
-        ReadonlyArray<RegisteredHost>,
+        RegisteredHostPagination.Page,
         | ResolvePrincipalControlPlaneAccessError
         | ListRegisteredHostsError
         | ListPrincipalHostsError
@@ -92,10 +94,17 @@ export class ControlPlaneAdministration extends Context.Service<ControlPlaneAdmi
               access.effectivePermissions.includes(
                 ControlPlanePermissions.hosts.list,
               )
-                ? hosts.listRegisteredHosts(ListRegisteredHostsInput.make({}))
+                ? hosts.listRegisteredHosts(
+                    ListRegisteredHostsInput.make({
+                      limit: input.limit,
+                      cursor: input.cursor,
+                    }),
+                  )
                 : hosts.listPrincipalHosts(
                     ListPrincipalHostsInput.make({
                       principalId: caller.principalId,
+                      limit: input.limit,
+                      cursor: input.cursor,
                     }),
                   ),
             ),

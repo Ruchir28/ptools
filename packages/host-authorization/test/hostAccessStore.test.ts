@@ -10,7 +10,7 @@
  * concrete platform adds the reusable behavioral-law suite for identity
  * correlation, canonical ordering, and mutation atomicity.
  */
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   CreatedOwnedHost,
@@ -18,10 +18,13 @@ import {
   HostPermissions,
   HostRole,
   HostRoleId,
+  HostRolePagination,
   ListHostRolesInput,
+  Pagination,
   PrincipalId,
   PrincipalIds,
   RegisteredHost,
+  RegisteredHostPagination,
   GetHostRoleInput,
   GetRegisteredHostInput,
 } from "../src/contracts/index.js";
@@ -57,16 +60,25 @@ const createdOwnedHost = CreatedOwnedHost.make({
  * correlation, canonical ordering, mutation atomicity) belong to the shared
  * platform contract suite once the first concrete adapter exists.
  */
+const hostPage = RegisteredHostPagination.Page.make({
+  items: [registeredHost],
+  nextCursor: Option.none(),
+});
+const rolePage = HostRolePagination.Page.make({
+  items: [role],
+  nextCursor: Option.none(),
+});
+
 const testStore = HostAccessStore.of({
   getRegisteredHost: () => Effect.succeed(registeredHost),
   createOwnedHost: () => Effect.succeed(createdOwnedHost),
-  listPrincipalHosts: () => Effect.succeed([registeredHost]),
-  listRegisteredHosts: () => Effect.succeed([registeredHost]),
+  listPrincipalHosts: () => Effect.succeed(hostPage),
+  listRegisteredHosts: () => Effect.succeed(hostPage),
   resolvePrincipalHostAccess: () => Effect.succeed(memberAccess),
   createMembership: () => Effect.succeed(memberAccess),
   replaceMembershipRoles: () => Effect.succeed(memberAccess),
   getHostRole: () => Effect.succeed(role),
-  listHostRoles: () => Effect.succeed([role]),
+  listHostRoles: () => Effect.succeed(rolePage),
 });
 
 /**
@@ -101,8 +113,15 @@ describe("HostAccessStore", () => {
       ),
     ).resolves.toBe(role);
     await expect(
-      Effect.runPromise(testStore.listHostRoles(ListHostRolesInput.make({}))),
-    ).resolves.toEqual([role]);
+      Effect.runPromise(
+        testStore.listHostRoles(
+          ListHostRolesInput.make({
+            limit: Pagination.PageSize.make(10),
+            cursor: Option.none(),
+          }),
+        ),
+      ),
+    ).resolves.toEqual(rolePage);
     expect("installBuiltInHostRoles" in testStore).toBe(false);
   });
 });

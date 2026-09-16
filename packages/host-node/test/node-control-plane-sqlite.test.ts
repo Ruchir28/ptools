@@ -13,6 +13,8 @@
  *   3. Foreign keys and native Drizzle Effect transactions run on that same
  *      connection and roll back multi-table failures.
  *   4. Generated/refined Effect schemas reject malformed persisted domain IDs.
+ *   5. Host and token pagination queries seek the indexes that own their
+ *      ordering rather than sorting or scanning unrelated rows.
  *
  * Boundaries:
  *   Temporary files, node:sqlite, Effect SQL, Drizzle queries, migrations, and
@@ -84,6 +86,73 @@ describe("Node control-plane Effect SQLite and Drizzle", () => {
         "schema_migration",
       ]),
     );
+  });
+
+  /**
+   * Mental model: each bounded page must begin at its cursor inside the index
+   * that owns the published order. Global Hosts use their primary key, scoped
+   * Hosts use the Principal-first membership index, and tokens use their
+   * creation-time composite indexes.
+   *
+   * What this proves:
+   * 1. Global Host pages seek the `host_id` primary-key index.
+   * 2. Principal-scoped pages seek `(principal_id, host_id)` before joining the
+   *    selected Host rows and require no temporary ordering B-tree.
+   * 3. Both token listing scopes retain their matching composite indexes.
+   *
+   * Boundaries: checked-in migrations and SQLite's real query planner are real;
+   * the SQL mirrors the corresponding Drizzle store queries.
+   */
+  it("uses range-seek indexes for bounded Host and token pages", async () => {
+    const plans = await withDatabase(
+      Effect.gen(function* () {
+        const { database } = yield* NodeControlPlaneDrizzle;
+        const hosts = yield* database.all<{ readonly detail: string }>(
+          "EXPLAIN QUERY PLAN SELECT * FROM registered_host WHERE host_id > 'host-1' ORDER BY host_id LIMIT 11",
+        );
+        const principalHosts = yield* database.all<{ readonly detail: string }>(
+          "EXPLAIN QUERY PLAN SELECT host.host_id, host.created_at_epoch_ms FROM principal_host_membership AS membership INNER JOIN registered_host AS host ON membership.host_id = host.host_id WHERE membership.principal_id = 'principal-1' AND membership.host_id > 'host-1' ORDER BY membership.host_id LIMIT 11",
+        );
+        const allTokens = yield* database.all<{ readonly detail: string }>(
+          "EXPLAIN QUERY PLAN SELECT * FROM host_token WHERE created_at_epoch_ms > 10 OR (created_at_epoch_ms = 10 AND token_id > '123e4567-e89b-42d3-a456-426614174000') ORDER BY created_at_epoch_ms, token_id LIMIT 11",
+        );
+        const hostTokens = yield* database.all<{ readonly detail: string }>(
+          "EXPLAIN QUERY PLAN SELECT * FROM host_token WHERE host_id = 'host-1' AND (created_at_epoch_ms > 10 OR (created_at_epoch_ms = 10 AND token_id > '123e4567-e89b-42d3-a456-426614174000')) ORDER BY created_at_epoch_ms, token_id LIMIT 11",
+        );
+        return { hosts, principalHosts, allTokens, hostTokens };
+      }),
+    );
+
+    expect(
+      plans.hosts.some(({ detail }) =>
+        detail.includes("sqlite_autoindex_registered_host_1"),
+      ),
+    ).toBe(true);
+    expect(
+      plans.principalHosts.some(({ detail }) =>
+        detail.includes("principal_host_membership_principal_page_idx"),
+      ),
+    ).toBe(true);
+    expect(
+      plans.principalHosts.some(({ detail }) =>
+        detail.includes("sqlite_autoindex_registered_host_1"),
+      ),
+    ).toBe(true);
+    expect(
+      plans.principalHosts.every(
+        ({ detail }) => !detail.includes("USE TEMP B-TREE"),
+      ),
+    ).toBe(true);
+    expect(
+      plans.allTokens.some(({ detail }) =>
+        detail.includes("host_token_page_idx"),
+      ),
+    ).toBe(true);
+    expect(
+      plans.hostTokens.some(({ detail }) =>
+        detail.includes("host_token_host_page_idx"),
+      ),
+    ).toBe(true);
   });
 
   it("rejects unknown migration history before adapters can run", async () => {

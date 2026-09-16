@@ -57,7 +57,9 @@ import {
 } from "../contracts/hostAccessOperations/index.js";
 import type { HostMemberAccess } from "../contracts/hostMemberAccess.js";
 import type { HostRole } from "../contracts/hostRole.js";
+import type { HostRolePagination } from "../contracts/hostRolePagination.js";
 import type { RegisteredHost } from "../contracts/registeredHost.js";
+import type { RegisteredHostPagination } from "../contracts/registeredHostPagination.js";
 
 /** Platform-owned registered-Host, role, and Principal-access capability. */
 export class HostAccessStore extends Context.Service<
@@ -73,11 +75,11 @@ export class HostAccessStore extends Context.Service<
 
     readonly listPrincipalHosts: (
       input: ListPrincipalHostsInput,
-    ) => Effect.Effect<ReadonlyArray<RegisteredHost>, ListPrincipalHostsError>;
+    ) => Effect.Effect<RegisteredHostPagination.Page, ListPrincipalHostsError>;
 
     readonly listRegisteredHosts: (
       input: ListRegisteredHostsInput,
-    ) => Effect.Effect<ReadonlyArray<RegisteredHost>, ListRegisteredHostsError>;
+    ) => Effect.Effect<RegisteredHostPagination.Page, ListRegisteredHostsError>;
 
     readonly resolvePrincipalHostAccess: (
       input: ResolvePrincipalHostAccessInput,
@@ -97,6 +99,6 @@ export class HostAccessStore extends Context.Service<
 
     readonly listHostRoles: (
       input: ListHostRolesInput,
-    ) => Effect.Effect<ReadonlyArray<HostRole>, ListHostRolesError>;
+    ) => Effect.Effect<HostRolePagination.Page, ListHostRolesError>;
   }
 >()("@ptools/host-authorization/HostAccessStore") {}

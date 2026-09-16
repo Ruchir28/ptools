@@ -108,6 +108,30 @@ present.
 - Do not create alias names for the same DTO or concept across package
   boundaries. Keep the owned name everywhere it is used. Add temporary
   compatibility aliases only when explicitly approved.
+- Group cohesive domain APIs with the OpenCode-style self-namespace pattern
+  when a module owns several closely related schemas, types, constructors, or
+  operations:
+
+  ```ts
+  // hostTokenPagination.ts
+  export * as HostTokenPagination from "./hostTokenPagination.js";
+  export const Page = ...;
+  export const Cursor = ...;
+
+  // index.ts
+  export { HostTokenPagination } from "./hostTokenPagination.js";
+
+  // consumer.ts
+  import { HostTokenPagination } from "./hostTokenPagination.js";
+  HostTokenPagination.Page;
+  ```
+
+  Keep namespace members concise, such as `Page`, `Cursor`, and `makeCursor`.
+  Do not substitute default imports, caller-side `import * as` aliases,
+  prefixed duplicate member names, or flattened barrel exports that can
+  collide. Use this pattern only for a genuinely cohesive domain surface, not
+  to wrap every single-export module.
+
 - If Effect is not viable for a host/runtime change, stop and confirm the
   non-Effect implementation direction with the user before proceeding.
 - Executor provider handlers are Effect-returning host capabilities. Wrap promise/value work with `Effect.promise` or `Effect.succeed` instead of widening executor APIs to raw promises.

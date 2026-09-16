@@ -6,17 +6,19 @@
  */
 import { Context, Effect, Option } from "effect";
 import type { RegisteredHostNotFound } from "../contracts/hostAccessErrors.js";
-import type {
-  HostTokenHash,
-  HostTokenRecord,
-} from "../contracts/hostToken.js";
+import type { HostTokenHash, HostTokenRecord } from "../contracts/hostToken.js";
 import type {
   HostTokenInvariantViolation,
   HostTokenNotFound,
   HostTokenRecordAlreadyExists,
   HostTokenStoreError,
 } from "../contracts/hostTokenErrors.js";
+import type {
+  ListAllHostTokensInput,
+  ListHostTokensInput,
+} from "../contracts/hostTokenOperations/listHostTokens.js";
 import type { RevokeHostTokenRecordInput } from "../contracts/hostTokenOperations/revokeHostToken.js";
+import type { HostTokenPagination } from "../contracts/hostTokenPagination.js";
 
 /**
  * Platform-owned persistence capability for hash-only host-token records.
@@ -96,27 +98,29 @@ export class HostTokenRecordStore extends Context.Service<
       HostTokenNotFound | HostTokenInvariantViolation | HostTokenStoreError
     >;
     /**
-     * Records for one Host, ordered by `createdAtEpochMs` then `tokenId`.
-     * The lifecycle validates that ordering and host scoping on every result
-     * and fails with `HostTokenInvariantViolation` if the store violates
-     * either, so implementations must return this order deterministically.
+     * One bounded keyset page for a Host, ordered by `createdAtEpochMs` then
+     * `tokenId`. The lifecycle validates ordering and Host scoping on every
+     * result and fails with `HostTokenInvariantViolation` if the store violates
+     * either, so implementations must apply the limit before publication.
      * Consumed only after the caller has been admitted for host-scoped
      * token management.
      */
     readonly listByHost: (
-      hostId: string,
+      input: ListHostTokensInput,
     ) => Effect.Effect<
-      ReadonlyArray<HostTokenRecord>,
+      HostTokenPagination.RecordPage,
       HostTokenInvariantViolation | HostTokenStoreError
     >;
     /**
-     * Cross-Host inventory with the same ordering contract as `listByHost`.
+     * One bounded cross-Host page with the same keyset contract as `listByHost`.
      * Deliberately unscoped: admission to use it is owned by the management
      * boundary (Administrator authorization), not by this port — the store
      * performs no access checks itself.
      */
-    readonly listAll: () => Effect.Effect<
-      ReadonlyArray<HostTokenRecord>,
+    readonly listAll: (
+      input: ListAllHostTokensInput,
+    ) => Effect.Effect<
+      HostTokenPagination.RecordPage,
       HostTokenInvariantViolation | HostTokenStoreError
     >;
   }

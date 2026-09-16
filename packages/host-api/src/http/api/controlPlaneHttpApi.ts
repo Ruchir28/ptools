@@ -4,9 +4,12 @@ import {
   CreateRegisteredHostInput,
   CreatedOwnedHost,
   HostToken,
+  HostTokenPagination,
+  HostTokenPageRequest,
   IssuedHostToken,
+  ListHostsInput,
   PrincipalControlPlaneAccess,
-  RegisteredHost,
+  RegisteredHostPagination,
 } from "@ptools/host-authorization/contracts";
 import { Schema } from "effect";
 import {
@@ -70,19 +73,17 @@ export class ControlPlaneAdministrationGroup extends HttpApiGroup.make(
   )
   .add(
     HttpApiEndpoint.get("listHosts", "/hosts", {
-      success: Schema.Array(RegisteredHost),
+      query: ListHostsInput,
+      success: RegisteredHostPagination.Page,
       error: errors,
     }),
   )
   .add(
-    HttpApiEndpoint.get(
-      "listAllHostTokens",
-      "/control-plane/credentials",
-      {
-        success: Schema.Array(HostToken),
-        error: errors,
-      },
-    ),
+    HttpApiEndpoint.get("listAllHostTokens", "/control-plane/credentials", {
+      query: HostTokenPageRequest,
+      success: HostTokenPagination.Page,
+      error: errors,
+    }),
   )
   .add(
     HttpApiEndpoint.put(
@@ -113,7 +114,8 @@ export class HostCredentialAdministrationGroup extends HttpApiGroup.make(
   .add(
     HttpApiEndpoint.get("listHostTokens", "/hosts/:hostId/credentials", {
       params: HostPath,
-      success: Schema.Array(HostToken),
+      query: HostTokenPageRequest,
+      success: HostTokenPagination.Page,
       error: errors,
     }),
   )

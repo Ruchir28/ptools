@@ -1,0 +1,1 @@
+CREATE INDEX `principal_control_plane_role_role_idx` ON `principal_control_plane_role` (`role_id`);

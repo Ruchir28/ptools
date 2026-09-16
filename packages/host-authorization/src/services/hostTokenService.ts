@@ -6,17 +6,25 @@
  * `PrincipalCaller`, performs no request admission, and never gives
  * plaintext to persistence.
  */
-import { Clock, Context, Crypto, Effect, Equal, Layer, Option, Schema } from "effect";
-import type { PrincipalCaller } from "../contracts/hostCaller.js";
 import {
-  HostTokenId,
-} from "../contracts/hostTokenIdentity.js";
+  Clock,
+  Context,
+  Crypto,
+  Effect,
+  Equal,
+  Layer,
+  Option,
+  Schema,
+} from "effect";
+import type { PrincipalCaller } from "../contracts/hostCaller.js";
+import { HostTokenId } from "../contracts/hostTokenIdentity.js";
 import {
   HostTokenRecord,
   IssuedHostToken,
   type HostToken,
   type VerifiedHostToken,
 } from "../contracts/hostToken.js";
+import { HostTokenPagination } from "../contracts/hostTokenPagination.js";
 import {
   HostTokenCryptoError,
   HostTokenExpirationInvalid,
@@ -47,7 +55,10 @@ import {
   makeV1HostTokenCredential,
   parseV1HostTokenCredential,
 } from "../hostTokenCredential.js";
-import { hashHostTokenCredential, timingSafeDigestEquals } from "../hostTokenHashing.js";
+import {
+  hashHostTokenCredential,
+  timingSafeDigestEquals,
+} from "../hostTokenHashing.js";
 import {
   isHostTokenActiveAt,
   projectSafeHostToken,
@@ -67,10 +78,10 @@ import { HostTokenRecordStore } from "./hostTokenRecordStore.js";
  * is a semantic change to make together with the crypto call site that
  * justifies it, not a cleanup.
  */
-const cryptoFailure = (
-  operation: Extract<HostTokenOperation, "issue" | "verify">,
-) =>
-  (error: Error) => new HostTokenCryptoError({ operation, message: error.message });
+const cryptoFailure =
+  (operation: Extract<HostTokenOperation, "issue" | "verify">) =>
+  (error: Error) =>
+    new HostTokenCryptoError({ operation, message: error.message });
 
 const invariant = (operation: HostTokenOperation, message: string) =>
   new HostTokenInvariantViolation({ operation, message });
@@ -109,15 +120,18 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
             });
           }
 
-          const secret = yield* crypto.randomBytes(HOST_TOKEN_SECRET_BYTES).pipe(
-            Effect.mapError(cryptoFailure("issue")),
-          );
+          const secret = yield* crypto
+            .randomBytes(HOST_TOKEN_SECRET_BYTES)
+            .pipe(Effect.mapError(cryptoFailure("issue")));
           const plaintext = yield* Option.match(
             makeV1HostTokenCredential(secret),
             {
               onNone: () =>
                 Effect.fail(
-                  invariant("issue", "secure random source returned the wrong byte length"),
+                  invariant(
+                    "issue",
+                    "secure random source returned the wrong byte length",
+                  ),
                 ),
               onSome: Effect.succeed,
             },
@@ -130,7 +144,9 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
           const rawTokenId = yield* crypto.randomUUIDv4.pipe(
             Effect.mapError(cryptoFailure("issue")),
           );
-          const tokenId = yield* Schema.decodeUnknownEffect(HostTokenId)(rawTokenId).pipe(
+          const tokenId = yield* Schema.decodeUnknownEffect(HostTokenId)(
+            rawTokenId,
+          ).pipe(
             Effect.mapError(() =>
               invariant("issue", "crypto service returned an invalid UUIDv4"),
             ),
@@ -148,7 +164,10 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
             revokedByPrincipalId: Option.none(),
           }).pipe(
             Effect.mapError(() =>
-              invariant("issue", "issued token record violated its lifecycle contract"),
+              invariant(
+                "issue",
+                "issued token record violated its lifecycle contract",
+              ),
             ),
           );
           const persisted = yield* recordStore.create(record);
@@ -186,7 +205,9 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
           const found = yield* recordStore.findByHash(tokenHash);
           const record = yield* Option.match(found, {
             onNone: () =>
-              Effect.fail(new HostTokenRejected({ message: "host token was rejected" })),
+              Effect.fail(
+                new HostTokenRejected({ message: "host token was rejected" }),
+              ),
             onSome: Effect.succeed,
           });
           // Store output was already keyed by this digest, so this check fires
@@ -200,7 +221,9 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
           }
           const now = yield* Clock.currentTimeMillis;
           if (!isHostTokenActiveAt(record, now)) {
-            return yield* new HostTokenRejected({ message: "host token was rejected" });
+            return yield* new HostTokenRejected({
+              message: "host token was rejected",
+            });
           }
           return projectVerifiedHostToken(record);
         });
@@ -235,13 +258,18 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
         });
 
       const projectTokenInventory = (
-        records: ReadonlyArray<HostTokenRecord>,
+        page: HostTokenPagination.RecordPage,
+        limit: number,
         expectedHostId?: string,
-      ): Effect.Effect<ReadonlyArray<HostToken>, HostTokenInvariantViolation> => {
+      ): Effect.Effect<
+        HostTokenPagination.Page,
+        HostTokenInvariantViolation
+      > => {
         const hasDuplicate =
-          new Set(records.map((record) => record.tokenId)).size !== records.length;
-        const isOrdered = records.every((record, index) => {
-          const previous = records[index - 1];
+          new Set(page.items.map((record) => record.tokenId)).size !==
+          page.items.length;
+        const isOrdered = page.items.every((record, index) => {
+          const previous = page.items[index - 1];
           return (
             previous === undefined ||
             previous.createdAtEpochMs < record.createdAtEpochMs ||
@@ -251,33 +279,44 @@ export class HostTokenService extends Context.Service<HostTokenService>()(
         });
         const hasWrongHost =
           expectedHostId !== undefined &&
-          records.some((record) => record.hostId !== expectedHostId);
+          page.items.some((record) => record.hostId !== expectedHostId);
 
-        return hasDuplicate || !isOrdered || hasWrongHost
+        const exceedsLimit = page.items.length > limit;
+
+        return hasDuplicate || !isOrdered || hasWrongHost || exceedsLimit
           ? Effect.fail(
               invariant(
                 "list",
-                "token inventory violated Host scope, uniqueness, or ordering",
+                "token inventory violated page bounds, Host scope, uniqueness, or ordering",
               ),
             )
-          : Effect.succeed(records.map(projectSafeHostToken));
+          : Effect.succeed(
+              HostTokenPagination.Page.make({
+                items: page.items.map(projectSafeHostToken),
+                nextCursor: page.nextCursor,
+              }),
+            );
       };
 
       const listByHost = (
         input: ListHostTokensInput,
-      ): Effect.Effect<ReadonlyArray<HostToken>, ListHostTokensError> =>
-        recordStore.listByHost(input.hostId).pipe(
-          Effect.flatMap((records) =>
-            projectTokenInventory(records, input.hostId),
-          ),
-        );
+      ): Effect.Effect<HostTokenPagination.Page, ListHostTokensError> =>
+        recordStore
+          .listByHost(input)
+          .pipe(
+            Effect.flatMap((page) =>
+              projectTokenInventory(page, input.limit, input.hostId),
+            ),
+          );
 
       const listAll = (
-        _input: ListAllHostTokensInput,
-      ): Effect.Effect<ReadonlyArray<HostToken>, ListHostTokensError> =>
-        recordStore.listAll().pipe(
-          Effect.flatMap((records) => projectTokenInventory(records)),
-        );
+        input: ListAllHostTokensInput,
+      ): Effect.Effect<HostTokenPagination.Page, ListHostTokensError> =>
+        recordStore
+          .listAll(input)
+          .pipe(
+            Effect.flatMap((page) => projectTokenInventory(page, input.limit)),
+          );
 
       return { issue, verify, revoke, listByHost, listAll } as const;
     }),

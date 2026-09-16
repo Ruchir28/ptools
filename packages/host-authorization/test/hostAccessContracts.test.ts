@@ -9,7 +9,7 @@
  * Input/output correlation and list ordering are service laws for the reusable
  * platform contract suite. These tests use no persistence, RPC, or HTTP.
  */
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   CreatedOwnedHost,
@@ -25,6 +25,7 @@ import {
   ListHostRolesInput,
   ListPrincipalHostsInput,
   ListRegisteredHostsInput,
+  Pagination,
   PrincipalId,
   PrincipalIds,
   RegisteredHost,
@@ -179,11 +180,16 @@ describe("host access operation inputs", () => {
     expect(
       ListPrincipalHostsInput.make({
         principalId: PrincipalIds.fromFixedLocalIdentity("principal-1"),
+        limit: Pagination.PageSize.make(10),
+        cursor: Option.none(),
       }),
     ).toBeInstanceOf(ListPrincipalHostsInput);
-    expect(ListRegisteredHostsInput.make({})).toBeInstanceOf(
-      ListRegisteredHostsInput,
-    );
+    expect(
+      ListRegisteredHostsInput.make({
+        limit: Pagination.PageSize.make(10),
+        cursor: Option.none(),
+      }),
+    ).toBeInstanceOf(ListRegisteredHostsInput);
     expect(
       ResolvePrincipalHostAccessInput.make({
         hostId: "host-1",
@@ -209,7 +215,12 @@ describe("host access operation inputs", () => {
         roleId: HostRoleId.make("123e4567-e89b-42d3-a456-426614174000"),
       }),
     ).toBeInstanceOf(GetHostRoleInput);
-    expect(ListHostRolesInput.make({})).toBeInstanceOf(ListHostRolesInput);
+    expect(
+      ListHostRolesInput.make({
+        limit: Pagination.PageSize.make(10),
+        cursor: Option.none(),
+      }),
+    ).toBeInstanceOf(ListHostRolesInput);
   });
 
   /**
